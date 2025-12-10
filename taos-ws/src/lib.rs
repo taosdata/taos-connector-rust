@@ -79,10 +79,20 @@ struct RetryPolicy {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TlsMode {
-    // Disabled,
-    // Required,
     VerifyCa,
     VerifyIdentity,
+}
+
+impl std::str::FromStr for TlsMode {
+    type Err = DsnError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "verify_ca" => Ok(TlsMode::VerifyCa),
+            "verify_identity" => Ok(TlsMode::VerifyIdentity),
+            _ => Err(DsnError::InvalidParam("tls_mode".into(), s.into())),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -91,11 +101,22 @@ enum TlsVersion {
     TLSv1_3,
 }
 
+impl std::str::FromStr for TlsVersion {
+    type Err = DsnError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "tlsv1.2" => Ok(TlsVersion::TLSv1_2),
+            "tlsv1.3" => Ok(TlsVersion::TLSv1_3),
+            _ => Err(DsnError::InvalidParam("tls_version".into(), s.into())),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 struct TlsConfig {
     mode: Option<TlsMode>,
-    versions: Option<Vec<TlsVersion>>,
-    ca: Option<String>,
+    versions: Vec<TlsVersion>,
     certs: Option<Vec<CertificateDer<'static>>>,
 }
 
@@ -118,11 +139,7 @@ pub struct TaosBuilder {
     version_prefer: String,
     user_ip: Option<String>,
     user_app: Option<String>,
-    // tls_config: Option<TlsConfig>,
-    tls_mode: Option<TlsMode>,
-    tls_versions: Option<Vec<TlsVersion>>,
-    tls_ca: Option<String>,
-    tls_certs: Option<Vec<CertificateDer<'static>>>,
+    tls_config: Option<TlsConfig>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -417,7 +434,7 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
 
 impl TaosBuilder {
     fn scheme(&self) -> &'static str {
-        if self.https() {
+        if self.https.load(Ordering::SeqCst) {
             "wss"
         } else {
             "ws"
@@ -428,20 +445,16 @@ impl TaosBuilder {
         self.https.store(https, Ordering::SeqCst);
     }
 
-    fn https(&self) -> bool {
-        self.https.load(Ordering::SeqCst)
-    }
-
     pub fn from_dsn<T: IntoDsn>(dsn: T) -> RawResult<Self> {
         let mut dsn = dsn.into_dsn()?;
 
-        let https = match (dsn.driver.as_str(), dsn.protocol.as_deref()) {
+        let is_https = match (dsn.driver.as_str(), dsn.protocol.as_deref()) {
             ("ws" | "http", _) | ("taos" | "taosws" | "tmq", Some("ws" | "http") | None) => false,
             ("wss" | "https", _) | ("taos" | "taosws" | "tmq", Some("wss" | "https")) => true,
             _ => Err(DsnError::InvalidDriver(dsn.to_string()))?,
         };
 
-        let https = Arc::new(AtomicBool::new(https));
+        let https = Arc::new(AtomicBool::new(is_https));
 
         let conn_mode = match dsn.params.get("conn_mode") {
             Some(s) => match s.parse::<u32>() {
@@ -544,19 +557,32 @@ impl TaosBuilder {
         let user_ip = dsn.remove("user_ip");
         let user_app = dsn.remove("user_app");
 
-        let tls_mode = dsn.remove("tls_mode");
-        let tls_version = dsn.remove("tls_version");
-        let tls_ca = dsn.remove("tls_ca");
-        let tls_config = Some(TlsConfig {
-            mode: None,
-            versions: None,
-            ca: None,
-            certs: None,
-        });
+        let tls_config = if is_https {
+            let mode = dsn.remove("tls_mode").map(|s| s.parse()).transpose()?;
 
-        let tls_mode = None;
-        let tls_versions = None;
-        let tls_certs = None;
+            let versions = dsn
+                .remove("tls_version")
+                .map(|s| s.split(',').map(|s| s.parse()).collect())
+                .transpose()?
+                .unwrap_or(vec![TlsVersion::TLSv1_3]);
+
+            let certs = mode
+                .as_ref()
+                .map(|_| {
+                    dsn.remove("tls_ca")
+                        .ok_or_else(|| DsnError::RequireParam("tls_ca".into()))
+                        .and_then(|s| parse_ca_to_certs(s.trim()))
+                })
+                .transpose()?;
+
+            Some(TlsConfig {
+                mode,
+                versions,
+                certs,
+            })
+        } else {
+            None
+        };
 
         let auth = if let Some(token) = token {
             WsAuth::Token(token)
@@ -584,11 +610,7 @@ impl TaosBuilder {
             version_prefer,
             user_ip,
             user_app,
-            // tls_config,
-            tls_mode,
-            tls_versions,
-            tls_ca,
-            tls_certs,
+            tls_config,
         })
     }
 
@@ -748,26 +770,22 @@ impl TaosBuilder {
 
     // #[cfg(feature = "rustls")]
     fn build_tls_connector(&self) -> RawResult<Option<Connector>> {
-        if !self.https() {
+        if self.tls_config.is_none() {
             return Ok(None);
         }
 
-        let protocol_versions = if let Some(versions) = &self.tls_versions {
-            let mut out = Vec::with_capacity(versions.len());
-            for version in versions {
-                match version {
-                    TlsVersion::TLSv1_2 => out.push(&rustls::version::TLS12),
-                    TlsVersion::TLSv1_3 => out.push(&rustls::version::TLS13),
-                }
+        let tls_cfg = self.tls_config.as_ref().unwrap();
+        let mut protocol_versions = Vec::with_capacity(tls_cfg.versions.len());
+        for version in &tls_cfg.versions {
+            match version {
+                TlsVersion::TLSv1_2 => protocol_versions.push(&rustls::version::TLS12),
+                TlsVersion::TLSv1_3 => protocol_versions.push(&rustls::version::TLS13),
             }
-            out
-        } else {
-            vec![&rustls::version::TLS13]
-        };
+        }
 
         let mut root_store = rustls::RootCertStore::empty();
-        if self.tls_mode.is_some() {
-            if let Some(certs) = &self.tls_certs {
+        if tls_cfg.mode.is_some() {
+            if let Some(certs) = &tls_cfg.certs {
                 let (num_added, num_ignored) =
                     root_store.add_parsable_certificates(certs.iter().cloned());
                 tracing::trace!("added {num_added} valid certificates, ignored {num_ignored} invalid certificates");
@@ -785,7 +803,7 @@ impl TaosBuilder {
             .with_root_certificates(root_store.clone())
             .with_no_client_auth();
 
-        if let Some(mode) = self.tls_mode {
+        if let Some(mode) = tls_cfg.mode {
             if mode == TlsMode::VerifyCa {
                 let inner = WebPkiServerVerifier::builder(root_store)
                     .build()
@@ -1152,21 +1170,25 @@ impl ServerCertVerifier for NoServerNameVerification {
     }
 }
 
-// Helper to parse tls_ca to DERs
-fn parse_ca_to_der(input: &str) -> RawResult<Vec<rustls::pki_types::CertificateDer<'static>>> {
-    todo!()
+fn parse_ca_to_certs(
+    input: &str,
+) -> Result<Vec<rustls::pki_types::CertificateDer<'static>>, DsnError> {
+    use rustls::pki_types::pem::PemObject;
 
-    // let s = input.trim();
-    // if s.contains("-----BEGIN CERTIFICATE-----") {
-    //     rustls::pki_types::CertificateDer::pem_slice_iter(s.as_bytes())
-    //         .collect::<Result<Vec<_>, _>>()
-    //         .map_err(|e| TaosError::new(Code::INVALID_PARA, &format!("invalid PEM: {e}")))
-    // } else {
-    //     rustls::pki_types::CertificateDer::pem_file_iter(std::path::Path::new(s))
-    //         .map_err(|e| TaosError::new(Code::INVALID_PARA, &format!("open CA file failed: {e}")))?
-    //         .collect::<Result<Vec<_>, _>>()
-    //         .map_err(|e| TaosError::new(Code::INVALID_PARA, &format!("parse CA file failed: {e}")))
-    // }
+    if input.contains("-----BEGIN CERTIFICATE-----") {
+        CertificateDer::pem_slice_iter(input.as_bytes())
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| DsnError::InvalidParam("tls_ca".into(), format!("parse PEM failed: {e}")))
+    } else {
+        CertificateDer::pem_file_iter(std::path::Path::new(input))
+            .map_err(|e| {
+                DsnError::InvalidParam("tls_ca".into(), format!("open PEM file failed: {e}"))
+            })?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| {
+                DsnError::InvalidParam("tls_ca".into(), format!("parse PEM file failed: {e}"))
+            })
+    }
 }
 
 #[cfg(test)]
