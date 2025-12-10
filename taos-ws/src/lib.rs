@@ -638,7 +638,7 @@ impl TaosBuilder {
         }
 
         let mut last_err = None;
-        let connector = self.build_tls_client_config().unwrap_or(None);
+        let connector = self.build_tls_connector()?;
 
         for _ in 0..self.addrs.len() {
             let mut url = self.to_url(ty);
@@ -747,7 +747,7 @@ impl TaosBuilder {
     }
 
     // #[cfg(feature = "rustls")]
-    fn build_tls_client_config(&self) -> Result<Option<Connector>, rustls::Error> {
+    fn build_tls_connector(&self) -> RawResult<Option<Connector>> {
         if !self.https() {
             return Ok(None);
         }
@@ -768,8 +768,14 @@ impl TaosBuilder {
         let mut root_store = rustls::RootCertStore::empty();
         if self.tls_mode.is_some() {
             if let Some(certs) = &self.tls_certs {
-                for cert in certs {
-                    root_store.add(cert.clone())?;
+                let (num_added, num_ignored) =
+                    root_store.add_parsable_certificates(certs.iter().cloned());
+                tracing::trace!("added {num_added} valid certificates, ignored {num_ignored} invalid certificates");
+                if num_ignored > 0 {
+                    return Err(RawError::new(
+                        WS_ERROR_NO::TLS_ERROR.as_code(),
+                        format!("provided {num_ignored} CA certificates are invalid"),
+                    ));
                 }
             }
         }
@@ -781,10 +787,14 @@ impl TaosBuilder {
 
         if let Some(mode) = self.tls_mode {
             if mode == TlsMode::VerifyCa {
-                // TODO: remove unwrap
-                let inner = WebPkiServerVerifier::builder(root_store.clone())
+                let inner = WebPkiServerVerifier::builder(root_store)
                     .build()
-                    .unwrap();
+                    .map_err(|e| {
+                        RawError::new(
+                            WS_ERROR_NO::TLS_ERROR.as_code(),
+                            format!("failed to build WebPkiServerVerifier: {e}"),
+                        )
+                    })?;
                 let verifier = Arc::new(NoServerNameVerification::new(inner));
                 client_config.dangerous().set_certificate_verifier(verifier);
             }
@@ -1099,18 +1109,21 @@ impl ServerCertVerifier for NoServerNameVerification {
             now,
         ) {
             Ok(scv) => Ok(scv),
-            Err(rustls::Error::InvalidCertificate(cert_error)) => {
-                println!("Certificate verification error (ignored): {:?}", cert_error);
-                if let rustls::CertificateError::NotValidForName = cert_error {
+            Err(rustls::Error::InvalidCertificate(cert_err)) => match cert_err {
+                rustls::CertificateError::NotValidForName
+                | rustls::CertificateError::NotValidForNameContext { .. } => {
+                    tracing::warn!(
+                        "TLS ignore hostname, server_name: {server_name:?}, err: {cert_err:?}"
+                    );
                     Ok(ServerCertVerified::assertion())
-                } else if let rustls::CertificateError::NotValidForNameContext { .. } = cert_error {
-                    Ok(ServerCertVerified::assertion())
-                } else {
-                    Err(rustls::Error::InvalidCertificate(cert_error))
                 }
-            }
+                _ => {
+                    tracing::error!("TLS invalid certificate: {cert_err:?}");
+                    Err(rustls::Error::InvalidCertificate(cert_err))
+                }
+            },
             Err(e) => {
-                println!("Certificate verification error: {:?}", e);
+                tracing::error!("TLS certificate verification failed: {e:?}");
                 Err(e)
             }
         }
