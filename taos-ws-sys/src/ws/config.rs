@@ -648,8 +648,8 @@ fn parse_config(lines: Vec<String>) -> Result<Config, TaosError> {
             let value = value.trim();
             match key {
                 COMPRESSION => match value {
-                    "1" => config.compression = Some(true),
-                    "0" => config.compression = Some(false),
+                    "1" => config.set_compression(true),
+                    "0" => config.set_compression(false),
                     _ => {
                         return Err(TaosError::new(
                             Code::INVALID_PARA,
@@ -657,50 +657,55 @@ fn parse_config(lines: Vec<String>) -> Result<Config, TaosError> {
                         ));
                     }
                 },
-                LOG_DIR => config.log_dir = Some(value.to_string().into()),
+                LOG_DIR => config.set_log_dir(value.to_string()),
                 DEBUG_FLAG => config.set_debug_flag(value),
-                TIMEZONE => config.set_timezone::<FastStr>(value.to_string().into()),
-                FQDN => config.fqdn = Some(value.to_string().into()),
+                TIMEZONE => config.set_timezone(value.to_string()),
+                FQDN => config.set_fqdn(value.to_string()),
                 SERVER_PORT => {
-                    config.server_port = Some(value.parse::<u16>().map_err(|_| {
+                    let server_port = value.parse::<u16>().map_err(|_| {
                         TaosError::new(
                             Code::INVALID_PARA,
                             &format!("invalid value for {SERVER_PORT}: {value}"),
                         )
-                    })?);
+                    })?;
+                    config.set_server_port(server_port);
                 }
-                ADAPTER_LIST => config.adapter_list = Some(value.to_string().into()),
+                ADAPTER_LIST => config.set_adapter_list(value.to_string()),
                 CONN_RETRIES => {
-                    config.conn_retries = Some(value.parse::<u32>().map_err(|_| {
+                    let conn_retries = value.parse::<u32>().map_err(|_| {
                         TaosError::new(
                             Code::INVALID_PARA,
                             &format!("invalid value for {CONN_RETRIES}: {value}"),
                         )
-                    })?);
+                    })?;
+                    config.set_conn_retries(conn_retries);
                 }
                 RETRY_BACKOFF_MS => {
-                    config.retry_backoff_ms = Some(value.parse::<u64>().map_err(|_| {
+                    let retry_backoff_ms = value.parse::<u64>().map_err(|_| {
                         TaosError::new(
                             Code::INVALID_PARA,
                             &format!("invalid value for {RETRY_BACKOFF_MS}: {value}"),
                         )
-                    })?);
+                    })?;
+                    config.set_retry_backoff_ms(retry_backoff_ms);
                 }
                 RETRY_BACKOFF_MAX_MS => {
-                    config.retry_backoff_max_ms = Some(value.parse::<u64>().map_err(|_| {
+                    let retry_backoff_max_ms = value.parse::<u64>().map_err(|_| {
                         TaosError::new(
                             Code::INVALID_PARA,
                             &format!("invalid value for {RETRY_BACKOFF_MAX_MS}: {value}"),
                         )
-                    })?);
+                    })?;
+                    config.set_retry_backoff_max_ms(retry_backoff_max_ms);
                 }
                 LOG_KEEP_DAYS => {
-                    config.log_keep_days = Some(value.parse::<u16>().map_err(|_| {
+                    let log_keep_days = value.parse::<u16>().map_err(|_| {
                         TaosError::new(
                             Code::INVALID_PARA,
                             &format!("invalid value for {LOG_KEEP_DAYS}: {value}"),
                         )
-                    })?);
+                    })?;
+                    config.set_log_keep_days(log_keep_days);
                 }
                 ROTATION_SIZE => config.set_rotation_size(value.to_string()),
                 WS_TLS_MODE => config.set_ws_tls_mode(value)?,
@@ -723,7 +728,7 @@ mod tests {
 
     #[test]
     fn test_read_config_from_path() {
-        let config = read_config_from_path("./tests/taos.cfg".as_ref()).unwrap();
+        let config = read_config_from_path("./tests/cfg/taos.cfg".as_ref()).unwrap();
         assert_eq!(config.compression(), true);
         assert_eq!(config.log_dir(), "/path/to/logDir/");
         assert_eq!(config.log_level(), LevelFilter::DEBUG);
@@ -737,13 +742,16 @@ mod tests {
         assert_eq!(config.retry_backoff_max_ms(), 2000);
         assert_eq!(config.log_keep_days(), 30);
         assert_eq!(config.rotation_size(), "1GB");
+        assert_eq!(config.ws_tls_mode(), WsTlsMode::Disabled);
+        assert_eq!(config.ws_tls_version(), &FastStr::from("TLSv1.3"));
+        assert_eq!(config.ws_tls_ca(), None);
     }
 
     #[test]
     fn test_config_load_from_path() -> Result<(), TaosError> {
         {
             let mut config = Config::new();
-            config.load_from_path("./tests")?;
+            config.load_from_path("./tests/cfg")?;
             assert_eq!(config.compression(), true);
             assert_eq!(config.log_dir(), "/path/to/logDir/");
             assert_eq!(config.log_level(), LevelFilter::DEBUG);
@@ -757,11 +765,14 @@ mod tests {
             assert_eq!(config.retry_backoff_max_ms(), 2000);
             assert_eq!(config.log_keep_days(), 30);
             assert_eq!(config.rotation_size(), "1GB");
+            assert_eq!(config.ws_tls_mode(), WsTlsMode::Disabled);
+            assert_eq!(config.ws_tls_version(), &FastStr::from("TLSv1.3"));
+            assert_eq!(config.ws_tls_ca(), None);
         }
 
         {
             let mut config = Config::new();
-            config.load_from_path("./tests/taos.cfg")?;
+            config.load_from_path("./tests/cfg/taos.cfg")?;
             assert_eq!(config.compression(), true);
             assert_eq!(config.log_dir(), "/path/to/logDir/");
             assert_eq!(config.log_level(), LevelFilter::DEBUG);
@@ -775,6 +786,9 @@ mod tests {
             assert_eq!(config.retry_backoff_max_ms(), 2000);
             assert_eq!(config.log_keep_days(), 30);
             assert_eq!(config.rotation_size(), "1GB");
+            assert_eq!(config.ws_tls_mode(), WsTlsMode::Disabled);
+            assert_eq!(config.ws_tls_version(), &FastStr::from("TLSv1.3"));
+            assert_eq!(config.ws_tls_ca(), None);
         }
 
         Ok(())
@@ -787,7 +801,7 @@ mod tests {
             let code = taos_options(TSDB_OPTION::TSDB_OPTION_TIMEZONE, timezone.as_ptr() as _);
             assert_eq!(code, 0);
 
-            let config_dir = c"./tests/taos.cfg";
+            let config_dir = c"./tests/cfg/taos.cfg";
             let code = taos_options(TSDB_OPTION::TSDB_OPTION_CONFIGDIR, config_dir.as_ptr() as _);
             assert_eq!(code, 0);
         }
@@ -825,7 +839,33 @@ mod tests {
         assert_eq!(retry_backoff_max_ms(), 1000);
         assert_eq!(log_keep_days(), 30);
         assert_eq!(rotation_size(), FastStr::from("1GB"));
+        assert_eq!(ws_tls_mode(), WsTlsMode::Disabled);
+        assert_eq!(ws_tls_version(), FastStr::from("TLSv1.3"));
+        assert_eq!(ws_tls_ca(), None);
 
         Ok(())
+    }
+
+    #[test]
+    fn test_ws_tls_mode() {
+        use std::str::FromStr;
+
+        assert_eq!(i32::from(WsTlsMode::Disabled), 0);
+        assert_eq!(i32::from(WsTlsMode::Required), 1);
+        assert_eq!(i32::from(WsTlsMode::VerifyCa), 2);
+        assert_eq!(i32::from(WsTlsMode::VerifyIdentity), 3);
+
+        assert_eq!(WsTlsMode::Disabled.to_string(), "0");
+        assert_eq!(WsTlsMode::Required.to_string(), "1");
+        assert_eq!(WsTlsMode::VerifyCa.to_string(), "2");
+        assert_eq!(WsTlsMode::VerifyIdentity.to_string(), "3");
+
+        assert_eq!(WsTlsMode::from_str("0").unwrap(), WsTlsMode::Disabled);
+        assert_eq!(WsTlsMode::from_str("1").unwrap(), WsTlsMode::Required);
+        assert_eq!(WsTlsMode::from_str("2").unwrap(), WsTlsMode::VerifyCa);
+        assert_eq!(WsTlsMode::from_str("3").unwrap(), WsTlsMode::VerifyIdentity);
+
+        let err = WsTlsMode::from_str("9").unwrap_err();
+        assert_eq!(err.code(), Code::INVALID_PARA);
     }
 }
