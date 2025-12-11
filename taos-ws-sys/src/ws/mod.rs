@@ -624,16 +624,12 @@ unsafe fn build_dsn_from_options(options: *const OPTIONS) -> TaosResult<String> 
 
     let tls_version = map
         .remove(WS_TLS_VERSION)
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| config::ws_tls_version().to_string());
+        .map_or_else(|| config::ws_tls_version().to_string(), |s| s.to_string());
     map.insert("tls_version", &tls_version);
 
     let tls_ca = match map.remove(WS_TLS_CA) {
         Some(ca) => Some(ca.to_string()),
-        None => match config::ws_tls_ca() {
-            Some(ca) => Some(ca.to_string()),
-            None => None,
-        },
+        None => config::ws_tls_ca().map(|ca| ca.to_string()),
     };
     if let Some(ca) = &tls_ca {
         map.insert("tls_ca", ca);
