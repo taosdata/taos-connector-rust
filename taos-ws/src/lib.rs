@@ -565,14 +565,14 @@ impl TaosBuilder {
                 .map(|s| s.split(',').map(|s| s.parse()).collect())
                 .transpose()?;
 
-            let certs = mode
-                .as_ref()
-                .map(|_| {
-                    dsn.remove("tls_ca")
-                        .ok_or_else(|| DsnError::RequireParam("tls_ca".into()))
-                        .and_then(|s| parse_ca_to_certs(s.trim()))
-                })
-                .transpose()?;
+            let certs = if mode.is_some() {
+                match dsn.remove("tls_ca").as_deref().map(str::trim) {
+                    None | Some("") => return Err(DsnError::RequireParam("tls_ca".into()).into()),
+                    Some(tls_ca) => Some(parse_ca_to_certs(tls_ca)?),
+                }
+            } else {
+                None
+            };
 
             match (mode, versions, certs) {
                 (None, None, None) => None,
@@ -1644,8 +1644,257 @@ mod tests {
     }
 }
 
-#[cfg(feature = "rustls-aws-lc-crypto-provider")]
 #[cfg(test)]
+mod tls_tests {
+    use super::*;
+    use std::path::Path;
+    use taos_query::AsyncTBuilder;
+
+    #[tokio::test]
+    async fn test_parse_ws_with_tls_params_ignored() -> anyhow::Result<()> {
+        let dsn = "ws://localhost:6041?tls_mode=bad&tls_version=TLSv1.1&tls_ca=some_ca";
+        let taos = TaosBuilder::from_dsn(dsn)?.build().await?;
+        assert!(taos.builder.tls_config.is_none());
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[cfg(feature = "rustls-aws-lc-crypto-provider")]
+    async fn test_build_wss_with_tls_versions() -> anyhow::Result<()> {
+        let cases = [
+            "wss://localhost:6445",
+            "wss://localhost:6445?tls_version=TLSv1.2",
+            "wss://localhost:6445?tls_version=TLSv1.3",
+            "wss://localhost:6445?tls_version=tlsv1.2,tlsv1.3",
+            "wss://localhost:6445?tls_version=TLSV1.3,TLSV1.2",
+            "wss://localhost:6445?tls_version=TlSv1.3,tLSv1.2,TLsv1.3,tlSv1.2",
+        ];
+        for dsn in cases {
+            let _taos = TaosBuilder::from_dsn(dsn)?.build().await?;
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[cfg(feature = "rustls-aws-lc-crypto-provider")]
+    async fn test_tls_verify_identity() -> anyhow::Result<()> {
+        let tls_ca = include_str!("../tests/ca_verify_identity.crt");
+
+        let ca_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests")
+            .join("ca_verify_identity.crt");
+        let tls_ca_path = ca_path.to_str().unwrap();
+
+        let tls_ca_cases = [
+            format!("wss://localhost:6445?tls_mode=verify_identity&tls_version=tlsv1.2,tlsv1.3&tls_ca={tls_ca}"),
+            format!("wss://localhost:6445?tls_mode=VERIFY_IDENTITY&tls_version=TLSV1.2,TLSV1.3&tls_ca={tls_ca}"),
+            format!("wss://localhost:6445?tls_mode=VeRify_IdenTity&tls_version=tlsV1.2,TlsV1.3&tls_ca={tls_ca}"),
+            format!("wss://localhost:6445?tls_mode=  VeRify_IdenTity  &tls_version=  TlsV1.2,  TlsV1.3  &tls_ca=  {tls_ca}  "),
+            format!("wss://localhost:6445?tls_mode=verify_identity&tls_ca={tls_ca}&tls_version=tlsv1.2"),
+            format!("wss://localhost:6445?tls_ca={tls_ca}&tls_mode=verify_identity&tls_version=tlsv1.3"),
+            format!("wss://localhost:6445?tls_ca={tls_ca}&tls_mode=verify_identity"),
+            format!("wss://localhost:6445?tls_mode=verify_identity&tls_version=TLSv1.3,TLSv1.3&tls_ca={tls_ca}"),
+        ];
+
+        let tls_ca_path_cases = [
+            format!("wss://localhost:6445?tls_mode=verify_identity&tls_version=tlsv1.2,tlsv1.3&tls_ca={tls_ca_path}"),
+            format!("wss://localhost:6445?tls_mode=VERIFY_IDENTITY&tls_version=TLSV1.2,TLSV1.3&tls_ca={tls_ca_path}"),
+            format!("wss://localhost:6445?tls_mode=VeRify_IdenTity&tls_version=tlsV1.2,TlsV1.3&tls_ca={tls_ca_path}"),
+            format!("wss://localhost:6445?tls_mode=  VeRify_IdenTity  &tls_version=  TlsV1.2,  TlsV1.3  &tls_ca=  {tls_ca_path}  "),
+            format!("wss://localhost:6445?tls_mode=verify_identity&tls_ca={tls_ca_path}&tls_version=tlsv1.2"),
+            format!("wss://localhost:6445?tls_ca={tls_ca_path}&tls_mode=verify_identity&tls_version=tlsv1.3"),
+            format!("wss://localhost:6445?tls_ca={tls_ca_path}&tls_mode=verify_identity"),
+            format!("wss://localhost:6445?tls_mode=verify_identity&tls_version=TLSv1.3,TLSv1.3&tls_ca={tls_ca_path}"),
+        ];
+
+        for dsn in tls_ca_cases {
+            let _taos = TaosBuilder::from_dsn(dsn)?.build().await?;
+        }
+
+        for dsn in tls_ca_path_cases {
+            let _taos = TaosBuilder::from_dsn(dsn)?.build().await?;
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[cfg(feature = "rustls-aws-lc-crypto-provider")]
+    async fn test_tls_verify_ca() -> anyhow::Result<()> {
+        let tls_ca = include_str!("../tests/ca_verify_ca.crt");
+
+        let ca_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests")
+            .join("ca_verify_ca.crt");
+        let tls_ca_path = ca_path.to_str().unwrap();
+
+        let tls_ca_cases = [
+            format!("wss://localhost:6446?tls_mode=verify_ca&tls_version=tlsv1.2,tlsv1.3&tls_ca={tls_ca}"),
+            format!("wss://localhost:6446?tls_mode=VERIFY_CA&tls_version=TLSV1.2,TLSV1.3&tls_ca={tls_ca}"),
+            format!("wss://localhost:6446?tls_mode=VeRify_Ca&tls_version=tlsV1.2,TlsV1.3&tls_ca={tls_ca}"),
+            format!("wss://localhost:6446?tls_mode=  VeRify_Ca  &tls_version=  TlsV1.2,  TlsV1.3  &tls_ca=  {tls_ca}  "),
+            format!("wss://localhost:6446?tls_mode=verify_ca&tls_ca={tls_ca}&tls_version=tlsv1.2"),
+            format!("wss://localhost:6446?tls_ca={tls_ca}&tls_mode=verify_ca&tls_version=tlsv1.3"),
+            format!("wss://localhost:6446?tls_ca={tls_ca}&tls_mode=verify_ca"),
+            format!("wss://localhost:6446?tls_mode=verify_ca&tls_version=TLSv1.3,TLSv1.3&tls_ca={tls_ca}"),
+        ];
+
+        let tls_ca_path_cases = [
+            format!("wss://localhost:6446?tls_mode=verify_ca&tls_version=tlsv1.2,tlsv1.3&tls_ca={tls_ca_path}"),
+            format!("wss://localhost:6446?tls_mode=VERIFY_CA&tls_version=TLSV1.2,TLSV1.3&tls_ca={tls_ca_path}"),
+            format!("wss://localhost:6446?tls_mode=VeRify_Ca&tls_version=tlsV1.2,TlsV1.3&tls_ca={tls_ca_path}"),
+            format!("wss://localhost:6446?tls_mode=  VeRify_Ca  &tls_version=  TlsV1.2,  TlsV1.3  &tls_ca=  {tls_ca_path}  "),
+            format!("wss://localhost:6446?tls_mode=verify_ca&tls_ca={tls_ca_path}&tls_version=tlsv1.2"),
+            format!("wss://localhost:6446?tls_ca={tls_ca_path}&tls_mode=verify_ca&tls_version=tlsv1.3"),
+            format!("wss://localhost:6446?tls_ca={tls_ca_path}&tls_mode=verify_ca"),
+            format!("wss://localhost:6446?tls_mode=verify_ca&tls_version=TLSv1.3,TLSv1.3&tls_ca={tls_ca_path}"),
+        ];
+
+        for dsn in tls_ca_cases {
+            let _taos = TaosBuilder::from_dsn(dsn)?.build().await?;
+        }
+
+        for dsn in tls_ca_path_cases {
+            let _taos = TaosBuilder::from_dsn(dsn)?.build().await?;
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[cfg(feature = "rustls-aws-lc-crypto-provider")]
+    async fn test_tls_san_mismatch() -> anyhow::Result<()> {
+        let tls_ca = include_str!("../tests/ca_verify_identity.crt");
+        let err = TaosBuilder::from_dsn(format!(
+            "wss://127.0.0.1:6445?tls_mode=verify_identity&tls_version=tlsv1.3&tls_ca={tls_ca}"
+        ))?
+        .build()
+        .await
+        .unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("invalid peer certificate: certificate not valid for name"));
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[cfg(feature = "rustls-aws-lc-crypto-provider")]
+    async fn test_tlsv12_version_mismatch() -> anyhow::Result<()> {
+        let tls_ca = include_str!("../tests/ca_verify_ca.crt");
+        let err = TaosBuilder::from_dsn(format!(
+            "wss://localhost:6447?tls_mode=verify_ca&tls_version=tlsv1.3&tls_ca={tls_ca}"
+        ))?
+        .build()
+        .await
+        .unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("received fatal alert: ProtocolVersion"));
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[cfg(feature = "rustls-aws-lc-crypto-provider")]
+    async fn test_tlsv13_version_mismatch() -> anyhow::Result<()> {
+        let tls_ca = include_str!("../tests/ca_verify_ca.crt");
+        let err = TaosBuilder::from_dsn(format!(
+            "wss://localhost:6448?tls_mode=verify_ca&tls_version=tlsv1.2&tls_ca={tls_ca}"
+        ))?
+        .build()
+        .await
+        .unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("received fatal alert: ProtocolVersion"));
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[cfg(feature = "rustls-aws-lc-crypto-provider")]
+    async fn test_tls_ca_mismatch() -> anyhow::Result<()> {
+        let tls_ca = include_str!("../tests/ca_mismatch.crt");
+        let err = TaosBuilder::from_dsn(format!(
+            "wss://localhost:6445?tls_mode=verify_identity&tls_version=TLSv1.3&tls_ca={tls_ca}"
+        ))?
+        .build()
+        .await
+        .unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("invalid peer certificate: BadSignature"));
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_invalid_tls_mode() {
+        let dsn = "wss://localhost:6041?tls_mode=bad";
+        let err = TaosBuilder::from_dsn(dsn).unwrap_err();
+        assert!(err.to_string().contains("invalid parameter for tls_mode"));
+    }
+
+    #[test]
+    fn test_parse_invalid_tls_version() {
+        let dsn = "wss://localhost:6041?tls_version=TLSv1.1";
+        let err = TaosBuilder::from_dsn(dsn).unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("invalid parameter for tls_version"));
+    }
+
+    #[test]
+    fn test_parse_invalid_tls_ca_content() {
+        let err = TaosBuilder::from_dsn("wss://localhost:6041?tls_mode=verify_ca&tls_version=TLSv1.3&tls_ca=-----BEGIN CERTIFICATE-----BAD-----END CERTIFICATE-----").unwrap_err();
+        assert!(err.to_string().contains("parse PEM failed"));
+
+        let ca_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests")
+            .join("invalid.pem");
+        let tls_ca_path = ca_path.to_str().unwrap();
+
+        let err = TaosBuilder::from_dsn(format!(
+            "wss://localhost:6041?tls_mode=verify_ca&tls_version=TLSv1.3&tls_ca={tls_ca_path}"
+        ))
+        .unwrap_err();
+        assert!(err.to_string().contains("parse PEM file failed"));
+    }
+
+    #[test]
+    fn test_parse_invalid_tls_ca_path() {
+        let err = TaosBuilder::from_dsn("wss://localhost:6041?tls_mode=verify_ca&tls_version=TLSv1.3&tls_ca=/path/not/exist.crt").unwrap_err();
+        assert!(err.to_string().contains("open PEM file failed"));
+    }
+
+    #[test]
+    fn test_parse_verify_ca_without_ca_err() {
+        let cases = [
+            "wss://localhost:6041?tls_mode=verify_ca&tls_version=TLSv1.3",
+            "wss://localhost:6041?tls_mode=verify_ca&tls_version=TLSv1.3&tls_ca",
+            "wss://localhost:6041?tls_mode=verify_ca&tls_version=TLSv1.3&tls_ca=",
+            "wss://localhost:6041?tls_mode=verify_ca&tls_version=TLSv1.3&tls_ca=  ",
+        ];
+        for dsn in cases {
+            let err = TaosBuilder::from_dsn(dsn).unwrap_err();
+            assert!(err.to_string().contains("requires parameter: tls_ca"));
+        }
+    }
+
+    #[test]
+    fn test_parse_verify_identity_without_ca_err() {
+        let cases = [
+            "wss://localhost:6041?tls_mode=verify_identity&tls_version=TLSv1.3",
+            "wss://localhost:6041?tls_mode=verify_identity&tls_version=TLSv1.3&tls_ca",
+            "wss://localhost:6041?tls_mode=verify_identity&tls_version=TLSv1.3&tls_ca=",
+            "wss://localhost:6041?tls_mode=verify_identity&tls_version=TLSv1.3&tls_ca=  ",
+        ];
+        for dsn in cases {
+            let err = TaosBuilder::from_dsn(dsn).unwrap_err();
+            assert!(err.to_string().contains("requires parameter: tls_ca"));
+        }
+    }
+}
+
+#[cfg(test)]
+#[cfg(feature = "rustls-aws-lc-crypto-provider")]
 mod cloud_tests {
     use futures::{SinkExt, StreamExt};
 
