@@ -207,18 +207,8 @@ unsafe fn connect(
         DEFAULT_DB
     };
 
-    let compression = config::compression();
-    let conn_retries = config::conn_retries();
-    let retry_backoff_ms = config::retry_backoff_ms();
-    let retry_backoff_max_ms = config::retry_backoff_max_ms();
-
-    let dsn = if util::is_cloud_host(&addr) && user == "token" {
-        format!("wss://{addr}/{db}?token={pass}&compression={compression}&conn_retries={conn_retries}&retry_backoff_ms={retry_backoff_ms}&retry_backoff_max_ms={retry_backoff_max_ms}")
-    } else {
-        format!("ws://{user}:{pass}@{addr}/{db}?compression={compression}&conn_retries={conn_retries}&retry_backoff_ms={retry_backoff_ms}&retry_backoff_max_ms={retry_backoff_max_ms}")
-    };
-
-    debug!("taos_connect, dsn: {:?}", dsn);
+    let dsn = util::build_dsn(&addr, user, pass, db);
+    debug!("taos_connect, dsn: {dsn:?}");
 
     let builder = TaosBuilder::from_dsn(dsn)?;
     let mut taos = builder.build()?;

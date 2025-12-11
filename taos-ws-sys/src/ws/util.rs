@@ -2,7 +2,7 @@ use std::ffi::CStr;
 
 use libc::{setlocale, LC_CTYPE};
 
-use crate::ws;
+use crate::ws::{self, config};
 
 pub fn get_system_locale() -> String {
     #[cfg(target_os = "windows")]
@@ -51,6 +51,51 @@ pub fn camel_to_snake(s: &str) -> String {
         }
     }
     out
+}
+
+pub fn build_dsn(addr: &str, user: &str, pass: &str, db: &str) -> String {
+    let compression = config::compression();
+    let conn_retries = config::conn_retries();
+    let retry_backoff_ms = config::retry_backoff_ms();
+    let retry_backoff_max_ms = config::retry_backoff_max_ms();
+    let ws_tls_mode = config::ws_tls_mode();
+    let ws_tls_version = config::ws_tls_version();
+    let ws_tls_ca = config::ws_tls_ca();
+
+    let protocol = match ws_tls_mode {
+        config::WsTlsMode::Disabled => "ws",
+        _ => "wss",
+    };
+
+    let ws_tls_mode = match ws_tls_mode {
+        config::WsTlsMode::VerifyCa => Some("verify_ca"),
+        config::WsTlsMode::VerifyIdentity => Some("verify_identity"),
+        _ => None,
+    };
+
+    let tls_mode = match ws_tls_mode {
+        Some(mode) => format!("&tls_mode={mode}"),
+        None => String::new(),
+    };
+
+    let tls_ca = match config::ws_tls_ca() {
+        Some(ca) => format!("&tls_ca={ca}"),
+        None => String::new(),
+    };
+
+    let params = format!(
+        "compression={compression}\
+        &conn_retries={conn_retries}\
+        &retry_backoff_ms={retry_backoff_ms}\
+        &retry_backoff_max_ms={retry_backoff_max_ms}\
+        &tls_version={ws_tls_version}{tls_mode}{tls_ca}"
+    );
+
+    if is_cloud_host(addr) && user == "token" {
+        format!("wss://{addr}/{db}?token={pass}&{params}")
+    } else {
+        format!("{protocol}://{user}:{pass}@{addr}/{db}?{params}")
+    }
 }
 
 #[cfg(test)]
