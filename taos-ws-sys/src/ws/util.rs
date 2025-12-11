@@ -87,14 +87,15 @@ pub fn build_dsn(addr: &str, user: &str, pass: &str, db: &str) -> String {
         "compression={compression}\
         &conn_retries={conn_retries}\
         &retry_backoff_ms={retry_backoff_ms}\
-        &retry_backoff_max_ms={retry_backoff_max_ms}\
-        &tls_version={ws_tls_version}{tls_mode}{tls_ca}"
+        &retry_backoff_max_ms={retry_backoff_max_ms}"
     );
+
+    let tls_params = format!("&tls_version={ws_tls_version}{tls_mode}{tls_ca}");
 
     if is_cloud_host(addr) && user == "token" {
         format!("wss://{addr}/{db}?token={pass}&{params}")
     } else {
-        format!("{protocol}://{user}:{pass}@{addr}/{db}?{params}")
+        format!("{protocol}://{user}:{pass}@{addr}/{db}?{params}{tls_params}")
     }
 }
 

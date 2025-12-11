@@ -482,22 +482,21 @@ mod tests {
 
     #[test]
     fn test_serde_send() {
-        let s = WsSend::Conn {
+        let conn = WsSend::Conn {
             req_id: 1,
             req: WsConnReq::new("root", "taosdata"),
         };
-        let v = serde_json::to_value(s).unwrap();
-        let j = serde_json::json!({
+        let actual = serde_json::to_value(conn).unwrap();
+        let expected = serde_json::json!({
             "action": "conn",
             "args": {
                 "req_id": 1,
                 "user": "root",
                 "password": "taosdata",
                 "db": "",
-                "tz": null,
             }
         });
-        assert_eq!(v, j);
+        assert_eq!(actual, expected);
     }
 
     #[test]
