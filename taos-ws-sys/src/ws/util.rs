@@ -53,14 +53,23 @@ pub fn camel_to_snake(s: &str) -> String {
     out
 }
 
-pub fn build_dsn(addr: &str, user: &str, pass: &str, db: &str) -> String {
+pub fn build_dsn(
+    addr: &str,
+    user: &str,
+    pass: &str,
+    db: Option<&str>,
+    ws_tls_mode: Option<config::WsTlsMode>,
+    ws_tls_version: Option<String>,
+    ws_tls_ca: Option<String>,
+) -> String {
+    let db = db.unwrap_or("");
     let compression = config::compression();
     let conn_retries = config::conn_retries();
     let retry_backoff_ms = config::retry_backoff_ms();
     let retry_backoff_max_ms = config::retry_backoff_max_ms();
-    let ws_tls_mode = config::ws_tls_mode();
-    let ws_tls_version = config::ws_tls_version();
-    let ws_tls_ca = config::ws_tls_ca();
+    let ws_tls_mode = ws_tls_mode.unwrap_or_else(config::ws_tls_mode);
+    let ws_tls_version = ws_tls_version.unwrap_or_else(|| config::ws_tls_version().to_string());
+    let ws_tls_ca = ws_tls_ca.or_else(|| config::ws_tls_ca().map(|s| s.to_string()));
 
     let protocol = match ws_tls_mode {
         config::WsTlsMode::Disabled => "ws",
@@ -78,10 +87,12 @@ pub fn build_dsn(addr: &str, user: &str, pass: &str, db: &str) -> String {
         None => String::new(),
     };
 
-    let tls_ca = match config::ws_tls_ca() {
+    let tls_ca = match ws_tls_ca {
         Some(ca) => format!("&tls_ca={ca}"),
         None => String::new(),
     };
+
+    let tls_params = format!("&tls_version={ws_tls_version}{tls_mode}{tls_ca}");
 
     let params = format!(
         "compression={compression}\
@@ -89,8 +100,6 @@ pub fn build_dsn(addr: &str, user: &str, pass: &str, db: &str) -> String {
         &retry_backoff_ms={retry_backoff_ms}\
         &retry_backoff_max_ms={retry_backoff_max_ms}"
     );
-
-    let tls_params = format!("&tls_version={ws_tls_version}{tls_mode}{tls_ca}");
 
     if is_cloud_host(addr) && user == "token" {
         format!("wss://{addr}/{db}?token={pass}&{params}")

@@ -210,6 +210,9 @@ unsafe fn conf_set(
                         ));
                     }
                 },
+                "ws.tls.mode" => {
+                    let _ = val.parse::<config::WsTlsMode>()?;
+                }
                 _ => {}
             }
             conf.map.insert(key, val);
@@ -421,7 +424,23 @@ unsafe fn consumer_new(conf: *mut tmq_conf_t) -> TaosResult<Tmq> {
                 format!("{host}:{port}")
             };
 
-            let dsn = util::build_dsn(&addr, user, pass, "");
+            let ws_tls_mode = conf
+                .map
+                .get("ws.tls.mode")
+                .map(|s| s.parse::<config::WsTlsMode>())
+                .transpose()?;
+            let ws_tls_version = conf.map.get("ws.tls.version");
+            let ws_tls_ca = conf.map.get("ws.tls.ca");
+
+            let dsn = util::build_dsn(
+                &addr,
+                user,
+                pass,
+                None,
+                ws_tls_mode,
+                ws_tls_version.cloned(),
+                ws_tls_ca.cloned(),
+            );
             let mut dsn = Dsn::from_str(&dsn)?;
 
             let mut auto_commit = false;

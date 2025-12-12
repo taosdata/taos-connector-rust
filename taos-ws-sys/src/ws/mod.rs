@@ -207,7 +207,7 @@ unsafe fn connect(
         DEFAULT_DB
     };
 
-    let dsn = util::build_dsn(&addr, user, pass, db);
+    let dsn = util::build_dsn(&addr, user, pass, Some(db), None, None, None);
     debug!("taos_connect, dsn: {dsn:?}");
 
     let builder = TaosBuilder::from_dsn(dsn)?;
