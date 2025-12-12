@@ -1,8 +1,5 @@
 use crate::{AsyncQueryable, ColumnView, Queryable, RawResult, Value};
 
-mod column;
-pub use column::*;
-
 pub trait Bindable<Q>
 where
     Q: Queryable,

@@ -1943,13 +1943,6 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_concurrent_conn() -> anyhow::Result<()> {
-        let _ = tracing_subscriber::fmt()
-            .with_file(true)
-            .with_line_number(true)
-            .with_max_level(tracing::Level::ERROR)
-            .compact()
-            .try_init();
-
         let intercept_fn: InterceptFn = {
             Arc::new(move |msg, _ctx| {
                 if let Message::Text(text) = msg {
@@ -2079,13 +2072,6 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_concurrent_stmt2() -> anyhow::Result<()> {
-        let _ = tracing_subscriber::fmt()
-            .with_file(true)
-            .with_line_number(true)
-            .with_max_level(tracing::Level::ERROR)
-            .compact()
-            .try_init();
-
         let intercept_fn: InterceptFn = {
             Arc::new(move |msg, _ctx| {
                 if let Message::Text(text) = msg {
@@ -2220,13 +2206,6 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_recover_stmt2() -> anyhow::Result<()> {
-        let _ = tracing_subscriber::fmt()
-            .with_file(true)
-            .with_line_number(true)
-            .with_max_level(tracing::Level::ERROR)
-            .compact()
-            .try_init();
-
         let intercept_fn: InterceptFn = {
             Arc::new(move |msg, _ctx| {
                 if let Message::Text(text) = msg {
