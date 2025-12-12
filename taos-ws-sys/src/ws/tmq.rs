@@ -2885,6 +2885,156 @@ mod tests {
             taos_close(taos);
         }
     }
+
+    #[test]
+    fn test_tmq_consumer_new_wss() {
+        unsafe {
+            let conf = tmq_conf_new();
+            assert!(!conf.is_null());
+
+            let key = c"group.id".as_ptr();
+            let value = c"10".as_ptr();
+            let res = tmq_conf_set(conf, key, value);
+            assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+            let key = c"td.connect.ip".as_ptr();
+            let value = c"localhost".as_ptr();
+            let res = tmq_conf_set(conf, key, value);
+            assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+            let key = c"td.connect.port".as_ptr();
+            let value = c"6445".as_ptr();
+            let res = tmq_conf_set(conf, key, value);
+            assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+            let key = c"ws.tls.mode".as_ptr();
+            let value = c"1".as_ptr();
+            let res = tmq_conf_set(conf, key, value);
+            assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+            let mut errstr = [0; 256];
+            let consumer = tmq_consumer_new(conf, errstr.as_mut_ptr(), errstr.len() as _);
+            assert!(!consumer.is_null());
+
+            tmq_conf_destroy(conf);
+            let code = tmq_consumer_close(consumer);
+            assert_eq!(code, 0);
+        }
+    }
+
+    #[test]
+    fn test_tmq_consumer_new_wss_verify_ca() {
+        unsafe {
+            let ca_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/certs/ca_verify_ca.crt");
+            let tls_ca_path = ca_path.to_str().unwrap();
+
+            let cases = [
+                include_str!("../../tests/certs/ca_verify_ca.crt"),
+                tls_ca_path,
+            ];
+
+            for tls_ca in cases {
+                let conf = tmq_conf_new();
+                assert!(!conf.is_null());
+
+                let key = c"group.id".as_ptr();
+                let value = c"10".as_ptr();
+                let res = tmq_conf_set(conf, key, value);
+                assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+                let key = c"td.connect.ip".as_ptr();
+                let value = c"localhost".as_ptr();
+                let res = tmq_conf_set(conf, key, value);
+                assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+                let key = c"td.connect.port".as_ptr();
+                let value = c"6446".as_ptr();
+                let res = tmq_conf_set(conf, key, value);
+                assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+                let key = c"ws.tls.mode".as_ptr();
+                let value = c"2".as_ptr();
+                let res = tmq_conf_set(conf, key, value);
+                assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+                let key = c"ws.tls.version".as_ptr();
+                let value = c"TLSv1.3".as_ptr();
+                let res = tmq_conf_set(conf, key, value);
+                assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+                let key = c"ws.tls.ca".as_ptr();
+                let value = CString::new(tls_ca).unwrap();
+                let res = tmq_conf_set(conf, key, value.as_ptr());
+                assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+                let mut errstr = [0; 256];
+                let consumer = tmq_consumer_new(conf, errstr.as_mut_ptr(), errstr.len() as _);
+                assert!(!consumer.is_null());
+
+                tmq_conf_destroy(conf);
+                let code = tmq_consumer_close(consumer);
+                assert_eq!(code, 0);
+            }
+        }
+    }
+
+    #[test]
+    fn test_tmq_consumer_new_wss_verify_identity() {
+        unsafe {
+            let ca_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/certs/ca_verify_identity.crt");
+            let tls_ca_path = ca_path.to_str().unwrap();
+
+            let cases = [
+                include_str!("../../tests/certs/ca_verify_identity.crt"),
+                tls_ca_path,
+            ];
+
+            for tls_ca in cases {
+                let conf = tmq_conf_new();
+                assert!(!conf.is_null());
+
+                let key = c"group.id".as_ptr();
+                let value = c"10".as_ptr();
+                let res = tmq_conf_set(conf, key, value);
+                assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+                let key = c"td.connect.ip".as_ptr();
+                let value = c"localhost".as_ptr();
+                let res = tmq_conf_set(conf, key, value);
+                assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+                let key = c"td.connect.port".as_ptr();
+                let value = c"6445".as_ptr();
+                let res = tmq_conf_set(conf, key, value);
+                assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+                let key = c"ws.tls.mode".as_ptr();
+                let value = c"3".as_ptr();
+                let res = tmq_conf_set(conf, key, value);
+                assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+                let key = c"ws.tls.version".as_ptr();
+                let value = c"TLSv1.3".as_ptr();
+                let res = tmq_conf_set(conf, key, value);
+                assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+                let key = c"ws.tls.ca".as_ptr();
+                let value = CString::new(tls_ca).unwrap();
+                let res = tmq_conf_set(conf, key, value.as_ptr());
+                assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+                let mut errstr = [0; 256];
+                let consumer = tmq_consumer_new(conf, errstr.as_mut_ptr(), errstr.len() as _);
+                assert!(!consumer.is_null());
+
+                tmq_conf_destroy(conf);
+                let code = tmq_consumer_close(consumer);
+                assert_eq!(code, 0);
+            }
+        }
+    }
 }
 
 #[cfg(test)]

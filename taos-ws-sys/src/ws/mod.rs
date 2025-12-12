@@ -1190,7 +1190,7 @@ mod tests {
         }
     }
 
-    fn make_options(kvs: &[(&str, &str)]) -> OPTIONS {
+    pub(super) fn make_options(kvs: &[(&str, &str)]) -> OPTIONS {
         let mut opts = OPTIONS {
             keys: [ptr::null(); 256],
             values: [ptr::null(); 256],
@@ -1204,7 +1204,7 @@ mod tests {
         opts
     }
 
-    fn free_options(opts: &OPTIONS) {
+    pub(super) fn free_options(opts: &OPTIONS) {
         for i in 0..opts.count as usize {
             unsafe {
                 if !opts.keys[i].is_null() {
@@ -1601,6 +1601,44 @@ mod cloud_tests {
             );
             assert!(!taos.is_null());
             taos_close(taos);
+        }
+    }
+
+    #[test]
+    fn test_taos_connect_with() {
+        let _ = tracing_subscriber::fmt()
+            .with_file(true)
+            .with_line_number(true)
+            .with_max_level(tracing::Level::INFO)
+            .compact()
+            .try_init();
+
+        let url = std::env::var("TDENGINE_CLOUD_URL");
+        if url.is_err() {
+            tracing::warn!("TDENGINE_CLOUD_URL is not set, skip test_taos_connect_with");
+            return;
+        }
+
+        let token = std::env::var("TDENGINE_CLOUD_TOKEN");
+        if token.is_err() {
+            tracing::warn!("TDENGINE_CLOUD_TOKEN is not set, skip test_taos_connect_with");
+            return;
+        }
+
+        let url = url.unwrap().strip_prefix("https://").unwrap().to_string();
+        let token = token.unwrap();
+
+        unsafe {
+            let opts = tests::make_options(&[
+                (IP, &url),
+                ("token", &token),
+                (WS_TLS_MODE, "1"),
+                (WS_TLS_VERSION, "TLSv1.3,TLSv1.2"),
+            ]);
+            let taos = taos_connect_with(&opts as *const _);
+            assert!(!taos.is_null());
+            taos_close(taos);
+            tests::free_options(&opts);
         }
     }
 }
