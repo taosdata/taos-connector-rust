@@ -554,8 +554,8 @@ impl TaosBuilder {
             }
         };
 
-        let user_ip = dsn.remove("user_ip");
-        let user_app = dsn.remove("user_app");
+        let user_ip = dsn.remove("user_ip").map(|s| s.trim().to_string());
+        let user_app = dsn.remove("user_app").map(|s| s.trim().to_string());
 
         let tls_config = if is_https {
             let mode = dsn.remove("tls_mode").map(|s| s.parse()).transpose()?;
@@ -1639,6 +1639,51 @@ mod tests {
         let err = taos.exec("show databases").await.unwrap_err();
         assert_eq!(err.code(), WS_ERROR_NO::CONN_CLOSED.as_code());
         assert!(err.to_string().contains("WebSocket connection is closed"));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_report_user_ip_and_app() -> anyhow::Result<()> {
+        #[derive(Debug, serde::Deserialize)]
+        struct Record {
+            user_ip: String,
+            user_app: String,
+        }
+
+        {
+            let taos = TaosBuilder::from_dsn(
+                "ws://localhost:6041?user_ip=192.168.1.1&user_app=rust_test",
+            )?
+            .build()
+            .await?;
+
+            tokio::time::sleep(Duration::from_secs(2)).await;
+
+            let mut rs = taos.query("show connections").await?;
+            let records: Vec<Record> = rs.deserialize().try_collect().await?;
+            let found = records
+                .iter()
+                .any(|record| record.user_ip == "192.168.1.1" && record.user_app == "rust_test");
+            assert!(found);
+        }
+
+        {
+            let taos = TaosBuilder::from_dsn(
+                "ws://localhost:6041?user_ip=  192.168.1.2  &user_app=  rust_test  ",
+            )?
+            .build()
+            .await?;
+
+            tokio::time::sleep(Duration::from_secs(2)).await;
+
+            let mut rs = taos.query("show connections").await?;
+            let records: Vec<Record> = rs.deserialize().try_collect().await?;
+            let found = records
+                .iter()
+                .any(|record| record.user_ip == "192.168.1.2" && record.user_app == "rust_test");
+            assert!(found);
+        }
 
         Ok(())
     }
