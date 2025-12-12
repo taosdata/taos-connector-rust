@@ -587,14 +587,10 @@ unsafe fn build_dsn_from_options(options: *const OPTIONS) -> TaosResult<String> 
         }
     };
 
-    let compression = config::compression().to_string();
     let conn_retries = config::conn_retries().to_string();
     let retry_backoff_ms = config::retry_backoff_ms().to_string();
     let retry_backoff_max_ms = config::retry_backoff_max_ms().to_string();
 
-    if !map.contains_key(COMPRESSION) {
-        map.insert(COMPRESSION, &compression);
-    }
     if !map.contains_key(CONN_RETRIES) {
         map.insert(CONN_RETRIES, &conn_retries);
     }
@@ -604,6 +600,21 @@ unsafe fn build_dsn_from_options(options: *const OPTIONS) -> TaosResult<String> 
     if !map.contains_key(RETRY_BACKOFF_MAX_MS) {
         map.insert(RETRY_BACKOFF_MAX_MS, &retry_backoff_max_ms);
     }
+
+    let compression = match map.remove(COMPRESSION) {
+        Some(s) => match s.trim() {
+            "1" => "true".to_string(),
+            "0" => "false".to_string(),
+            _ => {
+                return Err(TaosError::new(
+                    Code::INVALID_PARA,
+                    &format!("invalid value for {COMPRESSION}: {s}"),
+                ))
+            }
+        },
+        None => config::compression().to_string(),
+    };
+    map.insert(COMPRESSION, &compression);
 
     let ws_tls_mode = map
         .remove(WS_TLS_MODE)
@@ -1177,6 +1188,365 @@ mod tests {
             taos_free_result(res);
             taos_close(taos);
         }
+    }
+
+    fn make_options(kvs: &[(&str, &str)]) -> OPTIONS {
+        let mut opts = OPTIONS {
+            keys: [ptr::null(); 256],
+            values: [ptr::null(); 256],
+            count: 0,
+        };
+        for (k, v) in kvs {
+            let key = CString::new(*k).unwrap().into_raw();
+            let value = CString::new(*v).unwrap().into_raw();
+            unsafe { taos_set_option(&mut opts, key, value) };
+        }
+        opts
+    }
+
+    fn free_options(opts: &OPTIONS) {
+        for i in 0..opts.count as usize {
+            unsafe {
+                if !opts.keys[i].is_null() {
+                    let _ = CString::from_raw(opts.keys[i] as *mut c_char);
+                }
+                if !opts.values[i].is_null() {
+                    let _ = CString::from_raw(opts.values[i] as *mut c_char);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_taos_connect_with_default() {
+        unsafe {
+            let taos = taos_connect_with(ptr::null());
+            assert!(!taos.is_null(),);
+            taos_close(taos);
+        }
+    }
+
+    #[test]
+    fn test_taos_connect_with_ip_port() {
+        unsafe {
+            let opts = make_options(&[(IP, "localhost"), (PORT, "6041")]);
+            let taos = taos_connect_with(&opts as *const _);
+            assert!(!taos.is_null());
+            taos_close(taos);
+            free_options(&opts);
+        }
+    }
+
+    #[test]
+    fn test_taos_connect_with_adapter_list_priority() {
+        unsafe {
+            let opts = make_options(&[(ADAPTER_LIST, "localhost:6041"), (IP, "invalid_host")]);
+            let taos = taos_connect_with(&opts as *const _);
+            assert!(!taos.is_null());
+            taos_close(taos);
+            free_options(&opts);
+        }
+    }
+
+    #[test]
+    fn test_taos_connect_with_user_pass_db() {
+        unsafe {
+            let conn = test_connect();
+            test_exec_many(
+                conn,
+                &[
+                    "drop database if exists test_1765508846",
+                    "create database test_1765508846",
+                ],
+            );
+
+            let opts = make_options(&[
+                (IP, "localhost"),
+                (PORT, "6041"),
+                (USER, "root"),
+                (PASS, "taosdata"),
+                (DB, "test_1765508846"),
+            ]);
+            let taos = taos_connect_with(&opts as *const _);
+            assert!(!taos.is_null());
+            taos_close(taos);
+            free_options(&opts);
+
+            test_exec(conn, "drop database if exists test_1765508846");
+            taos_close(conn);
+        }
+    }
+
+    #[test]
+    fn test_taos_connect_with_invalid_port() {
+        unsafe {
+            let opts = make_options(&[(IP, "localhost"), (PORT, "not_a_number")]);
+            let taos = taos_connect_with(&opts as *const _);
+            assert!(taos.is_null());
+            let code = taos_errno(ptr::null_mut());
+            assert_eq!(Code::from(code), Code::INVALID_PARA);
+            free_options(&opts);
+        }
+    }
+
+    #[test]
+    fn test_taos_connect_with_compression() {
+        unsafe {
+            let opts = make_options(&[(IP, "localhost"), (PORT, "6041"), (COMPRESSION, "1")]);
+            let taos = taos_connect_with(&opts as *const _);
+            assert!(!taos.is_null());
+            free_options(&opts);
+        }
+
+        unsafe {
+            let opts = make_options(&[(IP, "localhost"), (PORT, "6041"), (COMPRESSION, "0")]);
+            let taos = taos_connect_with(&opts as *const _);
+            assert!(!taos.is_null());
+            free_options(&opts);
+        }
+    }
+
+    #[test]
+    fn test_taos_connect_with_invalid_compression() {
+        unsafe {
+            let opts = make_options(&[(IP, "localhost"), (PORT, "6041"), (COMPRESSION, "maybe")]);
+            let taos = taos_connect_with(&opts as *const _);
+            assert!(taos.is_null());
+            let code = taos_errno(ptr::null_mut());
+            assert_eq!(Code::from(code), Code::INVALID_PARA);
+            free_options(&opts);
+        }
+    }
+
+    #[test]
+    fn test_taos_connect_with_unreachable_host() {
+        unsafe {
+            let opts = make_options(&[(IP, "invalid_host.example"), (PORT, "6041")]);
+            let taos = taos_connect_with(&opts as *const _);
+            assert!(taos.is_null());
+            let code = taos_errno(ptr::null_mut());
+            assert_eq!(Code::from(code), Code::new(0x000B));
+            free_options(&opts);
+        }
+    }
+
+    #[test]
+    fn test_taos_connect_with_invalid_utf8_items() {
+        let mut opts = OPTIONS {
+            keys: [ptr::null(); 256],
+            values: [ptr::null(); 256],
+            count: 0,
+        };
+
+        let bad = CString::new([0xff, 0xfe, 0xfd]).unwrap();
+        let good_k = CString::new(IP).unwrap();
+        let good_v = CString::new("localhost").unwrap();
+
+        unsafe {
+            taos_set_option(&mut opts, bad.as_ptr(), good_v.as_ptr());
+            taos_set_option(&mut opts, good_k.as_ptr(), bad.as_ptr());
+
+            let taos = taos_connect_with(&opts as *const _);
+            assert!(taos.is_null());
+
+            let errstr = taos_errstr(ptr::null_mut());
+            let errstr = CStr::from_ptr(errstr).to_str().unwrap();
+            assert!(errstr.contains("invalid utf-8"));
+        }
+    }
+
+    #[test]
+    fn test_taos_connect_with_count_out_of_range() {
+        let opts = OPTIONS {
+            keys: [ptr::null(); 256],
+            values: [ptr::null(); 256],
+            count: 300,
+        };
+
+        unsafe {
+            let taos = taos_connect_with(&opts as *const _);
+            assert!(taos.is_null());
+
+            let code = taos_errno(ptr::null_mut());
+            assert_eq!(Code::from(code), Code::INVALID_PARA);
+
+            let errstr = taos_errstr(ptr::null_mut());
+            let errstr = CStr::from_ptr(errstr).to_str().unwrap();
+            assert_eq!(errstr, "options count out of range");
+        }
+    }
+
+    #[test]
+    fn test_taos_connect_with_ws_tls_mode_disabled() {
+        unsafe {
+            let opts = make_options(&[(WS_TLS_MODE, "0"), (IP, "localhost"), (PORT, "6041")]);
+            let taos = taos_connect_with(&opts as *const _);
+            assert!(!taos.is_null());
+            taos_close(taos);
+            free_options(&opts);
+        }
+    }
+
+    #[test]
+    fn test_taos_connect_with_verify_ca() {
+        unsafe {
+            let opts = make_options(&[
+                (WS_TLS_MODE, "2"),
+                (
+                    WS_TLS_CA,
+                    include_str!("../../tests/certs/ca_verify_ca.crt"),
+                ),
+                (IP, "localhost"),
+                (PORT, "6446"),
+                (WS_TLS_VERSION, "TLSv1.3,TLSv1.2"),
+            ]);
+            let taos = taos_connect_with(&opts as *const _);
+            assert!(!taos.is_null());
+            taos_close(taos);
+            free_options(&opts);
+        }
+
+        unsafe {
+            let ca_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/certs/ca_verify_ca.crt");
+            let tls_ca = ca_path.to_str().unwrap();
+
+            let opts = make_options(&[
+                (WS_TLS_MODE, "2"),
+                (WS_TLS_CA, tls_ca),
+                (IP, "localhost"),
+                (PORT, "6446"),
+                (WS_TLS_VERSION, "TLSv1.3,TLSv1.2"),
+            ]);
+            let taos = taos_connect_with(&opts as *const _);
+            assert!(!taos.is_null());
+            taos_close(taos);
+            free_options(&opts);
+        }
+    }
+
+    #[test]
+    fn test_taos_connect_with_verify_identity() {
+        unsafe {
+            let opts = make_options(&[
+                (WS_TLS_MODE, "3"),
+                (
+                    WS_TLS_CA,
+                    include_str!("../../tests/certs/ca_verify_identity.crt"),
+                ),
+                (IP, "localhost"),
+                (PORT, "6445"),
+                (WS_TLS_VERSION, "TLSv1.3,TLSv1.2"),
+            ]);
+            let taos = taos_connect_with(&opts as *const _);
+            assert!(!taos.is_null());
+            taos_close(taos);
+            free_options(&opts);
+        }
+
+        unsafe {
+            let ca_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/certs/ca_verify_identity.crt");
+            let tls_ca = ca_path.to_str().unwrap();
+
+            let opts = make_options(&[
+                (WS_TLS_MODE, "3"),
+                (WS_TLS_CA, tls_ca),
+                (IP, "localhost"),
+                (PORT, "6445"),
+                (WS_TLS_VERSION, "TLSv1.3,TLSv1.2"),
+            ]);
+            let taos = taos_connect_with(&opts as *const _);
+            assert!(!taos.is_null());
+            taos_close(taos);
+            free_options(&opts);
+        }
+    }
+
+    #[test]
+    fn test_taos_connect_with_verify_ca_missing_ca() {
+        unsafe {
+            let opts = make_options(&[
+                (WS_TLS_MODE, "2"),
+                (IP, "localhost"),
+                (PORT, "6041"),
+                (WS_TLS_VERSION, "TLSv1.3"),
+            ]);
+
+            let taos = taos_connect_with(&opts as *const _);
+            assert!(taos.is_null());
+
+            let errstr = taos_errstr(ptr::null_mut());
+            let errstr = CStr::from_ptr(errstr).to_str().unwrap();
+            assert!(errstr.contains("requires parameter: tls_ca"));
+
+            free_options(&opts);
+        }
+    }
+
+    #[test]
+    fn test_taos_connect_with_verify_identity_missing_ca() {
+        unsafe {
+            let opts = make_options(&[
+                (WS_TLS_MODE, "3"),
+                (IP, "localhost"),
+                (PORT, "6041"),
+                (WS_TLS_VERSION, "TLSv1.3"),
+            ]);
+
+            let taos = taos_connect_with(&opts as *const _);
+            assert!(taos.is_null());
+
+            let errstr = taos_errstr(ptr::null_mut());
+            let errstr = CStr::from_ptr(errstr).to_str().unwrap();
+            assert!(errstr.contains("requires parameter: tls_ca"));
+
+            free_options(&opts);
+        }
+    }
+
+    #[test]
+    fn test_taos_connect_with_all_params() {
+        let conn = test_connect();
+        test_exec_many(
+            conn,
+            &[
+                "drop database if exists test_1765519301",
+                "create database test_1765519301",
+            ],
+        );
+
+        unsafe {
+            let opts = make_options(&[
+                (IP, "localhost"),
+                (PORT, "6445"),
+                (USER, "root"),
+                (PASS, "taosdata"),
+                (DB, "test_1765519301"),
+                (WS_TLS_MODE, "3"),
+                (WS_TLS_VERSION, "TLSv1.3,TLSv1.2"),
+                (
+                    WS_TLS_CA,
+                    include_str!("../../tests/certs/ca_verify_identity.crt"),
+                ),
+                (COMPRESSION, "1"),
+                (CONN_RETRIES, "5"),
+                (RETRY_BACKOFF_MS, "200"),
+                (RETRY_BACKOFF_MAX_MS, "5000"),
+                ("token", "my_token"),
+                ("timezone", "UTC"),
+                ("userIp", "192.168.1.1"),
+                ("userApp", "my_app"),
+            ]);
+
+            let taos = taos_connect_with(&opts as *const _);
+            assert!(!taos.is_null());
+
+            free_options(&opts);
+        }
+
+        test_exec(conn, "drop database if exists test_1765519301");
+        unsafe { taos_close(conn) };
     }
 }
 
