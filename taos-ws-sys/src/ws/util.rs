@@ -54,22 +54,40 @@ pub fn camel_to_snake(s: &str) -> String {
 }
 
 pub fn build_dsn(
-    addr: &str,
-    user: &str,
-    pass: &str,
+    addr: Option<&str>,
+    user: Option<&str>,
+    pass: Option<&str>,
     db: Option<&str>,
     ws_tls_mode: Option<config::WsTlsMode>,
-    ws_tls_version: Option<String>,
-    ws_tls_ca: Option<String>,
+    ws_tls_version: Option<&str>,
+    ws_tls_ca: Option<&str>,
 ) -> String {
-    let db = db.unwrap_or("");
+    let addr = match addr {
+        Some(addr) => addr.to_string(),
+        None => match config::adapter_list() {
+            Some(addr) => addr.to_string(),
+            None => format!("{}:{}", ws::DEFAULT_HOST, ws::DEFAULT_PORT),
+        },
+    };
+
+    let user = user.unwrap_or(ws::DEFAULT_USER);
+    let pass = pass.unwrap_or(ws::DEFAULT_PASS);
+    let db = db.unwrap_or(ws::DEFAULT_DB);
+
+    let ws_tls_mode = ws_tls_mode.unwrap_or_else(config::ws_tls_mode);
+
+    let ws_tls_version = ws_tls_version
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| config::ws_tls_version().to_string());
+
+    let ws_tls_ca = ws_tls_ca
+        .map(|s| s.to_string())
+        .or_else(|| config::ws_tls_ca().map(|s| s.to_string()));
+
     let compression = config::compression();
     let conn_retries = config::conn_retries();
     let retry_backoff_ms = config::retry_backoff_ms();
     let retry_backoff_max_ms = config::retry_backoff_max_ms();
-    let ws_tls_mode = ws_tls_mode.unwrap_or_else(config::ws_tls_mode);
-    let ws_tls_version = ws_tls_version.unwrap_or_else(|| config::ws_tls_version().to_string());
-    let ws_tls_ca = ws_tls_ca.or_else(|| config::ws_tls_ca().map(|s| s.to_string()));
 
     let protocol = match ws_tls_mode {
         config::WsTlsMode::Disabled => "ws",
@@ -101,7 +119,7 @@ pub fn build_dsn(
         &retry_backoff_max_ms={retry_backoff_max_ms}"
     );
 
-    if is_cloud_host(addr) && user == "token" {
+    if is_cloud_host(&addr) && user == "token" {
         format!("wss://{addr}/{db}?token={pass}&{params}")
     } else {
         format!("{protocol}://{user}:{pass}@{addr}/{db}?{params}{tls_params}")

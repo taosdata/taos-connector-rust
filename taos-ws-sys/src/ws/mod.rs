@@ -44,7 +44,6 @@ pub type TAOS_ROW = *mut *mut c_void;
 #[allow(non_camel_case_types)]
 pub type __taos_async_fn_t = extern "C" fn(param: *mut c_void, res: *mut TAOS_RES, code: c_int);
 
-const DEFAULT_DSN: &str = "ws://localhost:6041";
 const DEFAULT_HOST: &str = "localhost";
 const DEFAULT_PORT: u16 = 6041;
 const DEFAULT_CLOUD_PORT: u16 = 443;
@@ -157,6 +156,7 @@ pub unsafe extern "C" fn taos_connect(
     db: *const c_char,
     port: u16,
 ) -> *mut TAOS {
+    taos_init();
     match connect(ip, user, pass, db, port) {
         Ok(taos) => Box::into_raw(Box::new(taos)) as _,
         Err(mut err) => {
@@ -190,24 +190,24 @@ unsafe fn connect(
     };
 
     let user = if !user.is_null() {
-        CStr::from_ptr(user).to_str()?
+        Some(CStr::from_ptr(user).to_str()?)
     } else {
-        DEFAULT_USER
+        None
     };
 
     let pass = if !pass.is_null() {
-        CStr::from_ptr(pass).to_str()?
+        Some(CStr::from_ptr(pass).to_str()?)
     } else {
-        DEFAULT_PASS
+        None
     };
 
     let db = if !db.is_null() {
-        CStr::from_ptr(db).to_str()?
+        Some(CStr::from_ptr(db).to_str()?)
     } else {
-        DEFAULT_DB
+        None
     };
 
-    let dsn = util::build_dsn(&addr, user, pass, Some(db), None, None, None);
+    let dsn = util::build_dsn(Some(&addr), user, pass, db, None, None, None);
     debug!("taos_connect, dsn: {dsn:?}");
 
     let builder = TaosBuilder::from_dsn(dsn)?;
@@ -420,9 +420,9 @@ fn taos_init_impl() -> Result<(), Box<dyn std::error::Error>> {
 
 #[repr(C)]
 pub struct OPTIONS {
-    keys: [*const c_char; 256],
-    values: [*const c_char; 256],
-    count: u16,
+    pub keys: [*const c_char; 256],
+    pub values: [*const c_char; 256],
+    pub count: u16,
 }
 
 #[no_mangle]
@@ -459,6 +459,7 @@ const WS_TLS_CA: &str = "wsTlsCa";
 
 #[no_mangle]
 pub unsafe extern "C" fn taos_connect_with(options: *const OPTIONS) -> *mut TAOS {
+    taos_init();
     match connect_with(options) {
         Ok(taos) => Box::into_raw(Box::new(taos)) as _,
         Err(mut err) => {
@@ -510,8 +511,9 @@ unsafe fn connect_with(options: *const OPTIONS) -> TaosResult<Taos> {
 
 unsafe fn build_dsn_from_options(options: *const OPTIONS) -> TaosResult<String> {
     if options.is_null() {
-        debug!("build_dsn_from_options, options is null, use default dsn: {DEFAULT_DSN}");
-        return Ok(DEFAULT_DSN.to_string());
+        let dsn = util::build_dsn(None, None, None, None, None, None, None);
+        debug!("build_dsn_from_options, options is null, use default dsn: {dsn}");
+        return Ok(dsn);
     }
 
     let opts = &*options;
@@ -1558,13 +1560,6 @@ mod cloud_tests {
 
     #[test]
     fn test_taos_connect() {
-        let _ = tracing_subscriber::fmt()
-            .with_file(true)
-            .with_line_number(true)
-            .with_max_level(tracing::Level::INFO)
-            .compact()
-            .try_init();
-
         let url = std::env::var("TDENGINE_CLOUD_URL");
         if url.is_err() {
             tracing::warn!("TDENGINE_CLOUD_URL is not set, skip test_taos_connect");
@@ -1606,13 +1601,6 @@ mod cloud_tests {
 
     #[test]
     fn test_taos_connect_with() {
-        let _ = tracing_subscriber::fmt()
-            .with_file(true)
-            .with_line_number(true)
-            .with_max_level(tracing::Level::INFO)
-            .compact()
-            .try_init();
-
         let url = std::env::var("TDENGINE_CLOUD_URL");
         if url.is_err() {
             tracing::warn!("TDENGINE_CLOUD_URL is not set, skip test_taos_connect_with");

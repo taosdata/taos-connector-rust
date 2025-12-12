@@ -403,15 +403,8 @@ unsafe fn consumer_new(conf: *mut tmq_conf_t) -> TaosResult<Tmq> {
                 .get("td.connect.port")
                 .map_or(0, |s| s.parse().unwrap());
 
-            let user = conf
-                .map
-                .get("td.connect.user")
-                .map_or(ws::DEFAULT_USER, |s| s.as_str());
-
-            let pass = conf
-                .map
-                .get("td.connect.pass")
-                .map_or(ws::DEFAULT_PASS, |s| s.as_str());
+            let user = conf.map.get("td.connect.user");
+            let pass = conf.map.get("td.connect.pass");
 
             let addr = if let Some(ip) = ip {
                 let port = util::resolve_port(ip, port);
@@ -433,13 +426,13 @@ unsafe fn consumer_new(conf: *mut tmq_conf_t) -> TaosResult<Tmq> {
             let ws_tls_ca = conf.map.get("ws.tls.ca");
 
             let dsn = util::build_dsn(
-                &addr,
-                user,
-                pass,
+                Some(&addr),
+                user.map(|s| s.as_str()),
+                pass.map(|s| s.as_str()),
                 None,
                 ws_tls_mode,
-                ws_tls_version.cloned(),
-                ws_tls_ca.cloned(),
+                ws_tls_version.map(|s| s.as_str()),
+                ws_tls_ca.map(|s| s.as_str()),
             );
             let mut dsn = Dsn::from_str(&dsn)?;
 
@@ -2690,12 +2683,6 @@ mod tests {
     #[test]
     fn test_show_consumers() {
         unsafe {
-            let _ = tracing_subscriber::fmt()
-                .with_max_level(tracing::Level::TRACE)
-                .with_line_number(true)
-                .with_file(true)
-                .try_init();
-
             let taos = test_connect();
             test_exec_many(
                 taos,
@@ -2787,12 +2774,6 @@ mod tests {
     #[test]
     fn test_poll_blob() {
         unsafe {
-            let _ = tracing_subscriber::fmt()
-                .with_max_level(tracing::Level::INFO)
-                .with_line_number(true)
-                .with_file(true)
-                .try_init();
-
             let taos = test_connect();
             test_exec_many(
                 taos,
@@ -3051,13 +3032,6 @@ mod cloud_tests {
 
     #[test]
     fn test_tmq_poll() {
-        let _ = tracing_subscriber::fmt()
-            .with_max_level(tracing::Level::INFO)
-            .with_line_number(true)
-            .with_file(true)
-            .compact()
-            .try_init();
-
         let url = std::env::var("TDENGINE_CLOUD_URL");
         if url.is_err() {
             tracing::warn!("TDENGINE_CLOUD_URL is not set, skip test_tmq_poll");
