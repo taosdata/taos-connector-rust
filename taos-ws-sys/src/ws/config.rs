@@ -507,8 +507,9 @@ impl Config {
         self.ws_tls_version = Some(version.into());
     }
 
-    fn set_ws_tls_ca<T: Into<FastStr>>(&mut self, ca: T) {
-        self.ws_tls_ca = Some(ca.into());
+    fn set_ws_tls_ca(&mut self, ca: &str) {
+        let ca = ca.replace("\\n", "\n");
+        self.ws_tls_ca = Some(FastStr::new(ca));
     }
 
     fn load_from_path(&mut self, path: &str) -> Result<(), TaosError> {
@@ -710,7 +711,7 @@ fn parse_config(lines: Vec<String>) -> Result<Config, TaosError> {
                 ROTATION_SIZE => config.set_rotation_size(value.to_string()),
                 WS_TLS_MODE => config.set_ws_tls_mode(value)?,
                 WS_TLS_VERSION => config.set_ws_tls_version(value.to_string()),
-                WS_TLS_CA => config.set_ws_tls_ca(value.to_string()),
+                WS_TLS_CA => config.set_ws_tls_ca(value),
                 _ => {}
             }
         }

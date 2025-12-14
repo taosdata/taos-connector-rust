@@ -76,9 +76,8 @@ pub fn build_dsn(
 
     let ws_tls_mode = ws_tls_mode.unwrap_or_else(config::ws_tls_mode);
 
-    let ws_tls_version = ws_tls_version
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| config::ws_tls_version().to_string());
+    let ws_tls_version =
+        ws_tls_version.map_or_else(|| config::ws_tls_version().to_string(), |s| s.to_string());
 
     let ws_tls_ca = ws_tls_ca
         .map(|s| s.to_string())
