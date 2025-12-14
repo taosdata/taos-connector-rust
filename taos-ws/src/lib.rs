@@ -1723,11 +1723,10 @@ mod tls_tests {
     #[tokio::test]
     #[cfg(feature = "rustls-aws-lc-crypto-provider")]
     async fn test_tls_verify_identity() -> anyhow::Result<()> {
-        let tls_ca = include_str!("../tests/ca_verify_identity.crt");
+        let tls_ca = include_str!("../tests/certs/ca_verify_identity.crt");
 
-        let ca_path = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("tests")
-            .join("ca_verify_identity.crt");
+        let ca_path =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/certs/ca_verify_identity.crt");
         let tls_ca_path = ca_path.to_str().unwrap();
 
         let tls_ca_cases = [
@@ -1766,11 +1765,9 @@ mod tls_tests {
     #[tokio::test]
     #[cfg(feature = "rustls-aws-lc-crypto-provider")]
     async fn test_tls_verify_ca() -> anyhow::Result<()> {
-        let tls_ca = include_str!("../tests/ca_verify_ca.crt");
+        let tls_ca = include_str!("../tests/certs/ca_verify_ca.crt");
 
-        let ca_path = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("tests")
-            .join("ca_verify_ca.crt");
+        let ca_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/certs/ca_verify_ca.crt");
         let tls_ca_path = ca_path.to_str().unwrap();
 
         let tls_ca_cases = [
@@ -1809,7 +1806,7 @@ mod tls_tests {
     #[tokio::test]
     #[cfg(feature = "rustls-aws-lc-crypto-provider")]
     async fn test_tls_san_mismatch() -> anyhow::Result<()> {
-        let tls_ca = include_str!("../tests/ca_verify_identity.crt");
+        let tls_ca = include_str!("../tests/certs/ca_verify_identity.crt");
         let err = TaosBuilder::from_dsn(format!(
             "wss://127.0.0.1:6445?tls_mode=verify_identity&tls_version=tlsv1.3&tls_ca={tls_ca}"
         ))?
@@ -1825,7 +1822,7 @@ mod tls_tests {
     #[tokio::test]
     #[cfg(feature = "rustls-aws-lc-crypto-provider")]
     async fn test_tlsv12_version_mismatch() -> anyhow::Result<()> {
-        let tls_ca = include_str!("../tests/ca_verify_ca.crt");
+        let tls_ca = include_str!("../tests/certs/ca_verify_ca.crt");
         let err = TaosBuilder::from_dsn(format!(
             "wss://localhost:6447?tls_mode=verify_ca&tls_version=tlsv1.3&tls_ca={tls_ca}"
         ))?
@@ -1841,7 +1838,7 @@ mod tls_tests {
     #[tokio::test]
     #[cfg(feature = "rustls-aws-lc-crypto-provider")]
     async fn test_tlsv13_version_mismatch() -> anyhow::Result<()> {
-        let tls_ca = include_str!("../tests/ca_verify_ca.crt");
+        let tls_ca = include_str!("../tests/certs/ca_verify_ca.crt");
         let err = TaosBuilder::from_dsn(format!(
             "wss://localhost:6448?tls_mode=verify_ca&tls_version=tlsv1.2&tls_ca={tls_ca}"
         ))?
@@ -1857,7 +1854,7 @@ mod tls_tests {
     #[tokio::test]
     #[cfg(feature = "rustls-aws-lc-crypto-provider")]
     async fn test_tls_ca_mismatch() -> anyhow::Result<()> {
-        let tls_ca = include_str!("../tests/ca_mismatch.crt");
+        let tls_ca = include_str!("../tests/certs/ca_mismatch.crt");
         let err = TaosBuilder::from_dsn(format!(
             "wss://localhost:6445?tls_mode=verify_identity&tls_version=TLSv1.3&tls_ca={tls_ca}"
         ))?
@@ -1891,9 +1888,7 @@ mod tls_tests {
         let err = TaosBuilder::from_dsn("wss://localhost:6041?tls_mode=verify_ca&tls_version=TLSv1.3&tls_ca=-----BEGIN CERTIFICATE-----BAD-----END CERTIFICATE-----").unwrap_err();
         assert!(err.to_string().contains("parse PEM failed"));
 
-        let ca_path = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("tests")
-            .join("invalid.pem");
+        let ca_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/certs/invalid.pem");
         let tls_ca_path = ca_path.to_str().unwrap();
 
         let err = TaosBuilder::from_dsn(format!(

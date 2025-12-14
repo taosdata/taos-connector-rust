@@ -21,6 +21,7 @@ jobs:
       - name: Install TDengine
         run: |
           tar -zxf TDengine-server-3.3.6.0-Linux-x64.tar.gz
+          rm -rf TDengine-server-3.3.6.0-Linux-x64.tar.gz
           cd TDengine-server-3.3.6.0
           sudo ./install.sh -e no
 
@@ -36,12 +37,12 @@ jobs:
           taosd &
           taosadapter &
 
-      # - name: Start Nginx
-      #   run: |
-
-      - name: Setup tmate session
-        uses: mxschmitt/action-tmate@v3
-        timeout-minutes: 300
+      - name: Start Nginx
+        run: |
+          sudo nginx -p "$PWD" -c taos-ws/tests/nginx/tls12.conf
+          sudo nginx -p "$PWD" -c taos-ws/tests/nginx/tls13.conf
+          sudo nginx -p "$PWD" -c taos-ws/tests/nginx/verify_ca.conf
+          sudo nginx -p "$PWD" -c taos-ws/tests/nginx/verify_identity.conf
 
       - name: Set up Rust
         id: setup-rust
