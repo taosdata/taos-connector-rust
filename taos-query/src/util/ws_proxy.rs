@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures::{SinkExt, StreamExt};
-use tokio::net::{TcpListener, TcpStream};
+use tokio::net::TcpListener;
 use tokio::sync::{Mutex, Notify};
 use tokio_tungstenite::{accept_async, connect_async, tungstenite::Message};
 
@@ -27,14 +27,10 @@ pub struct WsProxy {
 }
 
 impl WsProxy {
-    pub async fn start(
-        listen_addr: &str,
-        backend_url: &str,
-        intercept_fn: InterceptFn,
-    ) -> anyhow::Result<Self> {
+    pub async fn start(listen_addr: &str, backend_url: &str, intercept_fn: InterceptFn) -> Self {
         tracing::info!("starting WebSocket proxy on {listen_addr}, backend: {backend_url}");
 
-        let server_addr = listen_addr.parse()?;
+        let listen_addr = listen_addr.parse().unwrap();
         let backend_url = backend_url.to_string();
         let running = Arc::new(AtomicBool::new(true));
         let ctx = Arc::new(Mutex::new(ProxyContext { req_count: 0 }));
@@ -44,7 +40,7 @@ impl WsProxy {
         tokio::spawn(async move {
             loop {
                 run_proxy_server(
-                    server_addr,
+                    listen_addr,
                     backend_url.clone(),
                     intercept_fn.clone(),
                     running.clone(),
@@ -64,9 +60,7 @@ impl WsProxy {
             }
         });
 
-        wait_server_ready(listen_addr, Duration::from_secs(3)).await?;
-
-        Ok(Self { stop })
+        Self { stop }
     }
 }
 
@@ -160,21 +154,6 @@ async fn run_proxy_server(
             _ = stop_notify.notified() => {
                 break;
             }
-        }
-    }
-}
-
-async fn wait_server_ready(addr: &str, timeout: Duration) -> anyhow::Result<()> {
-    let start = std::time::Instant::now();
-    let mut delay = Duration::from_millis(50);
-    loop {
-        match TcpStream::connect(addr).await {
-            Ok(_) => return Ok(()),
-            Err(_) if start.elapsed() < timeout => {
-                tokio::time::sleep(delay).await;
-                delay = std::cmp::min(delay * 2, Duration::from_millis(500));
-            }
-            Err(e) => return Err(anyhow::anyhow!("{addr} not ready: {e}")),
         }
     }
 }
