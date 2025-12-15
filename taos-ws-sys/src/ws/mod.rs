@@ -1389,7 +1389,6 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "rustls-aws-lc-crypto-provider")]
     #[test]
     fn test_taos_connect_with_verify_ca() {
         unsafe {
@@ -1428,7 +1427,6 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "rustls-aws-lc-crypto-provider")]
     #[test]
     fn test_taos_connect_with_verify_identity() {
         unsafe {
@@ -1509,7 +1507,6 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "rustls-aws-lc-crypto-provider")]
     #[test]
     fn test_taos_connect_with_all_params() {
         let conn = test_connect();
@@ -1555,7 +1552,6 @@ mod tests {
     }
 }
 
-#[cfg(feature = "rustls-aws-lc-crypto-provider")]
 #[cfg(test)]
 mod cloud_tests {
     use std::ffi::CString;

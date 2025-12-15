@@ -2867,7 +2867,6 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "rustls-aws-lc-crypto-provider")]
     #[test]
     fn test_tmq_consumer_new_wss() {
         unsafe {
@@ -2904,7 +2903,6 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "rustls-aws-lc-crypto-provider")]
     #[test]
     fn test_tmq_consumer_new_wss_verify_ca() {
         unsafe {
@@ -2962,7 +2960,6 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "rustls-aws-lc-crypto-provider")]
     #[test]
     fn test_tmq_consumer_new_wss_verify_identity() {
         unsafe {
@@ -3021,7 +3018,6 @@ mod tests {
     }
 }
 
-#[cfg(feature = "rustls-aws-lc-crypto-provider")]
 #[cfg(test)]
 mod cloud_tests {
     use std::ffi::CString;

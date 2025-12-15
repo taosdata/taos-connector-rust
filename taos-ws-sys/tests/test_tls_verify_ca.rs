@@ -1,4 +1,4 @@
-#[cfg(all(feature = "test-tls", feature = "rustls-aws-lc-crypto-provider"))]
+#[cfg(feature = "test-tls")]
 mod tests {
     use std::ffi::{CStr, CString};
     use std::ptr;
