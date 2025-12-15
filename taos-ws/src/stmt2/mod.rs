@@ -1458,7 +1458,7 @@ mod recover_tests {
             })
         };
 
-        WsProxy::start("127.0.0.1:8811", "ws://localhost:6041/ws", intercept_fn).await;
+        let _proxy = WsProxy::start("127.0.0.1:8811", "ws://localhost:6041/ws", intercept_fn).await;
 
         let taos = TaosBuilder::from_dsn("ws://localhost:8811")?
             .build()
@@ -1495,7 +1495,7 @@ mod recover_tests {
             })
         };
 
-        WsProxy::start("127.0.0.1:8812", "ws://localhost:6041/ws", intercept_fn).await;
+        let _proxy = WsProxy::start("127.0.0.1:8812", "ws://localhost:6041/ws", intercept_fn).await;
 
         let taos = TaosBuilder::from_dsn("ws://localhost:8812")?
             .build()
@@ -1546,7 +1546,7 @@ mod recover_tests {
             })
         };
 
-        WsProxy::start("127.0.0.1:8813", "ws://localhost:6041/ws", intercept_fn).await;
+        let _proxy = WsProxy::start("127.0.0.1:8813", "ws://localhost:6041/ws", intercept_fn).await;
 
         let taos = TaosBuilder::from_dsn("ws://localhost:8813")?
             .build()
@@ -1603,7 +1603,7 @@ mod recover_tests {
             })
         };
 
-        WsProxy::start("127.0.0.1:8814", "ws://localhost:6041/ws", intercept_fn).await;
+        let _proxy = WsProxy::start("127.0.0.1:8814", "ws://localhost:6041/ws", intercept_fn).await;
 
         let taos = TaosBuilder::from_dsn("ws://localhost:8814")?
             .build()
@@ -1670,7 +1670,7 @@ mod recover_tests {
             })
         };
 
-        WsProxy::start("127.0.0.1:8815", "ws://localhost:6041/ws", intercept_fn).await;
+        let _proxy = WsProxy::start("127.0.0.1:8815", "ws://localhost:6041/ws", intercept_fn).await;
 
         let taos = TaosBuilder::from_dsn("ws://localhost:8815")?
             .build()
@@ -1749,7 +1749,7 @@ mod recover_tests {
             })
         };
 
-        WsProxy::start("127.0.0.1:8816", "ws://localhost:6041/ws", intercept_fn).await;
+        let _proxy = WsProxy::start("127.0.0.1:8816", "ws://localhost:6041/ws", intercept_fn).await;
 
         let taos = TaosBuilder::from_dsn("ws://localhost:8816")?
             .build()
@@ -1857,7 +1857,7 @@ mod recover_tests {
             })
         };
 
-        WsProxy::start("127.0.0.1:8817", "ws://localhost:6041/ws", intercept_fn).await;
+        let _proxy = WsProxy::start("127.0.0.1:8817", "ws://localhost:6041/ws", intercept_fn).await;
 
         let n = 10;
         let mut tasks = Vec::with_capacity(n);
@@ -1967,7 +1967,7 @@ mod recover_tests {
             })
         };
 
-        WsProxy::start("127.0.0.1:8820", "ws://localhost:6041/ws", intercept_fn).await;
+        let _proxy = WsProxy::start("127.0.0.1:8820", "ws://localhost:6041/ws", intercept_fn).await;
 
         let taos = TaosBuilder::from_dsn("ws://localhost:8820")?
             .build()

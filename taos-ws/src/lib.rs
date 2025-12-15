@@ -1325,7 +1325,7 @@ mod tests {
             })
         };
 
-        WsProxy::start("127.0.0.1:8901", "ws://localhost:6041/ws", intercept).await;
+        let _proxy = WsProxy::start("127.0.0.1:8901", "ws://localhost:6041/ws", intercept).await;
 
         let taos = TaosBuilder::from_dsn("ws://localhost:8901?conn_timeout=1&version_prefer=3.x")?
             .build()
@@ -1577,7 +1577,7 @@ mod tests {
             })
         };
 
-        WsProxy::start("127.0.0.1:8904", "ws://localhost:6041/ws", intercept).await;
+        let _proxy = WsProxy::start("127.0.0.1:8904", "ws://localhost:6041/ws", intercept).await;
 
         let err = TaosBuilder::from_dsn("ws://localhost:8904?conn_timeout=1")?
             .build()
@@ -1623,7 +1623,7 @@ mod tests {
             })
         };
 
-        WsProxy::start("127.0.0.1:8905", "ws://localhost:6041/ws", intercept).await;
+        let _proxy = WsProxy::start("127.0.0.1:8905", "ws://localhost:6041/ws", intercept).await;
 
         let taos = TaosBuilder::from_dsn("ws://localhost:8905?conn_timeout=1")?
             .build()
