@@ -189,8 +189,9 @@ jobs:
       - name: Start TDengine
         run: |
           sudo mkdir -p /mnt/taos/data /mnt/taos/log
-          taosd &
-          TAOS_ADAPTER_LOG_PATH=/mnt/taos/log taosadapter &
+          sudo chown -R "$USER":"$(id -gn)" /mnt/taos
+          sudo taosd &
+          sudo TAOS_ADAPTER_LOG_PATH=/mnt/taos/log taosadapter &
           sleep 1
 
       - name: Start Nginx
@@ -214,10 +215,6 @@ jobs:
           RUST_BACKTRACE=1 cargo llvm-cov nextest -j 4 --workspace \
             --features ws-rustls-ring-crypto-provider,test-new-feat,test-tls \
             --lcov --output-path lcov.info --no-fail-fast
-
-      - name: Setup tmate session
-        uses: mxschmitt/action-tmate@v3
-        timeout-minutes: 300
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
