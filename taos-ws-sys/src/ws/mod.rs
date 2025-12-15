@@ -432,15 +432,31 @@ pub unsafe extern "C" fn taos_set_option(
     key: *const c_char,
     value: *const c_char,
 ) {
+    debug!("taos_set_option, options: {options:?}, key: {key:?}, value: {value:?}");
     if options.is_null() || key.is_null() || value.is_null() {
         return;
     }
+
     let opts = &mut *options;
-    if (opts.count as usize) < opts.keys.len() {
-        opts.keys[opts.count as usize] = key;
-        opts.values[opts.count as usize] = value;
-        opts.count += 1;
+    let count = opts.count as usize;
+    if count >= opts.keys.len() {
+        warn!(
+            "taos_set_option overflow, count: {}, capacity: {}",
+            opts.count,
+            opts.keys.len()
+        );
+        return;
     }
+
+    trace!(
+        "taos_set_option insert, index: {count}, key: {}, value: {}",
+        CStr::from_ptr(key).to_string_lossy(),
+        CStr::from_ptr(value).to_string_lossy()
+    );
+
+    opts.keys[opts.count as usize] = key;
+    opts.values[opts.count as usize] = value;
+    opts.count += 1;
 }
 
 const IP: &str = "ip";
@@ -476,7 +492,7 @@ pub unsafe extern "C" fn taos_connect_with(options: *const OPTIONS) -> *mut TAOS
 
 unsafe fn connect_with(options: *const OPTIONS) -> TaosResult<Taos> {
     let dsn = build_dsn_from_options(options)?;
-    tracing::debug!("taos_connect_with, dsn: {dsn}");
+    debug!("taos_connect_with, dsn: {dsn}");
 
     let builder = TaosBuilder::from_dsn(dsn)?;
 
