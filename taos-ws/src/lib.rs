@@ -1180,7 +1180,7 @@ impl ServerCertVerifier for NoServerNameVerification {
 fn parse_ca_to_certs(input: &str) -> Result<Vec<CertificateDer<'static>>, DsnError> {
     use rustls::pki_types::pem::PemObject;
 
-    if input.contains("-----BEGIN CERTIFICATE-----") {
+    if input.starts_with("-----BEGIN CERTIFICATE-----") {
         CertificateDer::pem_slice_iter(input.as_bytes())
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| DsnError::InvalidParam("tls_ca".into(), format!("parse PEM failed: {e}")))
@@ -1703,8 +1703,8 @@ mod tls_tests {
         Ok(())
     }
 
-    #[tokio::test]
     #[cfg(feature = "rustls-aws-lc-crypto-provider")]
+    #[tokio::test]
     async fn test_build_wss_with_tls_versions() -> anyhow::Result<()> {
         let cases = [
             "wss://localhost:6445",
@@ -1720,8 +1720,8 @@ mod tls_tests {
         Ok(())
     }
 
-    #[tokio::test]
     #[cfg(feature = "rustls-aws-lc-crypto-provider")]
+    #[tokio::test]
     async fn test_tls_verify_identity() -> anyhow::Result<()> {
         let tls_ca = include_str!("../tests/certs/ca_verify_identity.crt");
 
@@ -1762,8 +1762,8 @@ mod tls_tests {
         Ok(())
     }
 
-    #[tokio::test]
     #[cfg(feature = "rustls-aws-lc-crypto-provider")]
+    #[tokio::test]
     async fn test_tls_verify_ca() -> anyhow::Result<()> {
         let tls_ca = include_str!("../tests/certs/ca_verify_ca.crt");
 
@@ -1803,8 +1803,8 @@ mod tls_tests {
         Ok(())
     }
 
-    #[tokio::test]
     #[cfg(feature = "rustls-aws-lc-crypto-provider")]
+    #[tokio::test]
     async fn test_tls_san_mismatch() -> anyhow::Result<()> {
         let tls_ca = include_str!("../tests/certs/ca_verify_identity.crt");
         let err = TaosBuilder::from_dsn(format!(
@@ -1819,8 +1819,8 @@ mod tls_tests {
         Ok(())
     }
 
-    #[tokio::test]
     #[cfg(feature = "rustls-aws-lc-crypto-provider")]
+    #[tokio::test]
     async fn test_tlsv12_version_mismatch() -> anyhow::Result<()> {
         let tls_ca = include_str!("../tests/certs/ca_verify_ca.crt");
         let err = TaosBuilder::from_dsn(format!(
@@ -1835,8 +1835,8 @@ mod tls_tests {
         Ok(())
     }
 
-    #[tokio::test]
     #[cfg(feature = "rustls-aws-lc-crypto-provider")]
+    #[tokio::test]
     async fn test_tlsv13_version_mismatch() -> anyhow::Result<()> {
         let tls_ca = include_str!("../tests/certs/ca_verify_ca.crt");
         let err = TaosBuilder::from_dsn(format!(
@@ -1851,8 +1851,8 @@ mod tls_tests {
         Ok(())
     }
 
-    #[tokio::test]
     #[cfg(feature = "rustls-aws-lc-crypto-provider")]
+    #[tokio::test]
     async fn test_tls_ca_mismatch() -> anyhow::Result<()> {
         let tls_ca = include_str!("../tests/certs/ca_mismatch.crt");
         let err = TaosBuilder::from_dsn(format!(
@@ -1933,8 +1933,8 @@ mod tls_tests {
     }
 }
 
-#[cfg(test)]
 #[cfg(feature = "rustls-aws-lc-crypto-provider")]
+#[cfg(test)]
 mod cloud_tests {
     use futures::{SinkExt, StreamExt};
 
