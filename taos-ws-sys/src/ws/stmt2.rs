@@ -1963,7 +1963,7 @@ mod tests {
             })
         };
 
-        WsProxy::start("127.0.0.1:8818", "ws://localhost:6041/ws", intercept_fn).await;
+        WsProxy::start("127.0.0.1:8818", "ws://localhost:6041/ws", intercept_fn).await?;
 
         let n = 10;
         let mut tasks = Vec::with_capacity(n);
@@ -2092,7 +2092,7 @@ mod tests {
             })
         };
 
-        WsProxy::start("127.0.0.1:8819", "ws://localhost:6041/ws", intercept_fn).await;
+        WsProxy::start("127.0.0.1:8819", "ws://localhost:6041/ws", intercept_fn).await?;
 
         let taos = unsafe {
             taos_connect(
@@ -2226,7 +2226,7 @@ mod tests {
             })
         };
 
-        WsProxy::start("127.0.0.1:8821", "ws://localhost:6041/ws", intercept_fn).await;
+        WsProxy::start("127.0.0.1:8821", "ws://localhost:6041/ws", intercept_fn).await?;
 
         unsafe {
             let taos = taos_connect(
