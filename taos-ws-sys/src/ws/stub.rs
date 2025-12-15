@@ -319,6 +319,11 @@ pub extern "C" fn taos_connect_token(
     ptr::null_mut()
 }
 
+#[no_mangle]
+pub extern "C" fn taos_connect_is_alive(taos: *mut TAOS) -> i32 {
+    0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -526,5 +531,8 @@ mod tests {
 
         let taos = taos_connect_token(ptr::null(), ptr::null(), ptr::null(), 0);
         assert_eq!(taos, ptr::null_mut());
+
+        let code = taos_connect_is_alive(ptr::null_mut());
+        assert_eq!(code, 0);
     }
 }
