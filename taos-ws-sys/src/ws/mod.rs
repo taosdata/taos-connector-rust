@@ -1209,6 +1209,84 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_taos_set_option_with_null_options() {
+        unsafe { taos_set_option(ptr::null_mut(), c"ip".as_ptr(), c"localhost".as_ptr()) };
+    }
+
+    #[test]
+    fn test_taos_set_option_with_null_key() {
+        let mut opts = OPTIONS {
+            keys: [ptr::null(); 256],
+            values: [ptr::null(); 256],
+            count: 0,
+        };
+        unsafe { taos_set_option(&mut opts, ptr::null(), c"localhost".as_ptr()) };
+        assert_eq!(opts.count, 0);
+    }
+
+    #[test]
+    fn test_taos_set_option_with_null_value() {
+        let mut opts = super::OPTIONS {
+            keys: [ptr::null(); 256],
+            values: [ptr::null(); 256],
+            count: 0,
+        };
+        unsafe { taos_set_option(&mut opts, c"ip".as_ptr(), ptr::null()) };
+        assert_eq!(opts.count, 0);
+    }
+
+    #[test]
+    fn test_taos_set_option_overflow_count() {
+        let mut opts = OPTIONS {
+            keys: [ptr::null(); 256],
+            values: [ptr::null(); 256],
+            count: 256,
+        };
+        unsafe { taos_set_option(&mut opts, c"ip".as_ptr(), c"localhost".as_ptr()) };
+        assert_eq!(opts.count, 256);
+        assert!(opts.keys[0].is_null());
+        assert!(opts.values[0].is_null());
+        assert!(opts.keys[255].is_null());
+        assert!(opts.values[255].is_null());
+    }
+
+    #[test]
+    fn test_build_dsn_from_options_skip_null_key_or_value() {
+        let mut opts = OPTIONS {
+            keys: [ptr::null(); 256],
+            values: [ptr::null(); 256],
+            count: 3,
+        };
+        opts.keys[1] = c"ip".as_ptr();
+        opts.keys[2] = c"port".as_ptr();
+        opts.values[2] = c"6041".as_ptr();
+
+        unsafe {
+            let dsn = build_dsn_from_options(&opts as *const _).unwrap();
+            assert!(dsn.starts_with("ws://localhost:6041/"));
+        }
+    }
+
+    #[test]
+    fn test_build_dsn_from_options_duplicate_key_overwrite() {
+        let mut opts = OPTIONS {
+            keys: [ptr::null(); 256],
+            values: [ptr::null(); 256],
+            count: 0,
+        };
+        unsafe {
+            taos_set_option(&mut opts, c"ip".as_ptr(), c"127.0.0.1".as_ptr());
+            taos_set_option(&mut opts, c"ip".as_ptr(), c"localhost".as_ptr()); // 覆盖
+            taos_set_option(&mut opts, c"port".as_ptr(), c"6041".as_ptr());
+        }
+
+        unsafe {
+            let dsn = build_dsn_from_options(&opts as *const _).unwrap();
+            assert!(dsn.starts_with("ws://localhost:6041/"));
+        }
+    }
+
     pub(super) fn make_options(kvs: &[(&str, &str)]) -> OPTIONS {
         let mut opts = OPTIONS {
             keys: [ptr::null(); 256],
