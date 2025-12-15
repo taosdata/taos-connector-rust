@@ -81,5 +81,5 @@ jobs:
         run: |
           sed -i 's/crate-type = \["cdylib", "staticlib"\]/crate-type = ["rlib"]/' taos-ws-sys/Cargo.toml
           RUST_BACKTRACE=1 cargo nextest run -j 4 --workspace \
-            --features ws-rustls-aws-lc-crypto-provider,test-tls \
+            --features ws-rustls-ring-crypto-provider,test-tls \
             --no-fail-fast
