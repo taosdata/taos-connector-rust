@@ -359,6 +359,7 @@ pub extern "C" fn taos_init() -> c_int {
     *ONCE.get_or_init(|| {
         if let Err(e) = taos_init_impl() {
             error!("taos_init failed, err: {e:?}");
+            eprintln!("taos_init failed, err: {e:?}");
         }
         0
     })

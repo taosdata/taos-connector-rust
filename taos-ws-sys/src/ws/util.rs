@@ -42,7 +42,7 @@ pub fn resolve_port(host: &str, port: u16) -> u16 {
 
 pub fn camel_to_snake(s: &str) -> String {
     let mut out = String::with_capacity(s.len() * 2);
-    for (i, ch) in s.chars().enumerate() {
+    for ch in s.chars() {
         if ch.is_ascii_uppercase() {
             out.push('_');
             out.push(ch.to_ascii_lowercase());

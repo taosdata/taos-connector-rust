@@ -211,7 +211,7 @@ jobs:
           TDENGINE_CLOUD_TOKEN: ${{ secrets.TDENGINE_CLOUD_TOKEN }}
         run: |
           sed -i 's/crate-type = \["cdylib", "staticlib"\]/crate-type = ["rlib"]/' taos-ws-sys/Cargo.toml
-          RUST_BACKTRACE=1 cargo llvm-cov nextest -j 4 --workspace \
+          RUST_BACKTRACE=1 cargo llvm-cov nextest -j 1 --workspace \
             --features ws-rustls-ring-crypto-provider,test-new-feat,test-tls \
             --lcov --output-path lcov.info --no-fail-fast
 
