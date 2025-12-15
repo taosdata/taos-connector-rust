@@ -31,11 +31,11 @@ jobs:
           sudo cp ./.github/workflows/taos.cfg /etc/taos/taos.cfg
 
       - name: Start TDengine
-        env:
-          TAOS_SUPPORT_VNODES: "256"
         run: |
-          taosd &
-          taosadapter &
+          sudo mkdir -p /mnt/taos/data /mnt/taos/log
+          sudo taosd &
+          sudo TAOS_ADAPTER_LOG_PATH=/mnt/taos/log taosadapter &
+          sleep 1
 
       - name: Start Nginx
         run: |
@@ -80,6 +80,6 @@ jobs:
           TDENGINE_CLOUD_TOKEN: ${{ secrets.TDENGINE_CLOUD_TOKEN }}
         run: |
           sed -i 's/crate-type = \["cdylib", "staticlib"\]/crate-type = ["rlib"]/' taos-ws-sys/Cargo.toml
-          RUST_BACKTRACE=1 cargo nextest run -j 4 --workspace \
+          sudo RUST_BACKTRACE=1 cargo nextest run -j 4 --workspace \
             --features ws-rustls-ring-crypto-provider,test-tls \
             --no-fail-fast

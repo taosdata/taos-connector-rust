@@ -188,9 +188,9 @@ jobs:
 
       - name: Start TDengine
         run: |
-          mkdir -p /tmp/taos/v3/log /tmp/taos/v3/data
+          sudo mkdir -p /mnt/taos/data /mnt/taos/log
           taosd &
-          TAOS_ADAPTER_LOG_PATH=/tmp/taos/v3/log taosadapter &
+          TAOS_ADAPTER_LOG_PATH=/mnt/taos/log taosadapter &
           sleep 1
 
       - name: Start Nginx
@@ -205,19 +205,19 @@ jobs:
           TD_VERSION=3.9.9.9 cargo nextest run -p taos-ws-sys test_taos_get_client_info_injected -- --ignored
           TD_VERSION="$(printf '\xff\xfe')" cargo nextest run -p taos-ws-sys test_taos_get_client_info_default
 
-      - name: Setup tmate session
-        uses: mxschmitt/action-tmate@v3
-        timeout-minutes: 300
-
       - name: Generate code coverage
         env:
           TDENGINE_CLOUD_URL: ${{ secrets.TDENGINE_CLOUD_URL }}
           TDENGINE_CLOUD_TOKEN: ${{ secrets.TDENGINE_CLOUD_TOKEN }}
         run: |
           sed -i 's/crate-type = \["cdylib", "staticlib"\]/crate-type = ["rlib"]/' taos-ws-sys/Cargo.toml
-          RUST_BACKTRACE=1 cargo llvm-cov nextest -j 1 --workspace \
+          RUST_BACKTRACE=1 cargo llvm-cov nextest -j 4 --workspace \
             --features ws-rustls-ring-crypto-provider,test-new-feat,test-tls \
             --lcov --output-path lcov.info --no-fail-fast
+
+      - name: Setup tmate session
+        uses: mxschmitt/action-tmate@v3
+        timeout-minutes: 300
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
