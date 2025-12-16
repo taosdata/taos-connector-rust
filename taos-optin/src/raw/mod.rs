@@ -788,6 +788,14 @@ impl ApiEntry {
         self.version.starts_with('3')
     }
 
+    pub fn ge_v3358(&self) -> bool {
+        let mut version = [0u32; 4];
+        for (i, seg) in self.version.split('.').take(4).enumerate() {
+            version[i] = seg.parse().unwrap_or(0);
+        }
+        version >= [3, 3, 5, 8]
+    }
+
     pub(super) fn options(&self, opt: TSDB_OPTION, val: &str) -> &Self {
         unsafe {
             let val = CString::new(val.as_bytes()).unwrap();

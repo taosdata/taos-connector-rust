@@ -28,6 +28,7 @@ pub(super) mod tmq {
         receiver: Option<flume::Receiver<oneshot::Sender<RawResult<Option<RawRes>>>>>,
         thread_handle: Option<std::thread::JoinHandle<()>>,
         stop_signal: Arc<AtomicBool>,
+        ge_v3358: Arc<AtomicBool>,
     }
 
     unsafe impl Send for RawTmq {}
@@ -41,6 +42,7 @@ pub(super) mod tmq {
             timeout: i64,
         ) -> Self {
             let (sender, receiver) = flume::bounded(1);
+            let ge_v3358 = api.ge_v3358();
             Self {
                 api,
                 tmq_api,
@@ -50,6 +52,7 @@ pub(super) mod tmq {
                 receiver: Some(receiver),
                 thread_handle: None,
                 stop_signal: Arc::new(AtomicBool::new(false)),
+                ge_v3358: Arc::new(AtomicBool::new(ge_v3358)),
             }
         }
 
@@ -180,7 +183,9 @@ pub(super) mod tmq {
             tracing::trace!("poll next message with timeout {}", timeout);
             let res = unsafe { (self.tmq_api.tmq_consumer_poll)(self.as_ptr(), timeout) };
             if res.is_null() {
-                self.api.check(res)?;
+                if self.ge_v3358() {
+                    self.api.check(res)?;
+                }
                 Ok(None)
             } else {
                 Ok(Some(unsafe {
@@ -429,6 +434,10 @@ pub(super) mod tmq {
 
         pub(crate) fn sender(&self) -> &flume::Sender<oneshot::Sender<RawResult<Option<RawRes>>>> {
             &self.sender
+        }
+
+        fn ge_v3358(&self) -> bool {
+            self.ge_v3358.load(Ordering::Relaxed)
         }
     }
 
