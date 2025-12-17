@@ -28,6 +28,7 @@ pub(super) mod tmq {
         receiver: Option<flume::Receiver<oneshot::Sender<RawResult<Option<RawRes>>>>>,
         thread_handle: Option<std::thread::JoinHandle<()>>,
         stop_signal: Arc<AtomicBool>,
+        supports_poll_null_check: bool,
     }
 
     unsafe impl Send for RawTmq {}
@@ -41,6 +42,7 @@ pub(super) mod tmq {
             timeout: i64,
         ) -> Self {
             let (sender, receiver) = flume::bounded(1);
+            let supports_poll_null_check = api.ge_v3358();
             Self {
                 api,
                 tmq_api,
@@ -50,6 +52,7 @@ pub(super) mod tmq {
                 receiver: Some(receiver),
                 thread_handle: None,
                 stop_signal: Arc::new(AtomicBool::new(false)),
+                supports_poll_null_check,
             }
         }
 
@@ -180,7 +183,9 @@ pub(super) mod tmq {
             tracing::trace!("poll next message with timeout {}", timeout);
             let res = unsafe { (self.tmq_api.tmq_consumer_poll)(self.as_ptr(), timeout) };
             if res.is_null() {
-                self.api.check(res)?;
+                if self.supports_poll_null_check {
+                    self.api.check(res)?;
+                }
                 Ok(None)
             } else {
                 Ok(Some(unsafe {
@@ -348,6 +353,7 @@ pub(super) mod tmq {
             let api = self.api.clone();
             let timeout = self.timeout;
             let stop_signal = self.stop_signal.clone();
+            let supports_poll_null_check = self.supports_poll_null_check;
 
             let handle = std::thread::spawn(move || {
                 let safe_tmq = safe_tmq;
@@ -391,9 +397,11 @@ pub(super) mod tmq {
                                     break;
                                 }
 
-                                if let Err(err) = api.check(res) {
-                                    val = Err(err);
-                                    break;
+                                if supports_poll_null_check {
+                                    if let Err(err) = api.check(res) {
+                                        val = Err(err);
+                                        break;
+                                    }
                                 }
                             }
 

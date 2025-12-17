@@ -1402,6 +1402,36 @@ mod tests {
         ])?;
         Ok(())
     }
+
+    #[test]
+    fn test_tmq_recv_timeout() -> anyhow::Result<()> {
+        use taos_query::prelude::sync::*;
+
+        let taos = TaosBuilder::from_dsn("taos://localhost:6030")?.build()?;
+        taos.exec_many([
+            "drop topic if exists topic_1765852570",
+            "drop database if exists test_1765852570",
+            "create database test_1765852570",
+            "create table test_1765852570.t0 (ts timestamp, c1 int)",
+            "create topic topic_1765852570 as select * from test_1765852570.t0",
+        ])?;
+
+        let tmq = TmqBuilder::from_dsn("taos://localhost:6030?group.id=10&timeout=never")?;
+        let mut consumer = tmq.build()?;
+        consumer.subscribe(["topic_1765852570"])?;
+        let res = consumer.recv_timeout(Timeout::from_millis(1))?;
+        assert!(res.is_none());
+        consumer.unsubscribe();
+
+        std::thread::sleep(std::time::Duration::from_secs(3));
+
+        taos.exec_many([
+            "drop topic if exists topic_1765852570",
+            "drop database if exists test_1765852570",
+        ])?;
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
