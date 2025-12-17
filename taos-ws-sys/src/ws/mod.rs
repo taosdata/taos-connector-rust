@@ -434,6 +434,10 @@ pub unsafe extern "C" fn taos_set_option(
 ) {
     debug!("taos_set_option, options: {options:?}, key: {key:?}, value: {value:?}");
     if options.is_null() || key.is_null() || value.is_null() {
+        let _ = set_err_and_get_code(TaosError::new(
+            Code::INVALID_PARA,
+            "options, key or value is null",
+        ));
         return;
     }
 
@@ -445,6 +449,10 @@ pub unsafe extern "C" fn taos_set_option(
             opts.count,
             opts.keys.len()
         );
+        let _ = set_err_and_get_code(TaosError::new(
+            Code::INVALID_PARA,
+            "options capacity exceeded",
+        ));
         return;
     }
 
@@ -1205,7 +1213,11 @@ mod tests {
 
     #[test]
     fn test_taos_set_option_with_null_options() {
-        unsafe { taos_set_option(ptr::null_mut(), c"ip".as_ptr(), c"localhost".as_ptr()) };
+        unsafe {
+            taos_set_option(ptr::null_mut(), c"ip".as_ptr(), c"localhost".as_ptr());
+            let code = taos_errno(ptr::null_mut());
+            assert_eq!(Code::from(code), Code::INVALID_PARA);
+        }
     }
 
     #[test]
@@ -1217,6 +1229,8 @@ mod tests {
         };
         unsafe { taos_set_option(&mut opts, ptr::null(), c"localhost".as_ptr()) };
         assert_eq!(opts.count, 0);
+        let code = unsafe { taos_errno(ptr::null_mut()) };
+        assert_eq!(Code::from(code), Code::INVALID_PARA);
     }
 
     #[test]
@@ -1228,6 +1242,8 @@ mod tests {
         };
         unsafe { taos_set_option(&mut opts, c"ip".as_ptr(), ptr::null()) };
         assert_eq!(opts.count, 0);
+        let code = unsafe { taos_errno(ptr::null_mut()) };
+        assert_eq!(Code::from(code), Code::INVALID_PARA);
     }
 
     #[test]
@@ -1237,12 +1253,16 @@ mod tests {
             values: [ptr::null(); 256],
             count: 256,
         };
+
         unsafe { taos_set_option(&mut opts, c"ip".as_ptr(), c"localhost".as_ptr()) };
         assert_eq!(opts.count, 256);
         assert!(opts.keys[0].is_null());
         assert!(opts.values[0].is_null());
         assert!(opts.keys[255].is_null());
         assert!(opts.values[255].is_null());
+
+        let code = unsafe { taos_errno(ptr::null_mut()) };
+        assert_eq!(Code::from(code), Code::INVALID_PARA);
     }
 
     #[test]
@@ -1258,7 +1278,7 @@ mod tests {
 
         unsafe {
             let dsn = build_dsn_from_options(&opts as *const _).unwrap();
-            assert!(dsn.starts_with("ws://localhost:6041/"));
+            assert!(dsn.starts_with("ws://root:taosdata@localhost:6041/"));
         }
     }
 
@@ -1271,13 +1291,13 @@ mod tests {
         };
         unsafe {
             taos_set_option(&mut opts, c"ip".as_ptr(), c"127.0.0.1".as_ptr());
-            taos_set_option(&mut opts, c"ip".as_ptr(), c"localhost".as_ptr()); // 覆盖
+            taos_set_option(&mut opts, c"ip".as_ptr(), c"localhost".as_ptr());
             taos_set_option(&mut opts, c"port".as_ptr(), c"6041".as_ptr());
         }
 
         unsafe {
             let dsn = build_dsn_from_options(&opts as *const _).unwrap();
-            assert!(dsn.starts_with("ws://localhost:6041/"));
+            assert!(dsn.starts_with("ws://root:taosdata@localhost:6041/"));
         }
     }
 
