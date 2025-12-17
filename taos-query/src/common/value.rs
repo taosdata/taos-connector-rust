@@ -158,7 +158,7 @@ impl BorrowedValue<'_> {
             Float(v) => format!("{v}"),
             Double(v) => format!("{v}"),
             VarChar(v) => format!("\"{}\"", v.escape_debug()),
-            Timestamp(v) => format!("{v}"),
+            Timestamp(v) => format!("\"{v}\""),
             NChar(v) => format!("\"{}\"", v.escape_debug()),
             UTinyInt(v) => format!("{v}"),
             USmallInt(v) => format!("{v}"),

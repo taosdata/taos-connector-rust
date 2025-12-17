@@ -53,11 +53,11 @@ impl WsTmqSender {
 
         let cleanup = || {
             let res = self.queries.remove(&req_id);
-            tracing::trace!("tmq send_recv, clean up queries, req_id: {req_id}, res: {res:?}");
+            tracing::trace!("tmq send_recv, clean up queries, req_id: 0x{req_id:x}, res: {res:?}");
         };
         let _cleanup = CleanUp { f: Some(cleanup) };
 
-        tracing::trace!("tmq send_recv, req_id: {req_id}, sending message: {message:?}");
+        tracing::trace!("tmq send_recv, req_id: 0x{req_id:x}, sending message: {message:?}");
 
         tokio::time::timeout(
             Duration::from_secs(5),
@@ -67,11 +67,11 @@ impl WsTmqSender {
         .map_err(WsTmqError::from)?
         .map_err(WsTmqError::from)?;
 
-        tracing::trace!("tmq send_recv, message sent, waiting for response, req_id: {req_id}");
+        tracing::trace!("tmq send_recv, message sent, waiting for response, req_id: 0x{req_id:x}");
 
         let data = data_rx.recv().await.ok_or(WsTmqError::ChannelClosedError)?;
 
-        tracing::trace!("tmq send_recv, req_id: {req_id}, received data: {data:?}");
+        tracing::trace!("tmq send_recv, req_id: 0x{req_id:x}, received data: {data:?}");
 
         data
     }

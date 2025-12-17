@@ -344,7 +344,7 @@ impl Stmt {
                                     let v: StmtRecv = serde_json::from_str(&text).unwrap();
                                     match v.ok() {
                                         StmtOk::Conn(_) => {
-                                            tracing::warn!("[{req_id}] received connected response in message loop");
+                                            tracing::warn!("[0x{req_id:x}] received connected response in message loop");
                                         },
                                         StmtOk::Init(req_id, stmt_id) => {
                                             tracing::trace!("stmt init done: {{ req_id: {}, stmt_id: {:?}}}", req_id, stmt_id);
@@ -352,7 +352,7 @@ impl Stmt {
                                             {
                                                 sender.send(stmt_id).unwrap();
                                             }  else {
-                                                tracing::trace!("Stmt init failed because req id {req_id} not exist");
+                                                tracing::trace!("Stmt init failed because req id 0x{req_id:x} not exist");
                                             }
                                         }
                                         StmtOk::Stmt(stmt_id, res) => {

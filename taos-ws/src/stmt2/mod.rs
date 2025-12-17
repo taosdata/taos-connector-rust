@@ -268,7 +268,7 @@ impl Stmt2Inner {
         cache.bind_bytes.push(bytes.clone());
         drop(cache);
 
-        tracing::trace!("stmt2 bind, id: {}, req_id: {req_id}", self.id);
+        tracing::trace!("stmt2 bind, id: {}, req_id: 0x{req_id:x}", self.id);
 
         self._bind_bytes(bytes, false).await
     }
@@ -284,7 +284,7 @@ impl Stmt2Inner {
         cache.bind_bytes.push(bytes.clone());
         drop(cache);
 
-        tracing::trace!("stmt2 bind_bytes, id: {}, req_id: {req_id}", self.id);
+        tracing::trace!("stmt2 bind_bytes, id: {}, req_id: 0x{req_id:x}", self.id);
 
         self._bind_bytes(bytes, false).await
     }
@@ -322,7 +322,7 @@ impl Stmt2Inner {
             if self.is_insert() {
                 self.cache.lock().await.bind_bytes.clear();
                 tracing::trace!(
-                    "stmt2 exec insert, clear bind_bytes cache, id: {}, req_id: {req_id}",
+                    "stmt2 exec insert, clear bind_bytes cache, id: {}, req_id: 0x{req_id:x}",
                     self.id
                 );
             }
@@ -392,7 +392,7 @@ impl Stmt2Inner {
         {
             self.cache.lock().await.bind_bytes.clear();
             tracing::trace!(
-                "stmt2 result, clear bind_bytes cache, id: {}, req_id: {req_id}",
+                "stmt2 result, clear bind_bytes cache, id: {}, req_id: 0x{req_id:x}",
                 self.id
             );
 
@@ -540,7 +540,7 @@ impl Stmt2Inner {
     async fn send_request(&self, req: WsSend, recovering: bool) -> RawResult<WsRecvData> {
         let req_id = req.req_id();
         tracing::trace!(
-            "stmt2 send request start, id: {}, req_id: {req_id}, recovering: {recovering}, req: {req:?}",
+            "stmt2 send request start, id: {}, req_id: 0x{req_id:x}, recovering: {recovering}, req: {req:?}",
             self.id
         );
         if !recovering {
@@ -551,7 +551,7 @@ impl Stmt2Inner {
             self.set_complete(true);
         }
         tracing::trace!(
-            "stmt2 send request end, id: {}, req_id: {req_id}, resp: {resp:?}",
+            "stmt2 send request end, id: {}, req_id: 0x{req_id:x}, resp: {resp:?}",
             self.id
         );
         resp

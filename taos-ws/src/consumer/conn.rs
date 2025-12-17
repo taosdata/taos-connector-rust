@@ -438,10 +438,10 @@ async fn parse_text_message(
         _ => {
             if let Some((_, sender)) = queries.remove(&req_id) {
                 if let Err(err) = sender.send(ok.map(|_| data)).await {
-                    tracing::warn!("failed to send data, req_id: {req_id}, err: {err:?}");
+                    tracing::warn!("failed to send data, req_id: 0x{req_id:x}, err: {err:?}");
                 }
             } else {
-                tracing::warn!("no sender found for req_id: {req_id}, the message may be lost");
+                tracing::warn!("no sender found for req_id: 0x{req_id:x}, the message may be lost");
             }
         }
     }
@@ -467,10 +467,10 @@ async fn parse_binary_message(data: Vec<u8>, queries: WsTmqAgent) {
 
     if let Some((_, sender)) = queries.remove(&req_id) {
         if let Err(err) = sender.send(Ok(TmqRecvData::Bytes(bytes.into()))).await {
-            tracing::warn!("failed to send data, req_id: {req_id}, err: {err:?}");
+            tracing::warn!("failed to send data, req_id: 0x{req_id:x}, err: {err:?}");
         }
     } else {
-        tracing::warn!("no sender found for req_id: {req_id}, the message may be lost");
+        tracing::warn!("no sender found for req_id: 0x{req_id:x}, the message may be lost");
     }
 }
 
