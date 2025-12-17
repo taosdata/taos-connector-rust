@@ -1943,13 +1943,6 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_concurrent_conn() -> anyhow::Result<()> {
-        let _ = tracing_subscriber::fmt()
-            .with_file(true)
-            .with_line_number(true)
-            .with_max_level(tracing::Level::ERROR)
-            .compact()
-            .try_init();
-
         let intercept_fn: InterceptFn = {
             Arc::new(move |msg, _ctx| {
                 if let Message::Text(text) = msg {
@@ -1970,7 +1963,7 @@ mod tests {
             })
         };
 
-        WsProxy::start("127.0.0.1:8818", "ws://localhost:6041/ws", intercept_fn).await;
+        let _proxy = WsProxy::start("127.0.0.1:8818", "ws://localhost:6041/ws", intercept_fn).await;
 
         let n = 10;
         let mut tasks = Vec::with_capacity(n);
@@ -2079,13 +2072,6 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_concurrent_stmt2() -> anyhow::Result<()> {
-        let _ = tracing_subscriber::fmt()
-            .with_file(true)
-            .with_line_number(true)
-            .with_max_level(tracing::Level::ERROR)
-            .compact()
-            .try_init();
-
         let intercept_fn: InterceptFn = {
             Arc::new(move |msg, _ctx| {
                 if let Message::Text(text) = msg {
@@ -2106,7 +2092,7 @@ mod tests {
             })
         };
 
-        WsProxy::start("127.0.0.1:8819", "ws://localhost:6041/ws", intercept_fn).await;
+        let _proxy = WsProxy::start("127.0.0.1:8819", "ws://localhost:6041/ws", intercept_fn).await;
 
         let taos = unsafe {
             taos_connect(
@@ -2220,13 +2206,6 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_recover_stmt2() -> anyhow::Result<()> {
-        let _ = tracing_subscriber::fmt()
-            .with_file(true)
-            .with_line_number(true)
-            .with_max_level(tracing::Level::ERROR)
-            .compact()
-            .try_init();
-
         let intercept_fn: InterceptFn = {
             Arc::new(move |msg, _ctx| {
                 if let Message::Text(text) = msg {
@@ -2247,7 +2226,7 @@ mod tests {
             })
         };
 
-        WsProxy::start("127.0.0.1:8821", "ws://localhost:6041/ws", intercept_fn).await;
+        let _proxy = WsProxy::start("127.0.0.1:8821", "ws://localhost:6041/ws", intercept_fn).await;
 
         unsafe {
             let taos = taos_connect(

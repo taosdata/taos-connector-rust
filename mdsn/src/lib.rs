@@ -2035,4 +2035,64 @@ mod tests {
         let res = Dsn::from_str("ws://:::6041");
         assert!(res.is_err(), "incorrect host:port format");
     }
+
+    #[test]
+    fn test_tls() {
+        const TEST_CERT: &str = r"-----BEGIN CERTIFICATE-----
+MIIDvTCCAqWgAwIBAgIUfQjwmIKn4dhLRrmlfu7lmVTVUQkwDQYJKoZIhvcNAQEL
+BQAwbjELMAkGA1UEBhMCQ04xEjAQBgNVBAgMCVlvdXJTdGF0ZTERMA8GA1UEBwwI
+WW91ckNpdHkxEDAOBgNVBAoMB1lvdXJPcmcxETAPBgNVBAsMCFlvdXJVbml0MRMw
+EQYDVQQDDApZb3VyUm9vdENBMB4XDTI1MTExNDA4MDk1N1oXDTM1MTExMjA4MDk1
+N1owbjELMAkGA1UEBhMCQ04xEjAQBgNVBAgMCVlvdXJTdGF0ZTERMA8GA1UEBwwI
+WW91ckNpdHkxEDAOBgNVBAoMB1lvdXJPcmcxETAPBgNVBAsMCFlvdXJVbml0MRMw
+EQYDVQQDDApZb3VyUm9vdENBMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKC
+AQEA1LFgg8JWCzFPlYWcMl7J3HsX1uzoURCFG4//KOpAgTb4zTw5+FmOV2fk8uj9
+quD91IFZz0hGgSW3FstEdfsQh/4v2IHMvMjL6+TFu5E46jg5SlIMSaqaW1/cWKyB
+vyWe7pyHJtQxo2btFioZFqYBw2Xv4q9fXBbMSI0iD/UG7ssgi1xP7e0AAXqOK1BV
+QmEA7kaxvKY1ZXYVHrGZM7+f1PFzHkClU8CnpdRY2vMTmYoc2deNnHUWaa1tEWvC
+8cyLLcXdElM0hn3ZI7nrb3/SCiBOHvXZo8hlundKVVigChpGhiG21WRrXDohhKnu
+cjUoa5bAdEEfsNJc7fnHfRG0WQIDAQABo1MwUTAdBgNVHQ4EFgQUJIS7MbM5ZV+U
+IxW9a7hjSsb6O3IwHwYDVR0jBBgwFoAUJIS7MbM5ZV+UIxW9a7hjSsb6O3IwDwYD
+VR0TAQH/BAUwAwEB/zANBgkqhkiG9w0BAQsFAAOCAQEAjs2RZ898QnJgwVYRFO/t
+pimfluY6xIMs7NfePQyuJdrVgJ6mEUKjrrGTVAUrTtDBKm5AvImhywX7CV4s9c/L
+YBDdS6+aAmPJW1TQsRpQxSoFUxd/bzbiisaUmXcFDsqrM9K2YTj1KjgpLG0H7ENJ
+5oIMZzoyF9DkYqVaDzaotpJJqTcqAd8pYxT9TzKLLCjWWgVjfRfthIZaNZkfC+Hr
+bdPwUC/7TgGTiEVXLm/jAGKhN0kRIrbIzro0MZqJuDW5tmr570lcE4PMUq2/4g2u
+j/p1+4zmwB7F4u64uwBzwcZN5qCcAkfYYxjPbGARED4pA8YVpMx2DqmeYdR5pTj8
+8Q==
+-----END CERTIFICATE-----";
+
+        let dsn = Dsn::from_str(
+            &format!("wss://localhost:6041?tls_mode=verify_ca&tls_version=TLSv1.3,TLSv1.2&tls_ca={TEST_CERT}"),
+        )
+        .unwrap();
+        assert_eq!(dsn.driver, "wss");
+        assert_eq!(dsn.addresses[0].host.as_deref().unwrap(), "localhost");
+        assert_eq!(dsn.addresses[0].port.unwrap(), 6041);
+        assert_eq!(dsn.get("tls_mode").unwrap(), "verify_ca");
+        assert_eq!(dsn.get("tls_version").unwrap(), "TLSv1.3,TLSv1.2");
+        assert_eq!(dsn.get("tls_ca").unwrap(), TEST_CERT);
+
+        let dsn = Dsn::from_str(&format!(
+            "wss://127.0.0.1:6041?tls_ca={TEST_CERT}&tls_mode=verify_identity&tls_version=tlsv1.3"
+        ))
+        .unwrap();
+        assert_eq!(dsn.driver, "wss");
+        assert_eq!(dsn.addresses[0].host.as_deref().unwrap(), "127.0.0.1");
+        assert_eq!(dsn.addresses[0].port.unwrap(), 6041);
+        assert_eq!(dsn.get("tls_mode").unwrap(), "verify_identity");
+        assert_eq!(dsn.get("tls_version").unwrap(), "tlsv1.3");
+        assert_eq!(dsn.get("tls_ca").unwrap(), TEST_CERT);
+
+        let dsn = Dsn::from_str(&format!(
+            "wss://[::1]:6041?tls_mode=verify_ca&tls_ca={TEST_CERT}&tls_version=tlsv1.3,tlsv1.2"
+        ))
+        .unwrap();
+        assert_eq!(dsn.driver, "wss");
+        assert_eq!(dsn.addresses[0].host.as_deref().unwrap(), "[::1]");
+        assert_eq!(dsn.addresses[0].port.unwrap(), 6041);
+        assert_eq!(dsn.get("tls_mode").unwrap(), "verify_ca");
+        assert_eq!(dsn.get("tls_version").unwrap(), "tlsv1.3,tlsv1.2");
+        assert_eq!(dsn.get("tls_ca").unwrap(), TEST_CERT);
+    }
 }

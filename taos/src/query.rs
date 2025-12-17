@@ -1712,7 +1712,7 @@ mod async_tests {
     }
 }
 
-#[cfg(feature = "ws-rustls-aws-lc-crypto-provider")]
+#[cfg(feature = "ws-rustls-ring-crypto-provider")]
 #[cfg(test)]
 mod cloud_tests {
     use taos_query::common::{SchemalessPrecision, SchemalessProtocol, SmlDataBuilder};

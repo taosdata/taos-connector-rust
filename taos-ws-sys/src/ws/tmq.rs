@@ -210,6 +210,9 @@ unsafe fn conf_set(
                         ));
                     }
                 },
+                "ws.tls.mode" => {
+                    let _ = val.parse::<config::WsTlsMode>()?;
+                }
                 _ => {}
             }
             conf.map.insert(key, val);
@@ -402,15 +405,8 @@ unsafe fn consumer_new(conf: *mut tmq_conf_t) -> TaosResult<Tmq> {
                 .get("td.connect.port")
                 .map_or(0, |s| s.parse().unwrap());
 
-            let user = conf
-                .map
-                .get("td.connect.user")
-                .map_or(ws::DEFAULT_USER, |s| s.as_str());
-
-            let pass = conf
-                .map
-                .get("td.connect.pass")
-                .map_or(ws::DEFAULT_PASS, |s| s.as_str());
+            let user = conf.map.get("td.connect.user");
+            let pass = conf.map.get("td.connect.pass");
 
             let addr = if let Some(ip) = ip {
                 let port = util::resolve_port(ip, port);
@@ -423,17 +419,23 @@ unsafe fn consumer_new(conf: *mut tmq_conf_t) -> TaosResult<Tmq> {
                 format!("{host}:{port}")
             };
 
-            let compression = config::compression();
-            let conn_retries = config::conn_retries();
-            let retry_backoff_ms = config::retry_backoff_ms();
-            let retry_backoff_max_ms = config::retry_backoff_max_ms();
+            let ws_tls_mode = conf
+                .map
+                .get("ws.tls.mode")
+                .map(|s| s.parse::<config::WsTlsMode>())
+                .transpose()?;
+            let ws_tls_version = conf.map.get("ws.tls.version");
+            let ws_tls_ca = conf.map.get("ws.tls.ca");
 
-            let dsn = if util::is_cloud_host(&addr) && user == "token" {
-                format!("wss://{addr}?token={pass}&compression={compression}&conn_retries={conn_retries}&retry_backoff_ms={retry_backoff_ms}&retry_backoff_max_ms={retry_backoff_max_ms}")
-            } else {
-                format!("ws://{user}:{pass}@{addr}?compression={compression}&conn_retries={conn_retries}&retry_backoff_ms={retry_backoff_ms}&retry_backoff_max_ms={retry_backoff_max_ms}")
-            };
-
+            let dsn = util::build_dsn(
+                Some(&addr),
+                user.map(|s| s.as_str()),
+                pass.map(|s| s.as_str()),
+                None,
+                ws_tls_mode,
+                ws_tls_version.map(|s| s.as_str()),
+                ws_tls_ca.map(|s| s.as_str()),
+            );
             let mut dsn = Dsn::from_str(&dsn)?;
 
             let mut auto_commit = false;
@@ -2896,12 +2898,6 @@ mod tests {
     #[test]
     fn test_show_consumers() {
         unsafe {
-            let _ = tracing_subscriber::fmt()
-                .with_max_level(tracing::Level::TRACE)
-                .with_line_number(true)
-                .with_file(true)
-                .try_init();
-
             let taos = test_connect();
             test_exec_many(
                 taos,
@@ -2993,12 +2989,6 @@ mod tests {
     #[test]
     fn test_poll_blob() {
         unsafe {
-            let _ = tracing_subscriber::fmt()
-                .with_max_level(tracing::Level::INFO)
-                .with_line_number(true)
-                .with_file(true)
-                .try_init();
-
             let taos = test_connect();
             test_exec_many(
                 taos,
@@ -3091,9 +3081,158 @@ mod tests {
             taos_close(taos);
         }
     }
+
+    #[test]
+    fn test_tmq_consumer_new_wss() {
+        unsafe {
+            let conf = tmq_conf_new();
+            assert!(!conf.is_null());
+
+            let key = c"group.id".as_ptr();
+            let value = c"10".as_ptr();
+            let res = tmq_conf_set(conf, key, value);
+            assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+            let key = c"td.connect.ip".as_ptr();
+            let value = c"localhost".as_ptr();
+            let res = tmq_conf_set(conf, key, value);
+            assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+            let key = c"td.connect.port".as_ptr();
+            let value = c"6445".as_ptr();
+            let res = tmq_conf_set(conf, key, value);
+            assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+            let key = c"ws.tls.mode".as_ptr();
+            let value = c"1".as_ptr();
+            let res = tmq_conf_set(conf, key, value);
+            assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+            let mut errstr = [0; 256];
+            let consumer = tmq_consumer_new(conf, errstr.as_mut_ptr(), errstr.len() as _);
+            assert!(!consumer.is_null());
+
+            tmq_conf_destroy(conf);
+            let code = tmq_consumer_close(consumer);
+            assert_eq!(code, 0);
+        }
+    }
+
+    #[test]
+    fn test_tmq_consumer_new_wss_verify_ca() {
+        unsafe {
+            let ca_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/certs/ca_verify_ca.crt");
+            let tls_ca_path = ca_path.to_str().unwrap();
+
+            let cases = [
+                include_str!("../../tests/certs/ca_verify_ca.crt"),
+                tls_ca_path,
+            ];
+
+            for tls_ca in cases {
+                let conf = tmq_conf_new();
+                assert!(!conf.is_null());
+
+                let key = c"group.id".as_ptr();
+                let value = c"10".as_ptr();
+                let res = tmq_conf_set(conf, key, value);
+                assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+                let key = c"td.connect.ip".as_ptr();
+                let value = c"localhost".as_ptr();
+                let res = tmq_conf_set(conf, key, value);
+                assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+                let key = c"td.connect.port".as_ptr();
+                let value = c"6446".as_ptr();
+                let res = tmq_conf_set(conf, key, value);
+                assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+                let key = c"ws.tls.mode".as_ptr();
+                let value = c"2".as_ptr();
+                let res = tmq_conf_set(conf, key, value);
+                assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+                let key = c"ws.tls.version".as_ptr();
+                let value = c"TLSv1.3".as_ptr();
+                let res = tmq_conf_set(conf, key, value);
+                assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+                let key = c"ws.tls.ca".as_ptr();
+                let value = CString::new(tls_ca).unwrap();
+                let res = tmq_conf_set(conf, key, value.as_ptr());
+                assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+                let mut errstr = [0; 256];
+                let consumer = tmq_consumer_new(conf, errstr.as_mut_ptr(), errstr.len() as _);
+                assert!(!consumer.is_null());
+
+                tmq_conf_destroy(conf);
+                let code = tmq_consumer_close(consumer);
+                assert_eq!(code, 0);
+            }
+        }
+    }
+
+    #[test]
+    fn test_tmq_consumer_new_wss_verify_identity() {
+        unsafe {
+            let ca_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/certs/ca_verify_identity.crt");
+            let tls_ca_path = ca_path.to_str().unwrap();
+
+            let cases = [
+                include_str!("../../tests/certs/ca_verify_identity.crt"),
+                tls_ca_path,
+            ];
+
+            for tls_ca in cases {
+                let conf = tmq_conf_new();
+                assert!(!conf.is_null());
+
+                let key = c"group.id".as_ptr();
+                let value = c"10".as_ptr();
+                let res = tmq_conf_set(conf, key, value);
+                assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+                let key = c"td.connect.ip".as_ptr();
+                let value = c"localhost".as_ptr();
+                let res = tmq_conf_set(conf, key, value);
+                assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+                let key = c"td.connect.port".as_ptr();
+                let value = c"6445".as_ptr();
+                let res = tmq_conf_set(conf, key, value);
+                assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+                let key = c"ws.tls.mode".as_ptr();
+                let value = c"3".as_ptr();
+                let res = tmq_conf_set(conf, key, value);
+                assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+                let key = c"ws.tls.version".as_ptr();
+                let value = c"TLSv1.3".as_ptr();
+                let res = tmq_conf_set(conf, key, value);
+                assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+                let key = c"ws.tls.ca".as_ptr();
+                let value = CString::new(tls_ca).unwrap();
+                let res = tmq_conf_set(conf, key, value.as_ptr());
+                assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+                let mut errstr = [0; 256];
+                let consumer = tmq_consumer_new(conf, errstr.as_mut_ptr(), errstr.len() as _);
+                assert!(!consumer.is_null());
+
+                tmq_conf_destroy(conf);
+                let code = tmq_consumer_close(consumer);
+                assert_eq!(code, 0);
+            }
+        }
+    }
 }
 
-#[cfg(feature = "rustls-aws-lc-crypto-provider")]
 #[cfg(test)]
 mod cloud_tests {
     use std::ffi::CString;
@@ -3108,13 +3247,6 @@ mod cloud_tests {
 
     #[test]
     fn test_tmq_poll() {
-        let _ = tracing_subscriber::fmt()
-            .with_max_level(tracing::Level::INFO)
-            .with_line_number(true)
-            .with_file(true)
-            .compact()
-            .try_init();
-
         let url = std::env::var("TDENGINE_CLOUD_URL");
         if url.is_err() {
             tracing::warn!("TDENGINE_CLOUD_URL is not set, skip test_tmq_poll");

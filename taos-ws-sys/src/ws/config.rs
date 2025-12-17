@@ -8,6 +8,11 @@ use faststr::FastStr;
 use taos_error::Code;
 use tracing::level_filters::LevelFilter;
 
+use crate::ws::{
+    ADAPTER_LIST, COMPRESSION, CONN_RETRIES, RETRY_BACKOFF_MAX_MS, RETRY_BACKOFF_MS, WS_TLS_CA,
+    WS_TLS_MODE, WS_TLS_VERSION,
+};
+
 use super::error::TaosError;
 
 static CONFIG: RwLock<Config> = RwLock::new(Config::new());
@@ -181,6 +186,18 @@ pub fn rotation_size() -> FastStr {
     CONFIG.read().unwrap().rotation_size().clone()
 }
 
+pub fn ws_tls_mode() -> WsTlsMode {
+    CONFIG.read().unwrap().ws_tls_mode()
+}
+
+pub fn ws_tls_version() -> FastStr {
+    CONFIG.read().unwrap().ws_tls_version().clone()
+}
+
+pub fn ws_tls_ca() -> Option<FastStr> {
+    CONFIG.read().unwrap().ws_tls_ca().cloned()
+}
+
 pub fn set_config_dir<T: Into<FastStr>>(cfg_dir: T) {
     CONFIG.write().unwrap().set_config_dir(cfg_dir);
 }
@@ -192,6 +209,14 @@ pub fn set_timezone<T: Into<FastStr>>(timezone: T) {
 pub fn print() {
     CONFIG.read().unwrap().print();
 }
+
+const FQDN: &str = "fqdn";
+const SERVER_PORT: &str = "serverPort";
+const TIMEZONE: &str = "timezone";
+const LOG_DIR: &str = "logDir";
+const LOG_KEEP_DAYS: &str = "logKeepDays";
+const ROTATION_SIZE: &str = "rotationSize";
+const DEBUG_FLAG: &str = "debugFlag";
 
 const DEFAULT_CONFIG_DIR: &str = if cfg!(windows) {
     "C:\\TDengine\\cfg"
@@ -216,6 +241,46 @@ const DEFAULT_RETRY_BACKOFF_MAX_MS: u64 = 2000;
 const DEFAULT_LOG_KEEP_DAYS: u16 = 30;
 const DEFAULT_ROTATION_SIZE: &str = "1GB";
 const DEFAULT_DEBUG_FLAG: u16 = 0;
+const DEFAULT_WS_TLS_MODE: WsTlsMode = WsTlsMode::Disabled;
+const DEFAULT_WS_TLS_VERSION: &str = "TLSv1.3";
+
+#[repr(i32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WsTlsMode {
+    Disabled,
+    Required,
+    VerifyCa,
+    VerifyIdentity,
+}
+
+impl From<WsTlsMode> for i32 {
+    fn from(mode: WsTlsMode) -> Self {
+        mode as i32
+    }
+}
+
+impl std::str::FromStr for WsTlsMode {
+    type Err = TaosError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.trim() {
+            "0" => Ok(WsTlsMode::Disabled),
+            "1" => Ok(WsTlsMode::Required),
+            "2" => Ok(WsTlsMode::VerifyCa),
+            "3" => Ok(WsTlsMode::VerifyIdentity),
+            _ => Err(TaosError::new(
+                Code::INVALID_PARA,
+                &format!("invalid value for {WS_TLS_MODE}: {s}"),
+            )),
+        }
+    }
+}
+
+impl std::fmt::Display for WsTlsMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", *self as i32)
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -233,6 +298,9 @@ pub struct Config {
     retry_backoff_max_ms: Option<u64>,
     log_keep_days: Option<u16>,
     rotation_size: Option<FastStr>,
+    ws_tls_mode: Option<WsTlsMode>,
+    ws_tls_version: Option<FastStr>,
+    ws_tls_ca: Option<FastStr>,
 }
 
 impl Config {
@@ -252,6 +320,9 @@ impl Config {
             retry_backoff_max_ms: None,
             log_keep_days: None,
             rotation_size: None,
+            ws_tls_mode: None,
+            ws_tls_version: None,
+            ws_tls_ca: None,
         }
     }
 
@@ -316,6 +387,19 @@ impl Config {
     fn rotation_size(&self) -> &FastStr {
         static ROTATION_SIZE: FastStr = FastStr::from_static_str(DEFAULT_ROTATION_SIZE);
         self.rotation_size.as_ref().unwrap_or(&ROTATION_SIZE)
+    }
+
+    fn ws_tls_mode(&self) -> WsTlsMode {
+        self.ws_tls_mode.unwrap_or(DEFAULT_WS_TLS_MODE)
+    }
+
+    fn ws_tls_version(&self) -> &FastStr {
+        static WS_TLS_VERSION: FastStr = FastStr::from_static_str(DEFAULT_WS_TLS_VERSION);
+        self.ws_tls_version.as_ref().unwrap_or(&WS_TLS_VERSION)
+    }
+
+    fn ws_tls_ca(&self) -> Option<&FastStr> {
+        self.ws_tls_ca.as_ref()
     }
 
     fn debug_flag(&self) -> Option<u16> {
@@ -414,6 +498,20 @@ impl Config {
         self.rotation_size = Some(size.into());
     }
 
+    fn set_ws_tls_mode(&mut self, mode: &str) -> Result<(), TaosError> {
+        self.ws_tls_mode = Some(mode.parse()?);
+        Ok(())
+    }
+
+    fn set_ws_tls_version<T: Into<FastStr>>(&mut self, version: T) {
+        self.ws_tls_version = Some(version.into());
+    }
+
+    fn set_ws_tls_ca(&mut self, ca: &str) {
+        let ca = ca.replace("\\n", "\n");
+        self.ws_tls_ca = Some(FastStr::new(ca));
+    }
+
     fn load_from_path(&mut self, path: &str) -> Result<(), TaosError> {
         let path = Path::new(path);
         let config_file = if path.is_file() {
@@ -470,7 +568,10 @@ impl Config {
             retry_backoff_ms,
             retry_backoff_max_ms,
             log_keep_days,
-            rotation_size
+            rotation_size,
+            ws_tls_mode,
+            ws_tls_version,
+            ws_tls_ca
         );
     }
 
@@ -488,28 +589,31 @@ impl Config {
             };
         }
 
-        show!(self.adapter_list, "adapterList", "");
+        show!(self.adapter_list, ADAPTER_LIST, "");
         show!(
             self.compression.map(|b| b as u8),
-            "compression",
+            COMPRESSION,
             DEFAULT_COMPRESSION as u8
         );
-        show!(self.timezone, "timezone", DEFAULT_TIMEZONE);
-        show!(self.log_dir, "logDir", DEFAULT_LOG_DIR);
-        show!(self.debug_flag(), "debugFlag", DEFAULT_DEBUG_FLAG);
-        show!(self.log_keep_days, "logKeepDays", DEFAULT_LOG_KEEP_DAYS);
-        show!(self.rotation_size, "rotationSize", DEFAULT_ROTATION_SIZE);
-        show!(self.conn_retries, "connRetries", DEFAULT_CONN_RETRIES);
+        show!(self.timezone, TIMEZONE, DEFAULT_TIMEZONE);
+        show!(self.log_dir, LOG_DIR, DEFAULT_LOG_DIR);
+        show!(self.debug_flag(), DEBUG_FLAG, DEFAULT_DEBUG_FLAG);
+        show!(self.log_keep_days, LOG_KEEP_DAYS, DEFAULT_LOG_KEEP_DAYS);
+        show!(self.rotation_size, ROTATION_SIZE, DEFAULT_ROTATION_SIZE);
+        show!(self.conn_retries, CONN_RETRIES, DEFAULT_CONN_RETRIES);
         show!(
             self.retry_backoff_ms,
-            "retryBackoffMs",
+            RETRY_BACKOFF_MS,
             DEFAULT_RETRY_BACKOFF_MS
         );
         show!(
             self.retry_backoff_max_ms,
-            "retryBackoffMaxMs",
+            RETRY_BACKOFF_MAX_MS,
             DEFAULT_RETRY_BACKOFF_MAX_MS
         );
+        show!(self.ws_tls_mode, WS_TLS_MODE, DEFAULT_WS_TLS_MODE);
+        show!(self.ws_tls_version, WS_TLS_VERSION, DEFAULT_WS_TLS_VERSION);
+        show!(self.ws_tls_ca, WS_TLS_CA, "");
 
         tracing::info!("{}", "=".repeat(76));
     }
@@ -544,66 +648,70 @@ fn parse_config(lines: Vec<String>) -> Result<Config, TaosError> {
         if let Some((key, value)) = line.split_once(char::is_whitespace) {
             let value = value.trim();
             match key {
-                "compression" => match value {
-                    "1" => config.compression = Some(true),
-                    "0" => config.compression = Some(false),
+                COMPRESSION => match value {
+                    "1" => config.set_compression(true),
+                    "0" => config.set_compression(false),
                     _ => {
                         return Err(TaosError::new(
                             Code::INVALID_PARA,
-                            &format!("invalid value for compression: {value}"),
+                            &format!("invalid value for {COMPRESSION}: {value}"),
                         ));
                     }
                 },
-                "logDir" => config.log_dir = Some(value.to_string().into()),
-                "debugFlag" => config.set_debug_flag(value),
-                "timezone" => config.set_timezone::<FastStr>(value.to_string().into()),
-                "fqdn" => config.fqdn = Some(value.to_string().into()),
-                "serverPort" => {
-                    config.server_port = Some(value.parse::<u16>().map_err(|_| {
+                LOG_DIR => config.set_log_dir(value.to_string()),
+                DEBUG_FLAG => config.set_debug_flag(value),
+                TIMEZONE => config.set_timezone(value.to_string()),
+                FQDN => config.set_fqdn(value.to_string()),
+                SERVER_PORT => {
+                    let server_port = value.parse::<u16>().map_err(|_| {
                         TaosError::new(
                             Code::INVALID_PARA,
-                            &format!("invalid value for serverPort: {value}"),
+                            &format!("invalid value for {SERVER_PORT}: {value}"),
                         )
-                    })?);
+                    })?;
+                    config.set_server_port(server_port);
                 }
-                "adapterList" => {
-                    config.adapter_list = Some(value.to_string().into());
-                }
-                "connRetries" => {
-                    config.conn_retries = Some(value.parse::<u32>().map_err(|_| {
+                ADAPTER_LIST => config.set_adapter_list(value.to_string()),
+                CONN_RETRIES => {
+                    let conn_retries = value.parse::<u32>().map_err(|_| {
                         TaosError::new(
                             Code::INVALID_PARA,
-                            &format!("invalid value for connRetries: {value}"),
+                            &format!("invalid value for {CONN_RETRIES}: {value}"),
                         )
-                    })?);
+                    })?;
+                    config.set_conn_retries(conn_retries);
                 }
-                "retryBackoffMs" => {
-                    config.retry_backoff_ms = Some(value.parse::<u64>().map_err(|_| {
+                RETRY_BACKOFF_MS => {
+                    let retry_backoff_ms = value.parse::<u64>().map_err(|_| {
                         TaosError::new(
                             Code::INVALID_PARA,
-                            &format!("invalid value for retryBackoffMs: {value}"),
+                            &format!("invalid value for {RETRY_BACKOFF_MS}: {value}"),
                         )
-                    })?);
+                    })?;
+                    config.set_retry_backoff_ms(retry_backoff_ms);
                 }
-                "retryBackoffMaxMs" => {
-                    config.retry_backoff_max_ms = Some(value.parse::<u64>().map_err(|_| {
+                RETRY_BACKOFF_MAX_MS => {
+                    let retry_backoff_max_ms = value.parse::<u64>().map_err(|_| {
                         TaosError::new(
                             Code::INVALID_PARA,
-                            &format!("invalid value for retryBackoffMaxMs: {value}"),
+                            &format!("invalid value for {RETRY_BACKOFF_MAX_MS}: {value}"),
                         )
-                    })?);
+                    })?;
+                    config.set_retry_backoff_max_ms(retry_backoff_max_ms);
                 }
-                "logKeepDays" => {
-                    config.log_keep_days = Some(value.parse::<u16>().map_err(|_| {
+                LOG_KEEP_DAYS => {
+                    let log_keep_days = value.parse::<u16>().map_err(|_| {
                         TaosError::new(
                             Code::INVALID_PARA,
-                            &format!("invalid value for logKeepDays: {value}"),
+                            &format!("invalid value for {LOG_KEEP_DAYS}: {value}"),
                         )
-                    })?);
+                    })?;
+                    config.set_log_keep_days(log_keep_days);
                 }
-                "rotationSize" => {
-                    config.rotation_size = Some(value.to_string().into());
-                }
+                ROTATION_SIZE => config.set_rotation_size(value.to_string()),
+                WS_TLS_MODE => config.set_ws_tls_mode(value)?,
+                WS_TLS_VERSION => config.set_ws_tls_version(value.to_string()),
+                WS_TLS_CA => config.set_ws_tls_ca(value),
                 _ => {}
             }
         }
@@ -621,7 +729,7 @@ mod tests {
 
     #[test]
     fn test_read_config_from_path() {
-        let config = read_config_from_path("./tests/taos.cfg".as_ref()).unwrap();
+        let config = read_config_from_path("./tests/cfg/taos.cfg".as_ref()).unwrap();
         assert_eq!(config.compression(), true);
         assert_eq!(config.log_dir(), "/path/to/logDir/");
         assert_eq!(config.log_level(), LevelFilter::DEBUG);
@@ -635,13 +743,16 @@ mod tests {
         assert_eq!(config.retry_backoff_max_ms(), 2000);
         assert_eq!(config.log_keep_days(), 30);
         assert_eq!(config.rotation_size(), "1GB");
+        assert_eq!(config.ws_tls_mode(), WsTlsMode::Disabled);
+        assert_eq!(config.ws_tls_version(), &FastStr::from("TLSv1.3"));
+        assert_eq!(config.ws_tls_ca(), None);
     }
 
     #[test]
     fn test_config_load_from_path() -> Result<(), TaosError> {
         {
             let mut config = Config::new();
-            config.load_from_path("./tests")?;
+            config.load_from_path("./tests/cfg")?;
             assert_eq!(config.compression(), true);
             assert_eq!(config.log_dir(), "/path/to/logDir/");
             assert_eq!(config.log_level(), LevelFilter::DEBUG);
@@ -655,11 +766,14 @@ mod tests {
             assert_eq!(config.retry_backoff_max_ms(), 2000);
             assert_eq!(config.log_keep_days(), 30);
             assert_eq!(config.rotation_size(), "1GB");
+            assert_eq!(config.ws_tls_mode(), WsTlsMode::Disabled);
+            assert_eq!(config.ws_tls_version(), &FastStr::from("TLSv1.3"));
+            assert_eq!(config.ws_tls_ca(), None);
         }
 
         {
             let mut config = Config::new();
-            config.load_from_path("./tests/taos.cfg")?;
+            config.load_from_path("./tests/cfg/taos.cfg")?;
             assert_eq!(config.compression(), true);
             assert_eq!(config.log_dir(), "/path/to/logDir/");
             assert_eq!(config.log_level(), LevelFilter::DEBUG);
@@ -673,6 +787,9 @@ mod tests {
             assert_eq!(config.retry_backoff_max_ms(), 2000);
             assert_eq!(config.log_keep_days(), 30);
             assert_eq!(config.rotation_size(), "1GB");
+            assert_eq!(config.ws_tls_mode(), WsTlsMode::Disabled);
+            assert_eq!(config.ws_tls_version(), &FastStr::from("TLSv1.3"));
+            assert_eq!(config.ws_tls_ca(), None);
         }
 
         Ok(())
@@ -685,7 +802,7 @@ mod tests {
             let code = taos_options(TSDB_OPTION::TSDB_OPTION_TIMEZONE, timezone.as_ptr() as _);
             assert_eq!(code, 0);
 
-            let config_dir = c"./tests/taos.cfg";
+            let config_dir = c"./tests/cfg/taos.cfg";
             let code = taos_options(TSDB_OPTION::TSDB_OPTION_CONFIGDIR, config_dir.as_ptr() as _);
             assert_eq!(code, 0);
         }
@@ -723,7 +840,33 @@ mod tests {
         assert_eq!(retry_backoff_max_ms(), 1000);
         assert_eq!(log_keep_days(), 30);
         assert_eq!(rotation_size(), FastStr::from("1GB"));
+        assert_eq!(ws_tls_mode(), WsTlsMode::Disabled);
+        assert_eq!(ws_tls_version(), FastStr::from("TLSv1.3"));
+        assert_eq!(ws_tls_ca(), None);
 
         Ok(())
+    }
+
+    #[test]
+    fn test_ws_tls_mode() {
+        use std::str::FromStr;
+
+        assert_eq!(i32::from(WsTlsMode::Disabled), 0);
+        assert_eq!(i32::from(WsTlsMode::Required), 1);
+        assert_eq!(i32::from(WsTlsMode::VerifyCa), 2);
+        assert_eq!(i32::from(WsTlsMode::VerifyIdentity), 3);
+
+        assert_eq!(WsTlsMode::Disabled.to_string(), "0");
+        assert_eq!(WsTlsMode::Required.to_string(), "1");
+        assert_eq!(WsTlsMode::VerifyCa.to_string(), "2");
+        assert_eq!(WsTlsMode::VerifyIdentity.to_string(), "3");
+
+        assert_eq!(WsTlsMode::from_str("0").unwrap(), WsTlsMode::Disabled);
+        assert_eq!(WsTlsMode::from_str("1").unwrap(), WsTlsMode::Required);
+        assert_eq!(WsTlsMode::from_str("2").unwrap(), WsTlsMode::VerifyCa);
+        assert_eq!(WsTlsMode::from_str("3").unwrap(), WsTlsMode::VerifyIdentity);
+
+        let err = WsTlsMode::from_str("9").unwrap_err();
+        assert_eq!(err.code(), Code::INVALID_PARA);
     }
 }

@@ -482,6 +482,8 @@ mod tests {
         ) {
         }
 
+        taos_fetch_ip_whitelist_a_cb(ptr::null_mut(), 0, ptr::null_mut(), 0, ptr::null_mut());
+
         taos_fetch_ip_whitelist_a(
             ptr::null_mut(),
             taos_fetch_ip_whitelist_a_cb,
@@ -497,6 +499,8 @@ mod tests {
             pWhiteLists: *mut *mut c_char,
         ) {
         }
+
+        taos_fetch_datetime_whitelist_a_cb(ptr::null_mut(), 0, ptr::null_mut(), 0, ptr::null_mut());
 
         taos_fetch_datetime_whitelist_a(
             ptr::null_mut(),
