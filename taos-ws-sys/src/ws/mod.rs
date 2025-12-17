@@ -676,7 +676,7 @@ unsafe fn build_dsn_from_options(options: *const OPTIONS) -> TaosResult<String> 
         params.push_str(value);
     }
 
-    Ok(format!("{protocol}://{addr}/{db}?{params}"))
+    Ok(format!("{protocol}://{user}:{pass}@{addr}/{db}?{params}"))
 }
 
 #[derive(Debug)]
