@@ -566,15 +566,9 @@ unsafe fn build_dsn_from_options(options: *const OPTIONS) -> TaosResult<String> 
     let pass = map.remove(PASS).unwrap_or(DEFAULT_PASS);
     let db = map.remove(DB).unwrap_or(DEFAULT_DB);
 
-    let port = match map.remove(PORT) {
-        Some(s) => s.parse::<u16>().map_err(|_| {
-            TaosError::new(
-                Code::INVALID_PARA,
-                &format!("invalid value for {PORT}: {s}"),
-            )
-        })?,
-        None => 0,
-    };
+    let port = map
+        .remove(PORT)
+        .map_or(0, |s| s.parse::<u16>().unwrap_or(0));
 
     let addr = match map.remove(ADAPTER_LIST) {
         Some(addr) => {
@@ -1379,9 +1373,8 @@ mod tests {
         unsafe {
             let opts = make_options(&[(IP, "localhost"), (PORT, "not_a_number")]);
             let taos = taos_connect_with(&opts as *const _);
-            assert!(taos.is_null());
-            let code = taos_errno(ptr::null_mut());
-            assert_eq!(Code::from(code), Code::INVALID_PARA);
+            assert!(!taos.is_null());
+            taos_close(taos);
             free_options(&opts);
         }
     }
