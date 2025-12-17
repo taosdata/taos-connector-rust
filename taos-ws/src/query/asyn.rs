@@ -1067,6 +1067,7 @@ pub enum WS_ERROR_NO {
     UNAUTHORIZED = 0xE006,
     DE_ERROR = 0xE007,
     WEBSOCKET_DISCONNECTED = 0xE008,
+    TLS_ERROR = 0xE009,
 }
 
 impl WS_ERROR_NO {
@@ -1806,7 +1807,7 @@ mod tests {
     }
 }
 
-#[cfg(feature = "rustls-aws-lc-crypto-provider")]
+#[cfg(feature = "rustls-ring-crypto-provider")]
 #[cfg(test)]
 mod cloud_tests {
     use futures::TryStreamExt;

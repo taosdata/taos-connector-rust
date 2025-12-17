@@ -21,6 +21,7 @@ jobs:
       - name: Install TDengine
         run: |
           tar -zxf TDengine-server-3.3.6.0-Linux-x64.tar.gz
+          rm -rf TDengine-server-3.3.6.0-Linux-x64.tar.gz
           cd TDengine-server-3.3.6.0
           sudo ./install.sh -e no
 
@@ -30,11 +31,19 @@ jobs:
           sudo cp ./.github/workflows/taos.cfg /etc/taos/taos.cfg
 
       - name: Start TDengine
-        env:
-          TAOS_SUPPORT_VNODES: "256"
         run: |
+          sudo mkdir -p /mnt/taos/data /mnt/taos/log
+          sudo chown -R "$USER":"$(id -gn)" /mnt/taos
           taosd &
-          taosadapter &
+          TAOS_ADAPTER_LOG_PATH=/mnt/taos/log taosadapter &
+          sleep 1
+
+      - name: Start Nginx
+        run: |
+          sudo nginx -p "$PWD" -c taos-ws/tests/nginx/tls12.conf
+          sudo nginx -p "$PWD" -c taos-ws/tests/nginx/tls13.conf
+          sudo nginx -p "$PWD" -c taos-ws/tests/nginx/verify_ca.conf
+          sudo nginx -p "$PWD" -c taos-ws/tests/nginx/verify_identity.conf
 
       - name: Set up Rust
         id: setup-rust
@@ -70,4 +79,8 @@ jobs:
         env:
           TDENGINE_CLOUD_URL: ${{ secrets.TDENGINE_CLOUD_URL }}
           TDENGINE_CLOUD_TOKEN: ${{ secrets.TDENGINE_CLOUD_TOKEN }}
-        run: RUST_BACKTRACE=1 cargo nextest run -j 4 --workspace --features ws-rustls-aws-lc-crypto-provider --no-fail-fast
+        run: |
+          sed -i 's/crate-type = \["cdylib", "staticlib"\]/crate-type = ["rlib"]/' taos-ws-sys/Cargo.toml
+          RUST_BACKTRACE=1 cargo nextest run -j 4 --workspace \
+            --features ws-rustls-ring-crypto-provider,test-tls \
+            --no-fail-fast

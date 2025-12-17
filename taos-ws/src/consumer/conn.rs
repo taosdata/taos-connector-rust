@@ -923,7 +923,8 @@ mod tests {
             })
         };
 
-        WsProxy::start("127.0.0.1:8907", "ws://localhost:6041/rest/tmq", intercept).await;
+        let _proxy =
+            WsProxy::start("127.0.0.1:8907", "ws://localhost:6041/rest/tmq", intercept).await;
 
         let taos = TaosBuilder::from_dsn("ws://localhost:6041")?
             .build()
@@ -988,7 +989,8 @@ mod tests {
             })
         };
 
-        WsProxy::start("127.0.0.1:8908", "ws://localhost:6041/rest/tmq", intercept).await;
+        let _proxy =
+            WsProxy::start("127.0.0.1:8908", "ws://localhost:6041/rest/tmq", intercept).await;
 
         let taos = TaosBuilder::from_dsn("ws://localhost:6041")?
             .build()

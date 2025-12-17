@@ -2446,6 +2446,7 @@ mod tests {
             execute!(b"drop database if exists ws_bi_mode\0");
         }
     }
+
     #[test]
     fn test_schemaless() {
         init_env();
@@ -2598,7 +2599,6 @@ mod tests {
     }
 }
 
-#[cfg(feature = "rustls-aws-lc-crypto-provider")]
 #[cfg(test)]
 mod cloud_tests {
     use super::*;

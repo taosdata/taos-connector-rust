@@ -746,7 +746,7 @@ mod tests {
             })
         };
 
-        WsProxy::start("127.0.0.1:8900", "ws://localhost:6041/ws", intercept).await;
+        let _proxy = WsProxy::start("127.0.0.1:8900", "ws://localhost:6041/ws", intercept).await;
 
         let taos = TaosBuilder::from_dsn("ws://localhost:8900?read_timeout=1")?
             .build()

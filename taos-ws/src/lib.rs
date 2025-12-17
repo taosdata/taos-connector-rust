@@ -1,5 +1,13 @@
 #![recursion_limit = "256"]
 
+use std::cmp;
+use std::fmt::{Debug, Display};
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::Arc;
+use std::time::Duration;
+
 use chrono_tz::Tz;
 use dashmap::DashMap;
 use futures::stream::{SplitSink, SplitStream};
@@ -9,13 +17,10 @@ use once_cell::sync::OnceCell;
 use query::Error as QueryError;
 use rand::seq::SliceRandom;
 use rand::Rng;
-use std::cmp;
-use std::fmt::{Debug, Display};
-use std::future::Future;
-use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::Arc;
-use std::time::Duration;
+use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
+use rustls::client::WebPkiServerVerifier;
+use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
+use rustls::{ClientConfig, DigitallySignedStruct};
 use taos_query::prelude::Code;
 use taos_query::util::{generate_req_id, Edition};
 use taos_query::{DsnError, IntoDsn, RawError, RawResult};
@@ -41,7 +46,9 @@ pub use query::{ResultSet, Taos};
 pub(crate) use taos_query::block_in_place_or_global;
 use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
-use tokio_tungstenite::{connect_async_with_config, MaybeTlsStream, WebSocketStream};
+use tokio_tungstenite::{
+    connect_async_tls_with_config, Connector, MaybeTlsStream, WebSocketStream,
+};
 
 use crate::query::asyn::WS_ERROR_NO;
 use crate::query::messages::{ToMessage, WsRecv, WsRecvData, WsSend};
@@ -70,6 +77,49 @@ struct RetryPolicy {
     backoff_max_ms: u64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TlsMode {
+    VerifyCa,
+    VerifyIdentity,
+}
+
+impl std::str::FromStr for TlsMode {
+    type Err = DsnError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "verify_ca" => Ok(TlsMode::VerifyCa),
+            "verify_identity" => Ok(TlsMode::VerifyIdentity),
+            _ => Err(DsnError::InvalidParam("tls_mode".into(), s.into())),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+enum TlsVersion {
+    TLSv1_2,
+    TLSv1_3,
+}
+
+impl std::str::FromStr for TlsVersion {
+    type Err = DsnError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "tlsv1.2" => Ok(TlsVersion::TLSv1_2),
+            "tlsv1.3" => Ok(TlsVersion::TLSv1_3),
+            _ => Err(DsnError::InvalidParam("tls_version".into(), s.into())),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct TlsConfig {
+    mode: Option<TlsMode>,
+    versions: Option<Vec<TlsVersion>>,
+    certs: Option<Vec<CertificateDer<'static>>>,
+}
+
 #[derive(Debug, Clone)]
 pub struct TaosBuilder {
     https: Arc<AtomicBool>,
@@ -87,6 +137,9 @@ pub struct TaosBuilder {
     read_timeout: Duration,
     conn_timeout: Duration,
     version_prefer: String,
+    user_ip: Option<String>,
+    user_app: Option<String>,
+    tls_config: Option<TlsConfig>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -395,13 +448,13 @@ impl TaosBuilder {
     pub fn from_dsn<T: IntoDsn>(dsn: T) -> RawResult<Self> {
         let mut dsn = dsn.into_dsn()?;
 
-        let https = match (dsn.driver.as_str(), dsn.protocol.as_deref()) {
+        let is_https = match (dsn.driver.as_str(), dsn.protocol.as_deref()) {
             ("ws" | "http", _) | ("taos" | "taosws" | "tmq", Some("ws" | "http") | None) => false,
             ("wss" | "https", _) | ("taos" | "taosws" | "tmq", Some("wss" | "https")) => true,
             _ => Err(DsnError::InvalidDriver(dsn.to_string()))?,
         };
 
-        let https = Arc::new(AtomicBool::new(https));
+        let https = Arc::new(AtomicBool::new(is_https));
 
         let conn_mode = match dsn.params.get("conn_mode") {
             Some(s) => match s.parse::<u32>() {
@@ -501,6 +554,38 @@ impl TaosBuilder {
             }
         };
 
+        let user_ip = dsn.remove("user_ip").map(|s| s.trim().to_string());
+        let user_app = dsn.remove("user_app").map(|s| s.trim().to_string());
+
+        let tls_config = if is_https {
+            let mode = dsn.remove("tls_mode").map(|s| s.parse()).transpose()?;
+
+            let versions = dsn
+                .remove("tls_version")
+                .map(|s| s.split(',').map(|s| s.parse()).collect())
+                .transpose()?;
+
+            let certs = if mode.is_some() {
+                match dsn.remove("tls_ca").as_deref().map(str::trim) {
+                    None | Some("") => return Err(DsnError::RequireParam("tls_ca".into()).into()),
+                    Some(tls_ca) => Some(parse_ca_to_certs(tls_ca)?),
+                }
+            } else {
+                None
+            };
+
+            match (mode, versions, certs) {
+                (None, None, None) => None,
+                (mode, versions, certs) => Some(TlsConfig {
+                    mode,
+                    versions,
+                    certs,
+                }),
+            }
+        } else {
+            None
+        };
+
         let auth = if let Some(token) = token {
             WsAuth::Token(token)
         } else {
@@ -525,6 +610,9 @@ impl TaosBuilder {
             read_timeout,
             conn_timeout,
             version_prefer,
+            user_ip,
+            user_app,
+            tls_config,
         })
     }
 
@@ -574,19 +662,21 @@ impl TaosBuilder {
         }
 
         let mut last_err = None;
+        let connector = self.build_tls_connector()?;
 
         for _ in 0..self.addrs.len() {
             let mut url = self.to_url(ty);
             for i in 0..=self.retry_policy.retries {
                 tracing::trace!("connecting to TDengine WebSocket server, url: {url}");
-                match connect_async_with_config(&url, Some(config), false).await {
+                match connect_async_tls_with_config(
+                    &url,
+                    Some(config),
+                    self.tcp_nodelay,
+                    connector.clone(),
+                )
+                .await
+                {
                     Ok((mut ws_stream, _)) => {
-                        if self.tcp_nodelay {
-                            if let Err(err) = self.enable_tcp_nodelay(&ws_stream) {
-                                tracing::warn!("failed to enable TCP_NODELAY: {err}");
-                            }
-                        }
-
                         if ty == EndpointType::Stmt {
                             return Ok((ws_stream, String::new()));
                         }
@@ -680,15 +770,65 @@ impl TaosBuilder {
         }
     }
 
-    fn enable_tcp_nodelay(&self, ws: &WsStream) -> std::io::Result<()> {
-        match ws.get_ref() {
-            MaybeTlsStream::Plain(s) => s.set_nodelay(true),
-            #[cfg(feature = "rustls")]
-            MaybeTlsStream::Rustls(s) => s.get_ref().0.set_nodelay(true),
-            #[cfg(feature = "native-tls")]
-            MaybeTlsStream::NativeTls(s) => s.get_ref().get_ref().get_ref().set_nodelay(true),
-            _ => Ok(()),
+    fn build_tls_connector(&self) -> RawResult<Option<Connector>> {
+        if self.tls_config.is_none() {
+            return Ok(None);
         }
+
+        let tls_cfg = self.tls_config.as_ref().unwrap();
+        let protocol_versions = match &tls_cfg.versions {
+            Some(versions) => {
+                let mut protocol_versions = Vec::with_capacity(versions.len());
+                for version in versions {
+                    match version {
+                        TlsVersion::TLSv1_2 => protocol_versions.push(&rustls::version::TLS12),
+                        TlsVersion::TLSv1_3 => protocol_versions.push(&rustls::version::TLS13),
+                    }
+                }
+                protocol_versions
+            }
+            None => vec![&rustls::version::TLS13],
+        };
+
+        let mut root_store = rustls::RootCertStore::empty();
+        if tls_cfg.mode.is_some() {
+            if let Some(certs) = &tls_cfg.certs {
+                let (num_added, num_ignored) =
+                    root_store.add_parsable_certificates(certs.iter().cloned());
+                tracing::trace!("added {num_added} valid certificates, ignored {num_ignored} invalid certificates");
+                if num_ignored > 0 {
+                    return Err(RawError::new(
+                        WS_ERROR_NO::TLS_ERROR.as_code(),
+                        format!("provided {num_ignored} CA certificates are invalid"),
+                    ));
+                }
+            }
+        }
+
+        let root_store = Arc::new(root_store);
+        let mut client_config = ClientConfig::builder_with_protocol_versions(&protocol_versions)
+            .with_root_certificates(root_store.clone())
+            .with_no_client_auth();
+
+        if let Some(mode) = tls_cfg.mode {
+            if mode == TlsMode::VerifyCa {
+                let inner = WebPkiServerVerifier::builder(root_store)
+                    .build()
+                    .map_err(|e| {
+                        RawError::new(
+                            WS_ERROR_NO::TLS_ERROR.as_code(),
+                            format!("failed to build WebPkiServerVerifier: {e}"),
+                        )
+                    })?;
+                let verifier = Arc::new(NoServerNameVerification::new(inner));
+                client_config.dangerous().set_certificate_verifier(verifier);
+            }
+        } else {
+            let verifier = Arc::new(NoCertificateVerification {});
+            client_config.dangerous().set_certificate_verifier(verifier);
+        }
+
+        Ok(Some(Connector::Rustls(Arc::new(client_config))))
     }
 
     async fn send_version_request(&self, ws_stream: &mut WsStream) -> RawResult<Version> {
@@ -828,6 +968,8 @@ impl TaosBuilder {
             db: self.database.clone(),
             mode: (self.conn_mode == Some(1)).then_some(0), // for adapter, 0 is bi mode
             tz: self.tz.map(|s| s.to_string()),
+            ip: self.user_ip.clone(),
+            app: self.user_app.clone(),
         }
     }
 
@@ -911,6 +1053,149 @@ fn handle_disconnect_error(err: WsError) -> RawError {
     }
 }
 
+#[derive(Debug)]
+pub struct NoCertificateVerification;
+
+impl ServerCertVerifier for NoCertificateVerification {
+    fn verify_server_cert(
+        &self,
+        _end_entity: &CertificateDer<'_>,
+        _intermediates: &[CertificateDer<'_>],
+        _server_name: &ServerName<'_>,
+        _ocsp_response: &[u8],
+        _now: UnixTime,
+    ) -> Result<ServerCertVerified, rustls::Error> {
+        Ok(ServerCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        _message: &[u8],
+        _cert: &CertificateDer<'_>,
+        _dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, rustls::Error> {
+        Ok(HandshakeSignatureValid::assertion())
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        _message: &[u8],
+        _cert: &CertificateDer<'_>,
+        _dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, rustls::Error> {
+        Ok(HandshakeSignatureValid::assertion())
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+        use rustls::SignatureScheme::*;
+        vec![
+            RSA_PKCS1_SHA1,
+            ECDSA_SHA1_Legacy,
+            RSA_PKCS1_SHA256,
+            ECDSA_NISTP256_SHA256,
+            RSA_PKCS1_SHA384,
+            ECDSA_NISTP384_SHA384,
+            RSA_PKCS1_SHA512,
+            ECDSA_NISTP521_SHA512,
+            RSA_PSS_SHA256,
+            RSA_PSS_SHA384,
+            RSA_PSS_SHA512,
+            ED25519,
+            ED448,
+        ]
+    }
+}
+
+#[derive(Debug)]
+pub struct NoServerNameVerification {
+    inner: Arc<WebPkiServerVerifier>,
+}
+
+impl NoServerNameVerification {
+    pub fn new(inner: Arc<WebPkiServerVerifier>) -> Self {
+        Self { inner }
+    }
+}
+
+impl ServerCertVerifier for NoServerNameVerification {
+    fn verify_server_cert(
+        &self,
+        end_entity: &CertificateDer<'_>,
+        intermediates: &[CertificateDer<'_>],
+        server_name: &ServerName<'_>,
+        ocsp_response: &[u8],
+        now: UnixTime,
+    ) -> Result<ServerCertVerified, rustls::Error> {
+        match self.inner.verify_server_cert(
+            end_entity,
+            intermediates,
+            server_name,
+            ocsp_response,
+            now,
+        ) {
+            Ok(scv) => Ok(scv),
+            Err(rustls::Error::InvalidCertificate(cert_err)) => match cert_err {
+                rustls::CertificateError::NotValidForName
+                | rustls::CertificateError::NotValidForNameContext { .. } => {
+                    tracing::warn!(
+                        "TLS ignore hostname, server_name: {server_name:?}, err: {cert_err:?}"
+                    );
+                    Ok(ServerCertVerified::assertion())
+                }
+                _ => {
+                    tracing::error!("TLS invalid certificate: {cert_err:?}");
+                    Err(rustls::Error::InvalidCertificate(cert_err))
+                }
+            },
+            Err(e) => {
+                tracing::error!("TLS certificate verification failed: {e:?}");
+                Err(e)
+            }
+        }
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, rustls::Error> {
+        self.inner.verify_tls12_signature(message, cert, dss)
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, rustls::Error> {
+        self.inner.verify_tls13_signature(message, cert, dss)
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+        self.inner.supported_verify_schemes()
+    }
+}
+
+fn parse_ca_to_certs(input: &str) -> Result<Vec<CertificateDer<'static>>, DsnError> {
+    use rustls::pki_types::pem::PemObject;
+
+    if input.starts_with("-----BEGIN CERTIFICATE-----") {
+        CertificateDer::pem_slice_iter(input.as_bytes())
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| DsnError::InvalidParam("tls_ca".into(), format!("parse PEM failed: {e}")))
+    } else {
+        CertificateDer::pem_file_iter(std::path::Path::new(input))
+            .map_err(|e| {
+                DsnError::InvalidParam("tls_ca".into(), format!("open PEM file failed: {e}"))
+            })?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| {
+                DsnError::InvalidParam("tls_ca".into(), format!("parse PEM file failed: {e}"))
+            })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use futures::{SinkExt, StreamExt};
@@ -961,56 +1246,6 @@ mod tests {
         let cases = ["true", "false", ""];
         for tcp_nodelay_val in cases {
             let dsn = format!("ws://localhost:6041?tcp_nodelay={tcp_nodelay_val}");
-            let builder = TaosBuilder::from_dsn(dsn)?;
-            let (ws, _) = builder.connect().await?;
-            let (mut sender, mut reader) = ws.split();
-
-            sender.send(WsSend::Version.to_msg()).await?;
-
-            loop {
-                if let Some(Ok(message)) = reader.next().await {
-                    let text = message.to_text().unwrap();
-                    let recv: WsRecv = serde_json::from_str(text).unwrap();
-                    assert_eq!(recv.code, 0);
-                    if let WsRecvData::Version { version, .. } = recv.data {
-                        tracing::info!("server version: {version}");
-                        break;
-                    }
-                }
-            }
-        }
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    #[cfg(feature = "native-tls")]
-    async fn test_connect_cloud_enable_tcp_nodelay() -> Result<(), anyhow::Error> {
-        let _ = tracing_subscriber::fmt()
-            .with_file(true)
-            .with_line_number(true)
-            .with_max_level(tracing::Level::INFO)
-            .compact()
-            .try_init();
-
-        let url = std::env::var("TDENGINE_CLOUD_URL");
-        if url.is_err() {
-            tracing::warn!("TDENGINE_CLOUD_URL is not set, skip test_conncet");
-            return Ok(());
-        }
-
-        let token = std::env::var("TDENGINE_CLOUD_TOKEN");
-        if token.is_err() {
-            tracing::warn!("TDENGINE_CLOUD_TOKEN is not set, skip test_conncet");
-            return Ok(());
-        }
-
-        let url = url.unwrap();
-        let token = token.unwrap();
-
-        let cases = ["true", "false", ""];
-        for tcp_nodelay_val in cases {
-            let dsn = format!("{url}/rust_test?token={token}&tcp_nodelay={tcp_nodelay_val}");
             let builder = TaosBuilder::from_dsn(dsn)?;
             let (ws, _) = builder.connect().await?;
             let (mut sender, mut reader) = ws.split();
@@ -1090,7 +1325,7 @@ mod tests {
             })
         };
 
-        WsProxy::start("127.0.0.1:8901", "ws://localhost:6041/ws", intercept).await;
+        let _proxy = WsProxy::start("127.0.0.1:8901", "ws://localhost:6041/ws", intercept).await;
 
         let taos = TaosBuilder::from_dsn("ws://localhost:8901?conn_timeout=1&version_prefer=3.x")?
             .build()
@@ -1342,7 +1577,7 @@ mod tests {
             })
         };
 
-        WsProxy::start("127.0.0.1:8904", "ws://localhost:6041/ws", intercept).await;
+        let _proxy = WsProxy::start("127.0.0.1:8904", "ws://localhost:6041/ws", intercept).await;
 
         let err = TaosBuilder::from_dsn("ws://localhost:8904?conn_timeout=1")?
             .build()
@@ -1388,7 +1623,7 @@ mod tests {
             })
         };
 
-        WsProxy::start("127.0.0.1:8905", "ws://localhost:6041/ws", intercept).await;
+        let _proxy = WsProxy::start("127.0.0.1:8905", "ws://localhost:6041/ws", intercept).await;
 
         let taos = TaosBuilder::from_dsn("ws://localhost:8905?conn_timeout=1")?
             .build()
@@ -1407,9 +1642,298 @@ mod tests {
 
         Ok(())
     }
+
+    #[tokio::test]
+    async fn test_report_user_ip_and_app() -> anyhow::Result<()> {
+        #[derive(Debug, serde::Deserialize)]
+        struct Record {
+            user_ip: String,
+            user_app: String,
+        }
+
+        {
+            let taos = TaosBuilder::from_dsn(
+                "ws://localhost:6041?user_ip=192.168.1.1&user_app=rust_test",
+            )?
+            .build()
+            .await?;
+
+            tokio::time::sleep(Duration::from_secs(2)).await;
+
+            let mut rs = taos.query("show connections").await?;
+            let records: Vec<Record> = rs.deserialize().try_collect().await?;
+            let found = records
+                .iter()
+                .any(|record| record.user_ip == "192.168.1.1" && record.user_app == "rust_test");
+            assert!(found);
+        }
+
+        {
+            let taos = TaosBuilder::from_dsn(
+                "ws://localhost:6041?user_ip=  192.168.1.2  &user_app=  rust_test  ",
+            )?
+            .build()
+            .await?;
+
+            tokio::time::sleep(Duration::from_secs(2)).await;
+
+            let mut rs = taos.query("show connections").await?;
+            let records: Vec<Record> = rs.deserialize().try_collect().await?;
+            let found = records
+                .iter()
+                .any(|record| record.user_ip == "192.168.1.2" && record.user_app == "rust_test");
+            assert!(found);
+        }
+
+        Ok(())
+    }
 }
 
-#[cfg(feature = "rustls-aws-lc-crypto-provider")]
+#[cfg(test)]
+mod tls_tests {
+    use super::*;
+    use std::path::Path;
+    use taos_query::AsyncTBuilder;
+
+    #[tokio::test]
+    async fn test_parse_ws_with_tls_params_ignored() -> anyhow::Result<()> {
+        let dsn = "ws://localhost:6041?tls_mode=bad&tls_version=TLSv1.1&tls_ca=some_ca";
+        let taos = TaosBuilder::from_dsn(dsn)?.build().await?;
+        assert!(taos.builder.tls_config.is_none());
+        Ok(())
+    }
+
+    #[cfg(feature = "rustls-ring-crypto-provider")]
+    #[tokio::test]
+    async fn test_build_wss_with_tls_versions() -> anyhow::Result<()> {
+        let cases = [
+            "wss://localhost:6445",
+            "wss://localhost:6445?tls_version=TLSv1.2",
+            "wss://localhost:6445?tls_version=TLSv1.3",
+            "wss://localhost:6445?tls_version=tlsv1.2,tlsv1.3",
+            "wss://localhost:6445?tls_version=TLSV1.3,TLSV1.2",
+            "wss://localhost:6445?tls_version=TlSv1.3,tLSv1.2,TLsv1.3,tlSv1.2",
+        ];
+        for dsn in cases {
+            let _taos = TaosBuilder::from_dsn(dsn)?.build().await?;
+        }
+        Ok(())
+    }
+
+    #[cfg(feature = "rustls-ring-crypto-provider")]
+    #[tokio::test]
+    async fn test_tls_verify_identity() -> anyhow::Result<()> {
+        let tls_ca = include_str!("../tests/certs/ca_verify_identity.crt");
+
+        let ca_path =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/certs/ca_verify_identity.crt");
+        let tls_ca_path = ca_path.to_str().unwrap();
+
+        let tls_ca_cases = [
+            format!("wss://localhost:6445?tls_mode=verify_identity&tls_version=tlsv1.2,tlsv1.3&tls_ca={tls_ca}"),
+            format!("wss://localhost:6445?tls_mode=VERIFY_IDENTITY&tls_version=TLSV1.2,TLSV1.3&tls_ca={tls_ca}"),
+            format!("wss://localhost:6445?tls_mode=VeRify_IdenTity&tls_version=tlsV1.2,TlsV1.3&tls_ca={tls_ca}"),
+            format!("wss://localhost:6445?tls_mode=  VeRify_IdenTity  &tls_version=  TlsV1.2,  TlsV1.3  &tls_ca=  {tls_ca}  "),
+            format!("wss://localhost:6445?tls_mode=verify_identity&tls_ca={tls_ca}&tls_version=tlsv1.2"),
+            format!("wss://localhost:6445?tls_ca={tls_ca}&tls_mode=verify_identity&tls_version=tlsv1.3"),
+            format!("wss://localhost:6445?tls_ca={tls_ca}&tls_mode=verify_identity"),
+            format!("wss://localhost:6445?tls_mode=verify_identity&tls_version=TLSv1.3,TLSv1.3&tls_ca={tls_ca}"),
+        ];
+
+        let tls_ca_path_cases = [
+            format!("wss://localhost:6445?tls_mode=verify_identity&tls_version=tlsv1.2,tlsv1.3&tls_ca={tls_ca_path}"),
+            format!("wss://localhost:6445?tls_mode=VERIFY_IDENTITY&tls_version=TLSV1.2,TLSV1.3&tls_ca={tls_ca_path}"),
+            format!("wss://localhost:6445?tls_mode=VeRify_IdenTity&tls_version=tlsV1.2,TlsV1.3&tls_ca={tls_ca_path}"),
+            format!("wss://localhost:6445?tls_mode=  VeRify_IdenTity  &tls_version=  TlsV1.2,  TlsV1.3  &tls_ca=  {tls_ca_path}  "),
+            format!("wss://localhost:6445?tls_mode=verify_identity&tls_ca={tls_ca_path}&tls_version=tlsv1.2"),
+            format!("wss://localhost:6445?tls_ca={tls_ca_path}&tls_mode=verify_identity&tls_version=tlsv1.3"),
+            format!("wss://localhost:6445?tls_ca={tls_ca_path}&tls_mode=verify_identity"),
+            format!("wss://localhost:6445?tls_mode=verify_identity&tls_version=TLSv1.3,TLSv1.3&tls_ca={tls_ca_path}"),
+        ];
+
+        for dsn in tls_ca_cases {
+            let _taos = TaosBuilder::from_dsn(dsn)?.build().await?;
+        }
+
+        for dsn in tls_ca_path_cases {
+            let _taos = TaosBuilder::from_dsn(dsn)?.build().await?;
+        }
+
+        Ok(())
+    }
+
+    #[cfg(feature = "rustls-ring-crypto-provider")]
+    #[tokio::test]
+    async fn test_tls_verify_ca() -> anyhow::Result<()> {
+        let tls_ca = include_str!("../tests/certs/ca_verify_ca.crt");
+
+        let ca_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/certs/ca_verify_ca.crt");
+        let tls_ca_path = ca_path.to_str().unwrap();
+
+        let tls_ca_cases = [
+            format!("wss://localhost:6446?tls_mode=verify_ca&tls_version=tlsv1.2,tlsv1.3&tls_ca={tls_ca}"),
+            format!("wss://localhost:6446?tls_mode=VERIFY_CA&tls_version=TLSV1.2,TLSV1.3&tls_ca={tls_ca}"),
+            format!("wss://localhost:6446?tls_mode=VeRify_Ca&tls_version=tlsV1.2,TlsV1.3&tls_ca={tls_ca}"),
+            format!("wss://localhost:6446?tls_mode=  VeRify_Ca  &tls_version=  TlsV1.2,  TlsV1.3  &tls_ca=  {tls_ca}  "),
+            format!("wss://localhost:6446?tls_mode=verify_ca&tls_ca={tls_ca}&tls_version=tlsv1.2"),
+            format!("wss://localhost:6446?tls_ca={tls_ca}&tls_mode=verify_ca&tls_version=tlsv1.3"),
+            format!("wss://localhost:6446?tls_ca={tls_ca}&tls_mode=verify_ca"),
+            format!("wss://localhost:6446?tls_mode=verify_ca&tls_version=TLSv1.3,TLSv1.3&tls_ca={tls_ca}"),
+        ];
+
+        let tls_ca_path_cases = [
+            format!("wss://localhost:6446?tls_mode=verify_ca&tls_version=tlsv1.2,tlsv1.3&tls_ca={tls_ca_path}"),
+            format!("wss://localhost:6446?tls_mode=VERIFY_CA&tls_version=TLSV1.2,TLSV1.3&tls_ca={tls_ca_path}"),
+            format!("wss://localhost:6446?tls_mode=VeRify_Ca&tls_version=tlsV1.2,TlsV1.3&tls_ca={tls_ca_path}"),
+            format!("wss://localhost:6446?tls_mode=  VeRify_Ca  &tls_version=  TlsV1.2,  TlsV1.3  &tls_ca=  {tls_ca_path}  "),
+            format!("wss://localhost:6446?tls_mode=verify_ca&tls_ca={tls_ca_path}&tls_version=tlsv1.2"),
+            format!("wss://localhost:6446?tls_ca={tls_ca_path}&tls_mode=verify_ca&tls_version=tlsv1.3"),
+            format!("wss://localhost:6446?tls_ca={tls_ca_path}&tls_mode=verify_ca"),
+            format!("wss://localhost:6446?tls_mode=verify_ca&tls_version=TLSv1.3,TLSv1.3&tls_ca={tls_ca_path}"),
+        ];
+
+        for dsn in tls_ca_cases {
+            let _taos = TaosBuilder::from_dsn(dsn)?.build().await?;
+        }
+
+        for dsn in tls_ca_path_cases {
+            let _taos = TaosBuilder::from_dsn(dsn)?.build().await?;
+        }
+
+        Ok(())
+    }
+
+    #[cfg(feature = "rustls-ring-crypto-provider")]
+    #[tokio::test]
+    async fn test_tls_san_mismatch() -> anyhow::Result<()> {
+        let tls_ca = include_str!("../tests/certs/ca_verify_identity.crt");
+        let err = TaosBuilder::from_dsn(format!(
+            "wss://127.0.0.1:6445?tls_mode=verify_identity&tls_version=tlsv1.3&tls_ca={tls_ca}"
+        ))?
+        .build()
+        .await
+        .unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("invalid peer certificate: certificate not valid for name"));
+        Ok(())
+    }
+
+    #[cfg(feature = "rustls-ring-crypto-provider")]
+    #[tokio::test]
+    async fn test_tls12_version_mismatch() -> anyhow::Result<()> {
+        let tls_ca = include_str!("../tests/certs/ca_verify_ca.crt");
+        let err = TaosBuilder::from_dsn(format!(
+            "wss://localhost:6447?tls_mode=verify_ca&tls_version=tlsv1.3&tls_ca={tls_ca}"
+        ))?
+        .build()
+        .await
+        .unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("received fatal alert: ProtocolVersion"));
+        Ok(())
+    }
+
+    #[cfg(feature = "rustls-ring-crypto-provider")]
+    #[tokio::test]
+    async fn test_tls13_version_mismatch() -> anyhow::Result<()> {
+        let tls_ca = include_str!("../tests/certs/ca_verify_ca.crt");
+        let err = TaosBuilder::from_dsn(format!(
+            "wss://localhost:6448?tls_mode=verify_ca&tls_version=tlsv1.2&tls_ca={tls_ca}"
+        ))?
+        .build()
+        .await
+        .unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("received fatal alert: ProtocolVersion"));
+        Ok(())
+    }
+
+    #[cfg(feature = "rustls-ring-crypto-provider")]
+    #[tokio::test]
+    async fn test_tls_ca_mismatch() -> anyhow::Result<()> {
+        let tls_ca = include_str!("../tests/certs/ca_mismatch.crt");
+        let err = TaosBuilder::from_dsn(format!(
+            "wss://localhost:6445?tls_mode=verify_identity&tls_version=TLSv1.3&tls_ca={tls_ca}"
+        ))?
+        .build()
+        .await
+        .unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("invalid peer certificate: BadSignature"));
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_invalid_tls_mode() {
+        let dsn = "wss://localhost:6041?tls_mode=bad";
+        let err = TaosBuilder::from_dsn(dsn).unwrap_err();
+        assert!(err.to_string().contains("invalid parameter for tls_mode"));
+    }
+
+    #[test]
+    fn test_parse_invalid_tls_version() {
+        let dsn = "wss://localhost:6041?tls_version=TLSv1.1";
+        let err = TaosBuilder::from_dsn(dsn).unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("invalid parameter for tls_version"));
+    }
+
+    #[test]
+    fn test_parse_invalid_tls_ca_content() {
+        let err = TaosBuilder::from_dsn("wss://localhost:6041?tls_mode=verify_ca&tls_version=TLSv1.3&tls_ca=-----BEGIN CERTIFICATE-----BAD-----END CERTIFICATE-----").unwrap_err();
+        assert!(err.to_string().contains("parse PEM failed"));
+
+        let ca_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/certs/invalid.pem");
+        let tls_ca_path = ca_path.to_str().unwrap();
+
+        let err = TaosBuilder::from_dsn(format!(
+            "wss://localhost:6041?tls_mode=verify_ca&tls_version=TLSv1.3&tls_ca={tls_ca_path}"
+        ))
+        .unwrap_err();
+        assert!(err.to_string().contains("parse PEM file failed"));
+    }
+
+    #[test]
+    fn test_parse_invalid_tls_ca_path() {
+        let err = TaosBuilder::from_dsn("wss://localhost:6041?tls_mode=verify_ca&tls_version=TLSv1.3&tls_ca=/path/not/exist.crt").unwrap_err();
+        assert!(err.to_string().contains("open PEM file failed"));
+    }
+
+    #[test]
+    fn test_parse_verify_ca_without_ca_err() {
+        let cases = [
+            "wss://localhost:6041?tls_mode=verify_ca&tls_version=TLSv1.3",
+            "wss://localhost:6041?tls_mode=verify_ca&tls_version=TLSv1.3&tls_ca",
+            "wss://localhost:6041?tls_mode=verify_ca&tls_version=TLSv1.3&tls_ca=",
+            "wss://localhost:6041?tls_mode=verify_ca&tls_version=TLSv1.3&tls_ca=  ",
+        ];
+        for dsn in cases {
+            let err = TaosBuilder::from_dsn(dsn).unwrap_err();
+            assert!(err.to_string().contains("requires parameter: tls_ca"));
+        }
+    }
+
+    #[test]
+    fn test_parse_verify_identity_without_ca_err() {
+        let cases = [
+            "wss://localhost:6041?tls_mode=verify_identity&tls_version=TLSv1.3",
+            "wss://localhost:6041?tls_mode=verify_identity&tls_version=TLSv1.3&tls_ca",
+            "wss://localhost:6041?tls_mode=verify_identity&tls_version=TLSv1.3&tls_ca=",
+            "wss://localhost:6041?tls_mode=verify_identity&tls_version=TLSv1.3&tls_ca=  ",
+        ];
+        for dsn in cases {
+            let err = TaosBuilder::from_dsn(dsn).unwrap_err();
+            assert!(err.to_string().contains("requires parameter: tls_ca"));
+        }
+    }
+}
+
+#[cfg(feature = "rustls-ring-crypto-provider")]
 #[cfg(test)]
 mod cloud_tests {
     use futures::{SinkExt, StreamExt};
@@ -1453,55 +1977,6 @@ mod cloud_tests {
                 if let WsRecvData::Version { version, .. } = recv.data {
                     tracing::info!("server version: {version}");
                     break;
-                }
-            }
-        }
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_connect_enable_tcp_nodelay() -> Result<(), anyhow::Error> {
-        let _ = tracing_subscriber::fmt()
-            .with_file(true)
-            .with_line_number(true)
-            .with_max_level(tracing::Level::INFO)
-            .compact()
-            .try_init();
-
-        let url = std::env::var("TDENGINE_CLOUD_URL");
-        if url.is_err() {
-            tracing::warn!("TDENGINE_CLOUD_URL is not set, skip test_conncet");
-            return Ok(());
-        }
-
-        let token = std::env::var("TDENGINE_CLOUD_TOKEN");
-        if token.is_err() {
-            tracing::warn!("TDENGINE_CLOUD_TOKEN is not set, skip test_conncet");
-            return Ok(());
-        }
-
-        let url = url.unwrap();
-        let token = token.unwrap();
-
-        let cases = ["true", "false", ""];
-        for tcp_nodelay_val in cases {
-            let dsn = format!("{url}/rust_test?token={token}&tcp_nodelay={tcp_nodelay_val}");
-            let builder = TaosBuilder::from_dsn(dsn)?;
-            let (ws, _) = builder.connect().await?;
-            let (mut sender, mut reader) = ws.split();
-
-            sender.send(WsSend::Version.to_msg()).await?;
-
-            loop {
-                if let Some(Ok(message)) = reader.next().await {
-                    let text = message.to_text().unwrap();
-                    let recv: WsRecv = serde_json::from_str(text).unwrap();
-                    assert_eq!(recv.code, 0);
-                    if let WsRecvData::Version { version, .. } = recv.data {
-                        tracing::info!("server version: {version}");
-                        break;
-                    }
                 }
             }
         }

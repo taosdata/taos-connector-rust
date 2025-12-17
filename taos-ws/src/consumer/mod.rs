@@ -3008,7 +3008,7 @@ mod tests {
     }
 }
 
-#[cfg(feature = "rustls-aws-lc-crypto-provider")]
+#[cfg(feature = "rustls-ring-crypto-provider")]
 #[cfg(test)]
 mod cloud_tests {
     use std::time::Duration;
