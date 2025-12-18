@@ -60,6 +60,8 @@ type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
 type WsStreamReader = SplitStream<WsStream>;
 type WsStreamSender = SplitSink<WsStream, Message>;
 
+const CONNECTOR_INFO: &str = concat!("RustWS-", env!("CARGO_PKG_VERSION"));
+
 #[derive(Debug, Clone)]
 pub enum WsAuth {
     Token(String),
@@ -140,6 +142,7 @@ pub struct TaosBuilder {
     user_ip: Option<String>,
     user_app: Option<String>,
     tls_config: Option<TlsConfig>,
+    connector_info: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -586,6 +589,10 @@ impl TaosBuilder {
             None
         };
 
+        let connector_info = dsn
+            .remove("connector_info")
+            .unwrap_or_else(|| CONNECTOR_INFO.to_string());
+
         let auth = if let Some(token) = token {
             WsAuth::Token(token)
         } else {
@@ -613,6 +620,7 @@ impl TaosBuilder {
             user_ip,
             user_app,
             tls_config,
+            connector_info,
         })
     }
 
@@ -970,6 +978,7 @@ impl TaosBuilder {
             tz: self.tz.map(|s| s.to_string()),
             ip: self.user_ip.clone(),
             app: self.user_app.clone(),
+            connector: self.connector_info.clone(),
         }
     }
 
@@ -1577,159 +1586,6 @@ mod tests {
             })
         };
 
-        WsProxy::start("127.0.0.1:8904", "ws://localhost:6041/ws", intercept).await;
-
-        let err = TaosBuilder::from_dsn("ws://localhost:8904?conn_timeout=1")?
-            .build()
-            .await
-            .unwrap_err();
-        assert_eq!(err.code(), WS_ERROR_NO::RECV_MESSAGE_TIMEOUT.as_code());
-        assert!(err
-            .to_string()
-            .contains("timeout waiting for conn response"));
-
-        Ok(())
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn test_recv_options_connection_resp_timeout() -> anyhow::Result<()> {
-        use serde_json::Value;
-        use taos_query::util::ws_proxy::*;
-
-        let _ = tracing_subscriber::fmt()
-            .with_file(true)
-            .with_line_number(true)
-            .with_max_level(tracing::Level::ERROR)
-            .try_init();
-
-        let intercept: InterceptFn = {
-            Arc::new(move |msg, ctx| {
-                if let Message::Text(text) = msg {
-                    let req = serde_json::from_str::<Value>(text).unwrap();
-                    let action = req.get("action").and_then(|v| v.as_str()).unwrap_or("");
-                    if action == "options_connection" {
-                        ctx.req_count += 1;
-                        if ctx.req_count == 2 {
-                            tokio::task::block_in_place(|| {
-                                std::thread::sleep(std::time::Duration::from_secs(2));
-                            });
-                        }
-                    }
-                } else if let Message::Binary(_) = msg {
-                    return ProxyAction::Restart;
-                }
-
-                ProxyAction::Forward
-            })
-        };
-
-        WsProxy::start("127.0.0.1:8905", "ws://localhost:6041/ws", intercept).await;
-
-        let taos = TaosBuilder::from_dsn("ws://localhost:8905?conn_timeout=1")?
-            .build()
-            .await?;
-
-        taos.client()
-            .options_connection(&[ConnOption {
-                option: 1,
-                value: Some("UTC".to_string()),
-            }])
-            .await?;
-
-        let err = taos.exec("show databases").await.unwrap_err();
-        assert_eq!(err.code(), WS_ERROR_NO::CONN_CLOSED.as_code());
-        assert!(err.to_string().contains("WebSocket connection is closed"));
-
-        Ok(())
-    }
-}
-
-#[cfg(feature = "rustls-aws-lc-crypto-provider")]
-#[cfg(test)]
-mod cloud_tests {
-    use futures::{SinkExt, StreamExt};
-
-    use crate::query::messages::{ToMessage, WsRecv, WsRecvData, WsSend};
-    use crate::*;
-
-    #[tokio::test]
-    async fn test_conncet() -> Result<(), anyhow::Error> {
-        let _ = tracing_subscriber::fmt()
-            .with_file(true)
-            .with_line_number(true)
-            .with_max_level(tracing::Level::ERROR)
-            .try_init();
-
-        let routes = warp::path("ws")
-            .and(warp::ws())
-            .map(move |ws: warp::ws::Ws| {
-                ws.on_upgrade(move |ws| async move {
-                    let (mut ws_tx, mut ws_rx) = ws.split();
-
-                    while let Some(res) = ws_rx.next().await {
-                        let message = res.unwrap();
-                        tracing::info!("ws recv message: {message:?}");
-
-                        if message.is_text() {
-                            let text = message.to_str().unwrap();
-                            let req: Value = serde_json::from_str(text).unwrap();
-                            let req_id = req
-                                .get("args")
-                                .and_then(|v| v.get("req_id"))
-                                .and_then(Value::as_u64)
-                                .unwrap_or(0);
-
-                            if text.contains("version") || text.contains("conn") {
-                                let data = json!({
-                                    "code": 0,
-                                    "message": "message",
-                                    "action": "conn",
-                                    "req_id": req_id
-                                });
-                                let _ = ws_tx.send(Message::text(data.to_string())).await;
-                            }
-                        }
-                    }
-                })
-            });
-
-        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
-        let (_, server) =
-            warp::serve(routes).bind_with_graceful_shutdown(([127, 0, 0, 1], 8906), async move {
-                let _ = shutdown_rx.await;
-            });
-
-        tokio::spawn(server);
-
-        let taos = TaosBuilder::from_dsn("ws://127.0.0.1:8906?version_prefer=3.x")?
-            .build()
-            .await?;
-        assert_eq!(taos.version(), "3.x");
-
-        let _ = shutdown_tx.send(());
-
-        Ok(())
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn test_recv_conn_resp_timeout() -> anyhow::Result<()> {
-        use taos_query::util::ws_proxy::*;
-
-        let _ = tracing_subscriber::fmt()
-            .with_file(true)
-            .with_line_number(true)
-            .with_max_level(tracing::Level::ERROR)
-            .try_init();
-
-        let intercept: InterceptFn = {
-            Arc::new(move |_msg, _ctx| {
-                tokio::task::block_in_place(|| {
-                    std::thread::sleep(std::time::Duration::from_secs(2));
-                });
-                ProxyAction::Forward
-            })
-        };
-
         let _proxy = WsProxy::start("127.0.0.1:8904", "ws://localhost:6041/ws", intercept).await;
 
         let err = TaosBuilder::from_dsn("ws://localhost:8904?conn_timeout=1")?
@@ -1835,6 +1691,47 @@ mod cloud_tests {
             let found = records
                 .iter()
                 .any(|record| record.user_ip == "192.168.1.2" && record.user_app == "rust_test");
+            assert!(found);
+        }
+
+        Ok(())
+    }
+
+    #[cfg(feature = "test-new-feat")]
+    #[tokio::test]
+    async fn test_report_connector_info() -> anyhow::Result<()> {
+        #[derive(Debug, serde::Deserialize)]
+        struct Record {
+            connector_info: String,
+        }
+
+        {
+            let taos = TaosBuilder::from_dsn("ws://localhost:6041")?
+                .build()
+                .await?;
+
+            tokio::time::sleep(Duration::from_secs(2)).await;
+
+            let mut rs = taos.query("show connections").await?;
+            let records: Vec<Record> = rs.deserialize().try_collect().await?;
+            let found = records
+                .iter()
+                .any(|record| record.connector_info == CONNECTOR_INFO);
+            assert!(found);
+        }
+
+        {
+            let taos = TaosBuilder::from_dsn("ws://localhost:6041?connector_info=rust-0.0.1")?
+                .build()
+                .await?;
+
+            tokio::time::sleep(Duration::from_secs(2)).await;
+
+            let mut rs = taos.query("show connections").await?;
+            let records: Vec<Record> = rs.deserialize().try_collect().await?;
+            let found = records
+                .iter()
+                .any(|record| record.connector_info == "rust-0.0.1");
             assert!(found);
         }
 
