@@ -60,7 +60,12 @@ type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
 type WsStreamReader = SplitStream<WsStream>;
 type WsStreamSender = SplitSink<WsStream, Message>;
 
-const CONNECTOR_INFO: &str = concat!("RustWS-", env!("CARGO_PKG_VERSION"));
+const CONNECTOR_INFO: &str = concat!(
+    "rust-ws-v",
+    env!("CARGO_PKG_VERSION"),
+    "-",
+    env!("GIT_COMMIT_ID")
+);
 
 #[derive(Debug, Clone)]
 pub enum WsAuth {
