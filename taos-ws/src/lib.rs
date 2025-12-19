@@ -449,6 +449,9 @@ impl TaosBuilder {
     }
 
     pub fn from_dsn<T: IntoDsn>(dsn: T) -> RawResult<Self> {
+        tracing::error!("commit_id: {}", env!("COMMIT_ID"));
+        dbg!("commit_id: ", env!("COMMIT_ID"));
+
         let mut dsn = dsn.into_dsn()?;
 
         let is_https = match (dsn.driver.as_str(), dsn.protocol.as_deref()) {
@@ -2033,4 +2036,18 @@ mod cloud_tests {
 
         Ok(())
     }
+}
+
+#[test]
+fn test_a() {
+    use std::net::ToSocketAddrs;
+
+    let host = "localhost";
+    let port = 6041;
+    let addr = format!("{}:{}", host, port);
+    // env!("RUST_LOG");
+    // println!("cargo:rerun-if-env-changed=TD_VERSION");
+    // let socket_addrs = addr.to_socket_addrs()?;
+    // let version = env!("TD_VERSION");
+    // dbg!(version);
 }
