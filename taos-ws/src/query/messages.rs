@@ -29,6 +29,10 @@ pub struct WsConnReq {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) app: Option<String>,
     pub(crate) connector: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) totp_code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) bearer_token: Option<String>,
 }
 
 impl WsConnReq {
@@ -43,6 +47,8 @@ impl WsConnReq {
             ip: None,
             app: None,
             connector: crate::CONNECTOR_INFO.to_string(),
+            totp_code: None,
+            bearer_token: None,
         }
     }
 }

@@ -148,6 +148,8 @@ pub struct TaosBuilder {
     user_app: Option<String>,
     tls_config: Option<TlsConfig>,
     connector_info: String,
+    totp_code: Option<String>,
+    bearer_token: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -324,6 +326,7 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
     fn client_version() -> &'static str {
         "0"
     }
+
     async fn ping(&self, taos: &mut Self::Target) -> RawResult<()> {
         taos_query::AsyncQueryable::exec(taos, "select server_version()")
             .await
@@ -598,6 +601,9 @@ impl TaosBuilder {
             .remove("connector_info")
             .unwrap_or_else(|| CONNECTOR_INFO.to_string());
 
+        let totp_code = dsn.remove("totp_code").map(|s| s.trim().to_string());
+        let bearer_token = dsn.remove("bearer_token").map(|s| s.trim().to_string());
+
         let auth = if let Some(token) = token {
             WsAuth::Token(token)
         } else {
@@ -626,6 +632,8 @@ impl TaosBuilder {
             user_app,
             tls_config,
             connector_info,
+            totp_code,
+            bearer_token,
         })
     }
 
@@ -984,6 +992,8 @@ impl TaosBuilder {
             ip: self.user_ip.clone(),
             app: self.user_app.clone(),
             connector: self.connector_info.clone(),
+            totp_code: self.totp_code.clone(),
+            bearer_token: self.bearer_token.clone(),
         }
     }
 
@@ -1739,6 +1749,25 @@ mod tests {
                 .any(|record| record.connector_info == "rust-0.0.1");
             assert!(found);
         }
+
+        Ok(())
+    }
+
+    #[cfg(feature = "test-new-feat")]
+    #[tokio::test]
+    async fn test_connect_with_totp_and_token() -> anyhow::Result<()> {
+        // invalid, valid totp_code and bearer_token
+        let _taos = TaosBuilder::from_dsn("ws://localhost:6041?totp_code=xxx")?
+            .build()
+            .await?;
+
+        let _taos = TaosBuilder::from_dsn("ws://localhost:6041?bearer_token=xxx")?
+            .build()
+            .await?;
+
+        let _taos = TaosBuilder::from_dsn("ws://localhost:6041?totp_code=xxx&bearer_token=xxx")?
+            .build()
+            .await?;
 
         Ok(())
     }
