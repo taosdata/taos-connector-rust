@@ -3006,6 +3006,155 @@ mod tests {
 
         Ok(())
     }
+
+    #[tokio::test]
+    #[ignore]
+    async fn test_report_user_ip_and_app() -> anyhow::Result<()> {
+        use taos_query::prelude::*;
+
+        #[derive(Debug, serde::Deserialize)]
+        struct Record {
+            user_ip: String,
+            user_app: String,
+        }
+
+        let taos = TaosBuilder::from_dsn("ws://localhost:6041")?
+            .build()
+            .await?;
+
+        taos.exec_many([
+            "drop topic if exists topic_1766045982",
+            "drop database if exists test_1766045982",
+            "create database test_1766045982",
+            "create topic topic_1766045982 as database test_1766045982",
+        ])
+        .await?;
+
+        {
+            let tmq = TmqBuilder::from_dsn(
+                "ws://localhost:6041?group.id=10&user_ip=192.168.1.1&user_app=rust_tmq_test",
+            )?;
+            let mut consumer = tmq.build().await?;
+            consumer.subscribe(["topic_1766045982"]).await?;
+
+            tokio::time::sleep(Duration::from_secs(2)).await;
+
+            let mut rs = taos.query("show connections").await?;
+            let records: Vec<Record> = rs.deserialize().try_collect().await?;
+            let found = records.iter().any(|record| {
+                record.user_ip == "192.168.1.1" && record.user_app == "rust_tmq_test"
+            });
+            assert!(found);
+
+            consumer.unsubscribe().await;
+        }
+
+        {
+            let tmq = TmqBuilder::from_dsn(
+                "ws://localhost:6041?group.id=10&user_ip=  192.168.1.2  &user_app=  rust_tmq_test  ",
+            )?;
+            let mut consumer = tmq.build().await?;
+            consumer.subscribe(["topic_1766045982"]).await?;
+
+            tokio::time::sleep(Duration::from_secs(2)).await;
+
+            let mut rs = taos.query("show connections").await?;
+            let records: Vec<Record> = rs.deserialize().try_collect().await?;
+            let found = records.iter().any(|record| {
+                record.user_ip == "192.168.1.2" && record.user_app == "rust_tmq_test"
+            });
+            assert!(found);
+
+            consumer.unsubscribe().await;
+        }
+
+        tokio::time::sleep(Duration::from_secs(3)).await;
+
+        taos.exec_many([
+            "drop topic if exists topic_1766045982",
+            "drop database if exists test_1766045982",
+        ])
+        .await?;
+
+        Ok(())
+    }
+
+    #[cfg(feature = "test-new-feat")]
+    #[tokio::test]
+    #[ignore]
+    async fn test_report_connector_info() -> anyhow::Result<()> {
+        use taos_query::prelude::*;
+
+        let _ = tracing_subscriber::fmt()
+            .with_file(true)
+            .with_line_number(true)
+            .with_max_level(tracing::Level::TRACE)
+            .try_init();
+
+        #[derive(Debug, serde::Deserialize)]
+        struct Record {
+            connector_info: String,
+        }
+
+        let taos = TaosBuilder::from_dsn("ws://localhost:6041")?
+            .build()
+            .await?;
+
+        taos.exec_many([
+            "drop topic if exists topic_1764581863",
+            "drop database if exists test_1764581863",
+            "create database test_1764581863",
+            "create topic topic_1764581863 as database test_1764581863",
+        ])
+        .await?;
+
+        {
+            let tmq = TmqBuilder::from_dsn("ws://localhost:6041?group.id=10")?;
+            let mut consumer = tmq.build().await?;
+            consumer.subscribe(["topic_1764581863"]).await?;
+
+            tokio::time::sleep(Duration::from_secs(2)).await;
+
+            let mut rs = taos.query("show connections").await?;
+            let records: Vec<Record> = rs.deserialize().try_collect().await?;
+            let cnt = records
+                .iter()
+                .filter(|record| record.connector_info == crate::CONNECTOR_INFO)
+                .count();
+            assert_eq!(cnt, 2);
+
+            consumer.unsubscribe().await;
+        }
+
+        {
+            let tmq = TmqBuilder::from_dsn(
+                "ws://localhost:6041?group.id=10&connector_info=rust_tmq-0.0.1",
+            )?;
+            let mut consumer = tmq.build().await?;
+            consumer.subscribe(["topic_1764581863"]).await?;
+
+            tokio::time::sleep(Duration::from_secs(2)).await;
+
+            let mut rs = taos.query("show connections").await?;
+            let records: Vec<Record> = rs.deserialize().try_collect().await?;
+            let found = records
+                .iter()
+                .any(|record| record.connector_info == "rust_tmq-0.0.1");
+            assert!(found);
+
+            consumer.unsubscribe().await;
+        }
+
+        tokio::time::sleep(Duration::from_secs(3)).await;
+
+        taos.exec_many([
+            "drop topic if exists topic_1764581863",
+            "drop database if exists test_1764581863",
+        ])
+        .await?;
+
+        Ok(())
+    }
 }
 
 #[cfg(feature = "rustls-ring-crypto-provider")]

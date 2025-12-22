@@ -28,6 +28,7 @@ pub struct WsConnReq {
     pub(crate) ip: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) app: Option<String>,
+    pub(crate) connector: String,
 }
 
 impl WsConnReq {
@@ -41,6 +42,7 @@ impl WsConnReq {
             tz: None,
             ip: None,
             app: None,
+            connector: crate::CONNECTOR_INFO.to_string(),
         }
     }
 }
@@ -494,6 +496,7 @@ mod tests {
                 "user": "root",
                 "password": "taosdata",
                 "db": "",
+                "connector": crate::CONNECTOR_INFO,
             }
         });
         assert_eq!(actual, expected);
