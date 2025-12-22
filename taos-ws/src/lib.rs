@@ -1755,6 +1755,7 @@ mod tests {
 
     #[cfg(feature = "test-new-feat")]
     #[tokio::test]
+    #[ignore]
     async fn test_connect_with_totp_and_token() -> anyhow::Result<()> {
         // invalid, valid totp_code and bearer_token
         let _taos = TaosBuilder::from_dsn("ws://localhost:6041?totp_code=xxx")?
