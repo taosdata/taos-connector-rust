@@ -1157,7 +1157,6 @@ impl TAOS_MULTI_BIND {
             return val;
         }
 
-        assert!(!self.length.is_null());
         assert!(!self.buffer.is_null());
 
         let val = match self.ty() {
@@ -1177,25 +1176,30 @@ impl TAOS_MULTI_BIND {
                 Value::Timestamp(Timestamp::Milliseconds(*(self.buffer as *const _)))
             },
             Ty::VarChar => unsafe {
+                assert!(!self.length.is_null());
                 let slice = slice::from_raw_parts(self.buffer as _, self.length.read() as _);
                 let val = str::from_utf8_unchecked(slice).to_owned();
                 Value::VarChar(val)
             },
             Ty::NChar => unsafe {
+                assert!(!self.length.is_null());
                 let slice = slice::from_raw_parts(self.buffer as _, self.length.read() as _);
                 let val = str::from_utf8_unchecked(slice).to_owned();
                 Value::NChar(val)
             },
             Ty::Json => unsafe {
+                assert!(!self.length.is_null());
                 let slice = slice::from_raw_parts(self.buffer as *const _, self.length.read() as _);
                 let val = serde_json::from_slice(slice).unwrap();
                 Value::Json(val)
             },
             Ty::VarBinary => unsafe {
+                assert!(!self.length.is_null());
                 let slice = slice::from_raw_parts(self.buffer as *const _, self.length.read() as _);
                 Value::VarBinary(slice.into())
             },
             Ty::Geometry => unsafe {
+                assert!(!self.length.is_null());
                 let slice = slice::from_raw_parts(self.buffer as *const _, self.length.read() as _);
                 Value::Geometry(slice.into())
             },
@@ -1212,7 +1216,14 @@ impl TAOS_MULTI_BIND {
 
         let ty = self.ty();
         let num = self.num as usize;
-        let lens = unsafe { slice::from_raw_parts(self.length, num) };
+
+        let lens: Vec<i32> = if !self.length.is_null() && num > 0 {
+            (0..num)
+                .map(|i| unsafe { ptr::read_unaligned(self.length.add(i)) })
+                .collect()
+        } else {
+            Vec::new()
+        };
 
         let mut is_nulls = None;
         if !self.is_null.is_null() {
