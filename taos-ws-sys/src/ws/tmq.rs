@@ -1365,6 +1365,8 @@ pub struct TmqResultSet {
     table_name: Option<CString>,
     topic_name: Option<CString>,
     db_name: Option<CString>,
+    rows: Vec<*const c_void>,
+    offsets: Option<Vec<i32>>,
 }
 
 impl TmqResultSet {
@@ -1390,6 +1392,8 @@ impl TmqResultSet {
             table_name,
             topic_name,
             db_name,
+            rows: vec![ptr::null(); num_of_fields],
+            offsets: None,
         }
     }
 }
@@ -1468,7 +1472,23 @@ impl ResultSetOperations for TmqResultSet {
     }
 
     unsafe fn fetch_block(&mut self, rows: *mut TAOS_ROW, num: *mut c_int) -> Result<(), Error> {
-        todo!()
+        if self.block.is_none() || self.row.current_row >= self.block.as_ref().unwrap().nrows() {
+            self.block = self.data.fetch_raw_block()?;
+            self.row.current_row = 0;
+        }
+
+        if let Some(block) = self.block.as_ref() {
+            if block.nrows() > 0 {
+                for (i, col) in block.columns().enumerate() {
+                    self.rows[i] = col.as_raw_ptr();
+                }
+                self.row.current_row = block.nrows();
+                *rows = self.rows.as_ptr() as _;
+                *num = block.nrows() as _;
+            }
+        }
+
+        Ok(())
     }
 
     unsafe fn fetch_row(&mut self) -> Result<TAOS_ROW, Error> {
@@ -1484,8 +1504,8 @@ impl ResultSetOperations for TmqResultSet {
                 }
 
                 for col in 0..block.ncols() {
-                    let value = block.get_raw_value_unchecked(self.row.current_row, col);
-                    self.row.data[col] = value.2;
+                    let res = block.get_raw_value_unchecked(self.row.current_row, col);
+                    self.row.data[col] = res.2;
                 }
 
                 self.row.current_row += 1;
@@ -1509,6 +1529,62 @@ impl ResultSetOperations for TmqResultSet {
     }
 
     fn stop_query(&mut self) {}
+
+    fn is_null_by_column(
+        &mut self,
+        column_index: usize,
+        result: *mut bool,
+        rows: *mut c_int,
+    ) -> Result<(), TaosError> {
+        let block = self.block.as_ref().ok_or_else(|| {
+            error!("tmq is_null_by_column failed, block is none");
+            TaosError::new(Code::FAILED, "block is none")
+        })?;
+
+        let ncols = block.ncols();
+        if ncols == 0 || column_index >= ncols {
+            error!("tmq is_null_by_column failed, column_index:{column_index} is invalid, columns_num: {ncols}");
+            return Err(TaosError::new(
+                Code::INVALID_PARA,
+                "column index is invalid",
+            ));
+        }
+
+        unsafe {
+            let is_nulls = block.is_null_by_col_unchecked(*rows as _, column_index);
+            debug!("tmq is_null_by_column, column_index: {column_index}, is_nulls: {is_nulls:?}");
+            *rows = is_nulls.len() as _;
+            let res = std::slice::from_raw_parts_mut(result, is_nulls.len());
+            for (i, is_null) in is_nulls.iter().enumerate() {
+                res[i] = *is_null;
+            }
+        }
+        Ok(())
+    }
+
+    fn get_column_data_offset(&mut self, column_index: usize) -> Result<*mut c_int, TaosError> {
+        let block = self.block.as_ref().ok_or_else(|| {
+            error!("tmq get_column_data_offset failed, block is none");
+            TaosError::new(Code::FAILED, "block is none")
+        })?;
+
+        let ncols = block.ncols();
+        if ncols == 0 || column_index >= ncols {
+            error!("tmq get_column_data_offset failed, column_index:{column_index} is invalid, columns_num: {ncols}");
+            return Err(TaosError::new(
+                Code::INVALID_PARA,
+                "column index is invalid",
+            ));
+        }
+
+        let offsets = block.get_col_data_offset_unchecked(column_index);
+        debug!("tmq get_column_data_offset, column_index: {column_index}, offsets: {offsets:?}");
+        if offsets.is_empty() {
+            return Ok(ptr::null_mut());
+        }
+        self.offsets = Some(offsets);
+        Ok(self.offsets.as_deref().unwrap().as_ptr() as *mut _)
+    }
 }
 
 #[derive(Debug)]

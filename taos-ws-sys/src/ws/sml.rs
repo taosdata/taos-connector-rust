@@ -526,6 +526,19 @@ impl ResultSetOperations for SchemalessResultSet {
     }
 
     fn stop_query(&mut self) {}
+
+    fn is_null_by_column(
+        &mut self,
+        column_index: usize,
+        result: *mut bool,
+        rows: *mut c_int,
+    ) -> Result<(), TaosError> {
+        unreachable!("schemaless result set does not support is_null_by_column")
+    }
+
+    fn get_column_data_offset(&mut self, column_index: usize) -> Result<*mut c_int, TaosError> {
+        unreachable!("schemaless result set does not support get_column_data_offset")
+    }
 }
 
 #[cfg(test)]

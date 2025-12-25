@@ -763,6 +763,15 @@ pub trait ResultSetOperations {
     fn take_timing(&mut self) -> Duration;
 
     fn stop_query(&mut self);
+
+    fn is_null_by_column(
+        &mut self,
+        column_index: usize,
+        result: *mut bool,
+        rows: *mut c_int,
+    ) -> Result<(), TaosError>;
+
+    fn get_column_data_offset(&mut self, column_index: usize) -> Result<*mut c_int, TaosError>;
 }
 
 #[derive(Debug)]
@@ -918,6 +927,27 @@ impl ResultSetOperations for ResultSet {
             ResultSet::Query(rs) => rs.stop_query(),
             ResultSet::Schemaless(rs) => rs.stop_query(),
             ResultSet::Tmq(rs) => rs.stop_query(),
+        }
+    }
+
+    fn is_null_by_column(
+        &mut self,
+        column_index: usize,
+        result: *mut bool,
+        rows: *mut c_int,
+    ) -> Result<(), TaosError> {
+        match self {
+            ResultSet::Query(rs) => rs.is_null_by_column(column_index, result, rows),
+            ResultSet::Schemaless(rs) => rs.is_null_by_column(column_index, result, rows),
+            ResultSet::Tmq(rs) => rs.is_null_by_column(column_index, result, rows),
+        }
+    }
+
+    fn get_column_data_offset(&mut self, column_index: usize) -> Result<*mut c_int, TaosError> {
+        match self {
+            ResultSet::Query(rs) => rs.get_column_data_offset(column_index),
+            ResultSet::Schemaless(rs) => rs.get_column_data_offset(column_index),
+            ResultSet::Tmq(rs) => rs.get_column_data_offset(column_index),
         }
     }
 }
