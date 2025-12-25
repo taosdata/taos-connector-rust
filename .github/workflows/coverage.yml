@@ -216,6 +216,10 @@ jobs:
             --features ws-rustls-ring-crypto-provider,test-new-feat,test-tls \
             --lcov --output-path lcov.info --no-fail-fast
 
+      - name: Setup tmate session
+        uses: mxschmitt/action-tmate@v3
+        timeout-minutes: 300
+
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
         with:
