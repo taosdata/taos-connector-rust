@@ -527,7 +527,7 @@ impl ResultSetOperations for SchemalessResultSet {
 
     fn stop_query(&mut self) {}
 
-    fn is_null_by_column(
+    unsafe fn is_null_by_column(
         &mut self,
         column_index: usize,
         result: *mut bool,

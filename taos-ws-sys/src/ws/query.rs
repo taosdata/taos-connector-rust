@@ -1357,7 +1357,7 @@ impl ResultSetOperations for QueryResultSet {
         taos_query::block_in_place_or_global(self.rs.stop());
     }
 
-    fn is_null_by_column(
+    unsafe fn is_null_by_column(
         &mut self,
         column_index: usize,
         result: *mut bool,
@@ -1377,14 +1377,12 @@ impl ResultSetOperations for QueryResultSet {
             ));
         }
 
-        unsafe {
-            let is_nulls = block.is_null_by_col_unchecked(*rows as _, column_index);
-            debug!("query is_null_by_column, column_index: {column_index}, is_nulls: {is_nulls:?}");
-            *rows = is_nulls.len() as _;
-            let res = slice::from_raw_parts_mut(result, is_nulls.len());
-            for (i, is_null) in is_nulls.iter().enumerate() {
-                res[i] = *is_null;
-            }
+        let is_nulls = block.is_null_by_col_unchecked(*rows as _, column_index);
+        debug!("query is_null_by_column, column_index: {column_index}, is_nulls: {is_nulls:?}");
+        *rows = is_nulls.len() as _;
+        let res = slice::from_raw_parts_mut(result, is_nulls.len());
+        for (i, is_null) in is_nulls.iter().enumerate() {
+            res[i] = *is_null;
         }
         Ok(())
     }
