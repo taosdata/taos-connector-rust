@@ -1200,17 +1200,12 @@ impl TAOS_MULTI_BIND {
 
         let ty = self.ty();
         let num = self.num as usize;
-        assert!(!self.length.is_null());
-        let lens: Vec<i32> = (0..num)
-            .map(|i| unsafe { ptr::read_unaligned(self.length.add(i)) })
-            .collect();
 
         let mut is_nulls = None;
         if !self.is_null.is_null() {
             is_nulls = Some(unsafe { slice::from_raw_parts(self.is_null, num) });
         }
-
-        debug!("to_column_view, ty: {ty}, num: {num}, is_nulls: {is_nulls:?}, lens: {lens:?}");
+        debug!("to_column_view, ty: {ty}, num: {num}, is_nulls: {is_nulls:?}");
 
         macro_rules! view {
             ($ty:ty, $from:expr) => {{
