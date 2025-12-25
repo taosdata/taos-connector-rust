@@ -1157,7 +1157,6 @@ impl TAOS_MULTI_BIND {
             return val;
         }
 
-        assert!(!self.length.is_null());
         assert!(!self.buffer.is_null());
 
         let val = match self.ty() {
@@ -1176,28 +1175,17 @@ impl TAOS_MULTI_BIND {
             Ty::Timestamp => unsafe {
                 Value::Timestamp(Timestamp::Milliseconds(*(self.buffer as *const _)))
             },
-            Ty::VarChar => unsafe {
-                let slice = slice::from_raw_parts(self.buffer as _, self.length.read() as _);
-                let val = str::from_utf8_unchecked(slice).to_owned();
-                Value::VarChar(val)
-            },
-            Ty::NChar => unsafe {
-                let slice = slice::from_raw_parts(self.buffer as _, self.length.read() as _);
-                let val = str::from_utf8_unchecked(slice).to_owned();
-                Value::NChar(val)
-            },
-            Ty::Json => unsafe {
+            Ty::VarChar | Ty::NChar | Ty::Json | Ty::VarBinary | Ty::Geometry => unsafe {
+                assert!(!self.length.is_null());
                 let slice = slice::from_raw_parts(self.buffer as *const _, self.length.read() as _);
-                let val = serde_json::from_slice(slice).unwrap();
-                Value::Json(val)
-            },
-            Ty::VarBinary => unsafe {
-                let slice = slice::from_raw_parts(self.buffer as *const _, self.length.read() as _);
-                Value::VarBinary(slice.into())
-            },
-            Ty::Geometry => unsafe {
-                let slice = slice::from_raw_parts(self.buffer as *const _, self.length.read() as _);
-                Value::Geometry(slice.into())
+                match self.ty() {
+                    Ty::VarChar => Value::VarChar(str::from_utf8_unchecked(slice).to_owned()),
+                    Ty::NChar => Value::NChar(str::from_utf8_unchecked(slice).to_owned()),
+                    Ty::Json => Value::Json(serde_json::from_slice(slice).unwrap()),
+                    Ty::VarBinary => Value::VarBinary(slice.into()),
+                    Ty::Geometry => Value::Geometry(slice.into()),
+                    _ => unreachable!("unreachable branch"),
+                }
             },
             _ => todo!(),
         };
@@ -1212,7 +1200,10 @@ impl TAOS_MULTI_BIND {
 
         let ty = self.ty();
         let num = self.num as usize;
-        let lens = unsafe { slice::from_raw_parts(self.length, num) };
+        assert!(!self.length.is_null());
+        let lens: Vec<i32> = (0..num)
+            .map(|i| unsafe { ptr::read_unaligned(self.length.add(i)) })
+            .collect();
 
         let mut is_nulls = None;
         if !self.is_null.is_null() {
