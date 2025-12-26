@@ -983,7 +983,7 @@ impl TaosBuilder {
             WsAuth::Plain(user, pass) => (user.as_str(), pass.as_str()),
         };
 
-        WsConnReq {
+        let req = WsConnReq {
             user: Some(user.to_string()),
             password: Some(password.to_string()),
             db: self.database.clone(),
@@ -994,7 +994,9 @@ impl TaosBuilder {
             connector: self.connector_info.clone(),
             totp_code: self.totp_code.clone(),
             bearer_token: self.bearer_token.clone(),
-        }
+        };
+        dbg!(&req);
+        req
     }
 
     #[inline]
@@ -1753,20 +1755,166 @@ mod tests {
         Ok(())
     }
 
-    #[cfg(feature = "test-new-feat")]
+    const LOWERCASE: &str = "abcdefghijklmnopqrstuvwxyz";
+    const UPPERCASE: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    const DIGITS: &str = "0123456789";
+    const ALL_CHARS: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+
+    fn generate_totp_seed(len: usize) -> String {
+        assert!(len >= 3);
+        let mut rng = rand::rng();
+        let mut buf = Vec::with_capacity(len);
+        buf.push(LOWERCASE.as_bytes()[rng.random_range(0..LOWERCASE.len())]);
+        buf.push(UPPERCASE.as_bytes()[rng.random_range(0..UPPERCASE.len())]);
+        buf.push(DIGITS.as_bytes()[rng.random_range(0..DIGITS.len())]);
+        for _ in 3..len {
+            buf.push(ALL_CHARS.as_bytes()[rng.random_range(0..ALL_CHARS.len())]);
+        }
+        buf.shuffle(&mut rng);
+        String::from_utf8(buf).unwrap()
+    }
+
+    fn generate_totp_code(secret: &[u8]) -> String {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let counter = now / 30;
+        let code = hotp(secret, counter, 6);
+        format!("{:06}", code)
+    }
+
+    fn hotp(secret: &[u8], counter: u64, digits: usize) -> u32 {
+        use byteorder::ByteOrder;
+        use hmac::Mac;
+
+        let mut mac = hmac::Hmac::<sha1::Sha1>::new_from_slice(secret).unwrap();
+        mac.update(&counter.to_be_bytes());
+        let result = mac.finalize().into_bytes();
+        let offset = (result[result.len() - 1] & 0x0F) as usize;
+        let code = byteorder::BigEndian::read_u32(&result[offset..offset + 4]) & 0x7FFFFFFF;
+        let m = 10u32.pow(digits.min(8) as u32);
+        code % m
+    }
+
+    fn generate_totp_secret(seed: &[u8]) -> Vec<u8> {
+        use hmac::Mac;
+        let mut mac = hmac::Hmac::<sha2::Sha256>::new_from_slice(&[]).unwrap();
+        mac.update(seed);
+        mac.finalize().into_bytes().to_vec()
+    }
+
+    fn totp_secret_encode(secret: &[u8]) -> String {
+        base32::encode(base32::Alphabet::Rfc4648 { padding: false }, secret)
+    }
+
+    fn totp_secret_decode(secret: &str) -> Option<Vec<u8>> {
+        base32::decode(base32::Alphabet::Rfc4648 { padding: false }, secret)
+    }
+
+    // #[cfg(feature = "test-new-feat")]
     #[tokio::test]
-    #[ignore]
-    async fn test_connect_with_totp_and_token() -> anyhow::Result<()> {
+    // #[ignore]
+    async fn test_connect_with_totp() -> anyhow::Result<()> {
         // invalid, valid totp_code and bearer_token
-        let _taos = TaosBuilder::from_dsn("ws://localhost:6041?totp_code=xxx")?
+        let err = TaosBuilder::from_dsn("ws://192.168.1.98:6041?totp_code=xxx")?
+            .build()
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("Invalid TOTP code"));
+
+        let taos = TaosBuilder::from_dsn("ws://192.168.1.98:6041")?
             .build()
             .await?;
 
-        let _taos = TaosBuilder::from_dsn("ws://localhost:6041?bearer_token=xxx")?
+        taos.exec("drop user totp_user").await.ok();
+
+        let totp_seed = generate_totp_seed(32);
+        dbg!(&totp_seed);
+        taos.exec_many([
+            // format!("create user totp_user pass 'totp_pass_1' totpseed '{totp_seed}'"),
+            format!("create user totp_user pass 'totp_pass_1' totpseed '{totp_seed}'"),
+            // format!("select generate_totp_secret('{totp_seed}')"),
+        ])
+        .await?;
+
+        let mut rs = taos
+            .query(format!("select generate_totp_secret('{totp_seed}')"))
+            .await?;
+        let rows: Vec<String> = rs.deserialize().try_collect().await?;
+        // dbg!(&rows);
+        assert_eq!(rows.len(), 1);
+        let totp_secret = &rows[0];
+        dbg!(&totp_secret);
+        let totp_secret = totp_secret_decode(totp_secret).unwrap();
+        // let totp_secret = base32::decode(base32::Alphabet::Rfc4648 { padding: false }, totp_secret)
+        //     .expect("decode totp_secret failed");
+
+        let secret = generate_totp_secret(totp_seed.as_bytes());
+        let secret = totp_secret_encode(&secret);
+        // assert_eq!(&secret, totp_secret);
+
+        let totp_code = generate_totp_code(&totp_secret);
+
+        // User already exists
+        // let taos = TaosBuilder::from_dsn(format!("ws://192.168.1.98:6041?totp_code={totp_code}"))?
+        //     .build()
+        //     .await;
+
+        dbg!(&totp_code);
+
+        let taos = TaosBuilder::from_dsn(format!(
+            "ws://totp_user:totp_pass_1@192.168.1.98:6041?totp_code={totp_code}"
+        ))?
+        .build()
+        .await?;
+
+        let mut rs = taos.query("select 1").await?;
+        let rows: Vec<String> = rs.deserialize().try_collect().await?;
+        assert_eq!(rows, vec!["1".to_string()]);
+
+        // let _taos = TaosBuilder::from_dsn("ws://localhost:6041?bearer_token=xxx")?
+        //     .build()
+        //     .await?;
+
+        // let _taos = TaosBuilder::from_dsn("ws://localhost:6041?totp_code=xxx&bearer_token=xxx")?
+        //     .build()
+        //     .await?;
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    // #[ignore]
+    async fn test_connect_with_token() -> anyhow::Result<()> {
+        let err = TaosBuilder::from_dsn("ws://192.168.1.98:6041?bearer_token=xxx")?
+            .build()
+            .await
+            .unwrap_err();
+        dbg!(&err);
+        assert!(err.to_string().contains("Invalid token"));
+
+        let taos = TaosBuilder::from_dsn("ws://192.168.1.98:6041")?
             .build()
             .await?;
 
-        let _taos = TaosBuilder::from_dsn("ws://localhost:6041?totp_code=xxx&bearer_token=xxx")?
+        taos.exec("drop user token_user").await.ok();
+
+        taos.exec_many([
+            // format!("create user totp_user pass 'totp_pass_1' totpseed '{totp_seed}'"),
+            &format!("create user token_user pass 'token_pass_1'"),
+            // format!("select generate_totp_secret('{totp_seed}')"),
+        ])
+        .await?;
+
+        let mut rs = taos
+            .query("create token test_bearer_token from user token_user")
+            .await?;
+        let rows: Vec<String> = rs.deserialize().try_collect().await?;
+        // dbg!(&rows);
+        let token = &rows[0];
+
+        let taos = TaosBuilder::from_dsn(format!("ws://192.168.1.98:6041?bearer_token={token}"))?
             .build()
             .await?;
 
