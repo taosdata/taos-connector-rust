@@ -372,14 +372,18 @@ pub unsafe extern "C" fn taos_stmt_set_tags(
         .map_or(0, |fields| fields.len());
 
     let binds = slice::from_raw_parts(tags, tag_cnt);
-
-    let mut tags = Vec::with_capacity(tag_cnt);
-    for bind in binds {
-        tags.push(bind.to_value());
-    }
+    let tags: Result<Vec<Value>, _> = binds.iter().map(|bind| bind.to_value()).collect();
+    let tags = match tags {
+        Ok(tags) => tags,
+        Err(err) => {
+            error!("taos_stmt_set_tags failed, err: {err:?}");
+            let code = err.code();
+            maybe_err.with_err(Some(err));
+            return format_errno(code.into());
+        }
+    };
 
     taos_stmt.set_tags(tags);
-
     debug!("taos_stmt_set_tags succ, taos_stmt: {taos_stmt:?}");
 
     maybe_err.clear_err();
@@ -1148,13 +1152,13 @@ pub unsafe extern "C" fn taos_stmt_affected_rows_once(stmt: *mut TAOS_STMT) -> c
 }
 
 impl TAOS_MULTI_BIND {
-    fn to_value(&self) -> Value {
+    fn to_value(&self) -> TaosResult<Value> {
         debug!("to_value, bind: {self:?}");
 
         if !self.is_null.is_null() && unsafe { self.is_null.read() != 0 } {
             let val = Value::Null(self.ty());
             debug!("to_value, value: {val:?}");
-            return val;
+            return Ok(val);
         }
 
         assert!(!self.buffer.is_null());
@@ -1179,9 +1183,11 @@ impl TAOS_MULTI_BIND {
                 assert!(!self.length.is_null());
                 let slice = slice::from_raw_parts(self.buffer as *const _, self.length.read() as _);
                 match self.ty() {
-                    Ty::VarChar => Value::VarChar(str::from_utf8_unchecked(slice).to_owned()),
-                    Ty::NChar => Value::NChar(str::from_utf8_unchecked(slice).to_owned()),
-                    Ty::Json => Value::Json(serde_json::from_slice(slice).unwrap()),
+                    Ty::VarChar => str::from_utf8(slice)
+                        .map(String::from)
+                        .map(Value::VarChar)?,
+                    Ty::NChar => str::from_utf8(slice).map(String::from).map(Value::NChar)?,
+                    Ty::Json => serde_json::from_slice(slice).map(Value::Json)?,
                     Ty::VarBinary => Value::VarBinary(slice.into()),
                     Ty::Geometry => Value::Geometry(slice.into()),
                     _ => unreachable!("unreachable branch"),
@@ -1192,7 +1198,7 @@ impl TAOS_MULTI_BIND {
 
         debug!("to_value, value: {val:?}");
 
-        val
+        Ok(val)
     }
 
     fn to_column_view(&self) -> ColumnView {

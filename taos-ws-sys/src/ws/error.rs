@@ -324,6 +324,16 @@ impl From<taos_error::Error> for TaosError {
     }
 }
 
+impl From<serde_json::Error> for TaosError {
+    fn from(err: serde_json::Error) -> Self {
+        Self {
+            code: Code::FAILED,
+            message: CString::new(err.to_string()).unwrap(),
+            source: None,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::ffi::CStr;
@@ -345,5 +355,13 @@ mod tests {
             let errstr = CStr::from_ptr(errstr_ptr);
             assert_eq!(errstr, c"test error");
         }
+    }
+
+    #[test]
+    fn test_taos_error_from_serde_json_error() {
+        let invalid_json = "{ invalid json }";
+        let err = serde_json::from_str::<serde_json::Value>(invalid_json).unwrap_err();
+        let taos_err = TaosError::from(err);
+        assert_eq!(taos_err.code, Code::FAILED);
     }
 }

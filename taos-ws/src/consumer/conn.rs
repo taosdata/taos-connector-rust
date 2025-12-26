@@ -952,7 +952,7 @@ mod tests {
 
         consumer.unsubscribe().await;
 
-        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+        tokio::time::sleep(std::time::Duration::from_secs(10)).await;
 
         taos.exec_many([
             "drop topic if exists topic_1762848301",
