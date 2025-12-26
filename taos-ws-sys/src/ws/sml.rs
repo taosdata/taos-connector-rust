@@ -794,4 +794,28 @@ mod tests {
             taos_close(taos);
         }
     }
+
+    #[test]
+    #[should_panic]
+    fn test_is_null_by_column_unreachable() {
+        let mut rs = SchemalessResultSet::new(
+            0,
+            Precision::Millisecond,
+            std::time::Duration::from_millis(0),
+        );
+        unsafe {
+            let _ = rs.is_null_by_column(0, std::ptr::null_mut(), std::ptr::null_mut());
+        }
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_get_column_data_offset_unreachable() {
+        let mut rs = SchemalessResultSet::new(
+            0,
+            Precision::Millisecond,
+            std::time::Duration::from_millis(0),
+        );
+        let _ = rs.get_column_data_offset(0);
+    }
 }

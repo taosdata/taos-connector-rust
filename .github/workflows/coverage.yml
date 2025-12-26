@@ -120,23 +120,11 @@ jobs:
     runs-on: ubuntu-latest
     needs: build-tdengine
     steps:
-      # - name: Setup tmate session
-      #   uses: mxschmitt/action-tmate@v3
-      #   timeout-minutes: 3
-
       - name: Maximize build space
         uses: easimon/maximize-build-space@master
         with:
           root-reserve-mb: 10240
-          # swap-size-mb: 1024
-          # remove-dotnet: 'true'
-          # remove-android: 'true'
-          # remove-haskell: 'true'
           temp-reserve-mb: 20480
-
-      # - name: Setup tmate session
-      #   uses: mxschmitt/action-tmate@v3
-      #   timeout-minutes: 3
 
       - name: Get cache server by push
         if: github.event_name == 'push'
@@ -161,19 +149,8 @@ jobs:
           tar -zxvf server.tar.gz
           cd release && sudo sh install.sh
 
-      # - name: test
-      #   run: |
-      #     sudo mkdir -p /mnt/taos/data /mnt/taos/log /mnt/taos/project
-      #     sudo chown -R "$USER":"$(id -gn)" /mnt/taos
-
       - name: Checkout
         uses: actions/checkout@v4
-        # with:
-        #   path: /mnt/taos/project
-
-      # - name: Setup tmate session
-      #   uses: mxschmitt/action-tmate@v3
-      #   timeout-minutes: 300
 
       - name: Set up Rust
         id: setup-rust
@@ -235,10 +212,6 @@ jobs:
           TD_VERSION=3.9.9.9 cargo nextest run -p taos-ws-sys test_taos_get_client_info_injected -- --ignored
           TD_VERSION="$(printf '\xff\xfe')" cargo nextest run -p taos-ws-sys test_taos_get_client_info_default
 
-      # - name: Setup tmate session
-      #   uses: mxschmitt/action-tmate@v3
-      #   timeout-minutes: 300
-
       - name: Generate code coverage
         env:
           TDENGINE_CLOUD_URL: ${{ secrets.TDENGINE_CLOUD_URL }}
@@ -248,10 +221,6 @@ jobs:
           RUST_BACKTRACE=1 cargo llvm-cov nextest -j 4 --workspace \
             --features ws-rustls-ring-crypto-provider,test-new-feat,test-tls \
             --lcov --output-path lcov.info --no-fail-fast
-
-      # - name: Setup tmate session
-      #   uses: mxschmitt/action-tmate@v3
-      #   timeout-minutes: 300
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
