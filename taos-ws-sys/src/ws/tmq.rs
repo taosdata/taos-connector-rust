@@ -1365,6 +1365,8 @@ pub struct TmqResultSet {
     table_name: Option<CString>,
     topic_name: Option<CString>,
     db_name: Option<CString>,
+    rows: Vec<*const c_void>,
+    offsets: Option<Vec<i32>>,
 }
 
 impl TmqResultSet {
@@ -1390,6 +1392,8 @@ impl TmqResultSet {
             table_name,
             topic_name,
             db_name,
+            rows: vec![ptr::null(); num_of_fields],
+            offsets: None,
         }
     }
 }
@@ -1468,7 +1472,23 @@ impl ResultSetOperations for TmqResultSet {
     }
 
     unsafe fn fetch_block(&mut self, rows: *mut TAOS_ROW, num: *mut c_int) -> Result<(), Error> {
-        todo!()
+        if self.block.is_none() || self.row.current_row >= self.block.as_ref().unwrap().nrows() {
+            self.block = self.data.fetch_raw_block()?;
+            self.row.current_row = 0;
+        }
+
+        if let Some(block) = self.block.as_ref() {
+            if block.nrows() > 0 {
+                for (i, col) in block.columns().enumerate() {
+                    self.rows[i] = col.as_raw_ptr();
+                }
+                self.row.current_row = block.nrows();
+                *rows = self.rows.as_ptr() as _;
+                *num = block.nrows() as _;
+            }
+        }
+
+        Ok(())
     }
 
     unsafe fn fetch_row(&mut self) -> Result<TAOS_ROW, Error> {
@@ -1484,8 +1504,8 @@ impl ResultSetOperations for TmqResultSet {
                 }
 
                 for col in 0..block.ncols() {
-                    let value = block.get_raw_value_unchecked(self.row.current_row, col);
-                    self.row.data[col] = value.2;
+                    let res = block.get_raw_value_unchecked(self.row.current_row, col);
+                    self.row.data[col] = res.2;
                 }
 
                 self.row.current_row += 1;
@@ -1509,6 +1529,62 @@ impl ResultSetOperations for TmqResultSet {
     }
 
     fn stop_query(&mut self) {}
+
+    unsafe fn is_null_by_column(
+        &mut self,
+        column_index: usize,
+        result: *mut bool,
+        rows: *mut c_int,
+    ) -> Result<(), TaosError> {
+        let block = self.block.as_ref().ok_or_else(|| {
+            error!("tmq is_null_by_column failed, block is none");
+            TaosError::new(Code::FAILED, "block is none")
+        })?;
+
+        let ncols = block.ncols();
+        if ncols == 0 || column_index >= ncols {
+            error!("tmq is_null_by_column failed, column_index:{column_index} is invalid, columns_num: {ncols}");
+            return Err(TaosError::new(
+                Code::INVALID_PARA,
+                "column index is invalid",
+            ));
+        }
+
+        unsafe {
+            let is_nulls = block.is_null_by_col_unchecked(*rows as _, column_index);
+            debug!("tmq is_null_by_column, column_index: {column_index}, is_nulls: {is_nulls:?}");
+            *rows = is_nulls.len() as _;
+            let res = std::slice::from_raw_parts_mut(result, is_nulls.len());
+            for (i, is_null) in is_nulls.iter().enumerate() {
+                res[i] = *is_null;
+            }
+        }
+        Ok(())
+    }
+
+    fn get_column_data_offset(&mut self, column_index: usize) -> Result<*mut c_int, TaosError> {
+        let block = self.block.as_ref().ok_or_else(|| {
+            error!("tmq get_column_data_offset failed, block is none");
+            TaosError::new(Code::FAILED, "block is none")
+        })?;
+
+        let ncols = block.ncols();
+        if ncols == 0 || column_index >= ncols {
+            error!("tmq get_column_data_offset failed, column_index:{column_index} is invalid, columns_num: {ncols}");
+            return Err(TaosError::new(
+                Code::INVALID_PARA,
+                "column index is invalid",
+            ));
+        }
+
+        let offsets = block.get_col_data_offset_unchecked(column_index);
+        debug!("tmq get_column_data_offset, column_index: {column_index}, offsets: {offsets:?}");
+        if offsets.is_empty() {
+            return Ok(ptr::null_mut());
+        }
+        self.offsets = Some(offsets);
+        Ok(self.offsets.as_mut().unwrap().as_mut_ptr())
+    }
 }
 
 #[derive(Debug)]
@@ -1599,7 +1675,8 @@ mod tests {
 
     use super::*;
     use crate::ws::query::{
-        taos_fetch_fields, taos_fetch_row, taos_free_result, taos_num_fields, taos_print_row,
+        taos_fetch_block, taos_fetch_fields, taos_fetch_row, taos_free_result,
+        taos_get_column_data_offset, taos_is_null_by_column, taos_num_fields, taos_print_row,
     };
     use crate::ws::{taos_close, test_connect, test_exec, test_exec_many};
 
@@ -3229,6 +3306,281 @@ mod tests {
                 let code = tmq_consumer_close(consumer);
                 assert_eq!(code, 0);
             }
+        }
+    }
+
+    #[test]
+    fn test_taos_fetch_block() {
+        unsafe {
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    "drop topic if exists topic_1766654629",
+                    "drop database if exists test_1766654629",
+                    "create database test_1766654629",
+                    "create topic topic_1766654629 as database test_1766654629",
+                    "use test_1766654629",
+                    "create table t0 (ts timestamp, c1 int, c2 varchar(20))",
+                    "insert into t0 values (1741780784749, 2025, 'hello')",
+                    "insert into t0 values (1741780784750, 999, null)",
+                    "insert into t0 values (1741780784751, null, 'world')",
+                    "insert into t0 values (1741780784752, null, null)",
+                ],
+            );
+
+            let conf = tmq_conf_new();
+            assert!(!conf.is_null());
+
+            let key = c"group.id".as_ptr();
+            let value = c"10".as_ptr();
+            let res = tmq_conf_set(conf, key, value);
+            assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+            let key = c"auto.offset.reset".as_ptr();
+            let value = c"earliest".as_ptr();
+            let res = tmq_conf_set(conf, key, value);
+            assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+            let mut errstr = [0; 256];
+            let consumer = tmq_consumer_new(conf, errstr.as_mut_ptr(), errstr.len() as _);
+            assert!(!consumer.is_null());
+
+            let list = tmq_list_new();
+            assert!(!list.is_null());
+
+            let topic = c"topic_1766654629";
+            let code = tmq_list_append(list, topic.as_ptr());
+            assert_eq!(code, 0);
+
+            let code = tmq_subscribe(consumer, list);
+            assert_eq!(code, 0);
+
+            tmq_conf_destroy(conf);
+            tmq_list_destroy(list);
+
+            let mut total_rows = 0;
+            loop {
+                let res = tmq_consumer_poll(consumer, 1000);
+                if res.is_null() {
+                    break;
+                }
+
+                loop {
+                    let mut rows = ptr::null_mut();
+                    let num_of_rows = taos_fetch_block(res, &mut rows);
+                    if num_of_rows == 0 {
+                        break;
+                    }
+                    total_rows += num_of_rows;
+                }
+
+                taos_free_result(res);
+            }
+            assert_eq!(total_rows, 4);
+
+            let code = tmq_unsubscribe(consumer);
+            assert_eq!(code, 0);
+
+            let code = tmq_consumer_close(consumer);
+            assert_eq!(code, 0);
+
+            test_exec_many(
+                taos,
+                &[
+                    "drop topic if exists topic_1766654629",
+                    "drop database if exists test_1766654629",
+                ],
+            );
+
+            taos_close(taos);
+        }
+    }
+
+    #[test]
+    fn test_taos_is_null_by_column() {
+        unsafe {
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    "drop topic if exists topic_1766656091",
+                    "drop database if exists test_1766656091",
+                    "create database test_1766656091",
+                    "create topic topic_1766656091 as database test_1766656091",
+                    "use test_1766656091",
+                    "create table t0 (ts timestamp, c1 int)",
+                    "insert into t0 values (1741780784749, 1)",
+                    "insert into t0 values (1741780784750, null)",
+                    "insert into t0 values (1741780784751, 2)",
+                    "insert into t0 values (1741780784752, null)",
+                ],
+            );
+
+            let conf = tmq_conf_new();
+            assert!(!conf.is_null());
+
+            let key = c"group.id".as_ptr();
+            let value = c"10".as_ptr();
+            let res = tmq_conf_set(conf, key, value);
+            assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+            let key = c"auto.offset.reset".as_ptr();
+            let value = c"earliest".as_ptr();
+            let res = tmq_conf_set(conf, key, value);
+            assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+            let mut errstr = [0; 256];
+            let consumer = tmq_consumer_new(conf, errstr.as_mut_ptr(), errstr.len() as _);
+            assert!(!consumer.is_null());
+
+            let list = tmq_list_new();
+            assert!(!list.is_null());
+
+            let topic = c"topic_1766656091";
+            let code = tmq_list_append(list, topic.as_ptr());
+            assert_eq!(code, 0);
+
+            let code = tmq_subscribe(consumer, list);
+            assert_eq!(code, 0);
+
+            tmq_conf_destroy(conf);
+            tmq_list_destroy(list);
+
+            let mut actual_rows = 0;
+            let mut actual_results = vec![];
+
+            loop {
+                let res = tmq_consumer_poll(consumer, 1000);
+                if res.is_null() {
+                    break;
+                }
+
+                loop {
+                    let mut rows = ptr::null_mut();
+                    let num_of_rows = taos_fetch_block(res, &mut rows);
+                    if num_of_rows == 0 {
+                        break;
+                    }
+
+                    let mut rows = num_of_rows;
+                    let mut result = vec![false; num_of_rows as _];
+                    let code = taos_is_null_by_column(res, 1, result.as_mut_ptr(), &mut rows);
+                    assert_eq!(code, 0);
+
+                    actual_rows += num_of_rows;
+                    actual_results.extend_from_slice(&result);
+                }
+
+                taos_free_result(res);
+            }
+
+            assert_eq!(actual_rows, 4);
+            assert_eq!(actual_results, vec![false, true, false, true]);
+
+            let code = tmq_unsubscribe(consumer);
+            assert_eq!(code, 0);
+
+            let code = tmq_consumer_close(consumer);
+            assert_eq!(code, 0);
+
+            test_exec_many(
+                taos,
+                &[
+                    "drop topic if exists topic_1766656091",
+                    "drop database if exists test_1766656091",
+                ],
+            );
+
+            taos_close(taos);
+        }
+    }
+
+    #[test]
+    fn test_taos_get_column_data_offset() {
+        unsafe {
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    "drop topic if exists topic_1766661127",
+                    "drop database if exists test_1766661127",
+                    "create database test_1766661127",
+                    "create topic topic_1766661127 as database test_1766661127",
+                    "use test_1766661127",
+                    "create table t0 (ts timestamp, c1 varchar(20))",
+                    "insert into t0 values (1741780784749, 'hello')",
+                    "insert into t0 values (1741780784750, null)",
+                ],
+            );
+
+            let conf = tmq_conf_new();
+            assert!(!conf.is_null());
+
+            let key = c"group.id".as_ptr();
+            let value = c"10".as_ptr();
+            let res = tmq_conf_set(conf, key, value);
+            assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+            let key = c"auto.offset.reset".as_ptr();
+            let value = c"earliest".as_ptr();
+            let res = tmq_conf_set(conf, key, value);
+            assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+            let mut errstr = [0; 256];
+            let consumer = tmq_consumer_new(conf, errstr.as_mut_ptr(), errstr.len() as _);
+            assert!(!consumer.is_null());
+
+            let list = tmq_list_new();
+            assert!(!list.is_null());
+
+            let topic = c"topic_1766661127";
+            let code = tmq_list_append(list, topic.as_ptr());
+            assert_eq!(code, 0);
+
+            let code = tmq_subscribe(consumer, list);
+            assert_eq!(code, 0);
+
+            tmq_conf_destroy(conf);
+            tmq_list_destroy(list);
+
+            loop {
+                let res = tmq_consumer_poll(consumer, 1000);
+                if res.is_null() {
+                    break;
+                }
+
+                loop {
+                    let mut rows = ptr::null_mut();
+                    let num_of_rows = taos_fetch_block(res, &mut rows);
+                    if num_of_rows == 0 {
+                        break;
+                    }
+
+                    let offset = taos_get_column_data_offset(res, 1);
+                    assert!(!offset.is_null());
+                    let offsets = std::slice::from_raw_parts(offset, num_of_rows as _);
+                    println!("offsets: {offsets:?}");
+                }
+
+                taos_free_result(res);
+            }
+
+            let code = tmq_unsubscribe(consumer);
+            assert_eq!(code, 0);
+
+            let code = tmq_consumer_close(consumer);
+            assert_eq!(code, 0);
+
+            test_exec_many(
+                taos,
+                &[
+                    "drop topic if exists topic_1766661127",
+                    "drop database if exists test_1766661127",
+                ],
+            );
+
+            taos_close(taos);
         }
     }
 }

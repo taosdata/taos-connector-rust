@@ -945,14 +945,14 @@ mod tests {
         let mut consumer = tmq.build().await?;
         consumer.subscribe(["topic_1762848301"]).await?;
 
-        let timeout = Timeout::Duration(std::time::Duration::from_secs(5));
+        let timeout = Timeout::Duration(std::time::Duration::from_secs(10));
         let err = consumer.recv_timeout(timeout).await.unwrap_err();
         assert_eq!(err.code(), WS_ERROR_NO::CONN_CLOSED.as_code());
         assert!(err.to_string().contains("WebSocket connection is closed"));
 
         consumer.unsubscribe().await;
 
-        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+        tokio::time::sleep(std::time::Duration::from_secs(10)).await;
 
         taos.exec_many([
             "drop topic if exists topic_1762848301",

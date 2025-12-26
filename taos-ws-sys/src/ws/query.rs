@@ -503,44 +503,28 @@ pub unsafe extern "C" fn taos_is_null_by_column(
 
     if res.is_null() || result.is_null() || rows.is_null() || *rows <= 0 || columnIndex < 0 {
         error!("taos_is_null_by_column failed, invalid params");
-        return Code::INVALID_PARA.into();
+        return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "invalid params"));
     }
 
     let maybe_err = (res as *mut TaosMaybeError<ResultSet>).as_mut().unwrap();
-    if maybe_err.deref_mut().is_none() {
-        error!("taos_is_null_by_column failed, res is invalid");
-        return Code::INVALID_PARA.into();
-    }
-
-    match maybe_err.deref_mut().unwrap() {
-        ResultSet::Query(rs) => match &rs.block {
-            Some(block) => {
-                let col = columnIndex as usize;
-                if col >= block.ncols() || block.ncols() == 0 {
-                    error!("taos_is_null_by_column failed, column index is invalid");
-                    return Code::INVALID_PARA.into();
-                }
-
-                let is_nulls = block.is_null_by_col_unchecked(*rows as _, col);
-                debug!("taos_is_null_by_column succ, is_nulls: {is_nulls:?}");
-                *rows = is_nulls.len() as _;
-                let res = slice::from_raw_parts_mut(result, is_nulls.len());
-                for (i, is_null) in is_nulls.iter().enumerate() {
-                    res[i] = *is_null;
-                }
+    match maybe_err.deref_mut() {
+        Some(rs) => match rs.is_null_by_column(columnIndex as usize, result, rows) {
+            Ok(()) => {
+                debug!("taos_is_null_by_column succ, column_index: {columnIndex}");
                 maybe_err.clear_err();
                 clear_err_and_ret_succ()
             }
-            None => {
-                error!("taos_is_null_by_column failed, block is none");
-                maybe_err.with_err(Some(TaosError::new(Code::FAILED, "block is none")));
-                format_errno(Code::FAILED.into())
+            Err(err) => {
+                error!("taos_is_null_by_column failed, err: {err:?}");
+                let code = err.code().into();
+                maybe_err.with_err(Some(err));
+                format_errno(code)
             }
         },
-        _ => {
-            error!("taos_is_null_by_column failed, rs is invalid");
-            maybe_err.with_err(Some(TaosError::new(Code::FAILED, "rs is invalid")));
-            format_errno(Code::FAILED.into())
+        None => {
+            error!("taos_is_null_by_column failed, res is invalid");
+            maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "res is invalid")));
+            format_errno(Code::INVALID_PARA.into())
         }
     }
 }
@@ -751,7 +735,8 @@ pub unsafe extern "C" fn taos_get_column_data_offset(
     debug!("taos_get_column_data_offset start, res: {res:?}, column_index: {columnIndex}");
 
     if res.is_null() || columnIndex < 0 {
-        error!("taos_get_column_data_offset failed, res or column index is invalid");
+        error!("taos_get_column_data_offset failed, invalid params");
+        set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "invalid params"));
         return ptr::null_mut();
     }
 
@@ -760,31 +745,24 @@ pub unsafe extern "C" fn taos_get_column_data_offset(
         Some(rs) => rs,
         None => {
             error!("taos_get_column_data_offset failed, res is invalid");
+            set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "res is invalid"));
             return ptr::null_mut();
         }
     };
 
-    let col = columnIndex as usize;
-    if let ResultSet::Query(rs) = rs {
-        if let Some(block) = rs.block.as_ref() {
-            if col < block.ncols() && block.ncols() > 0 {
-                let offsets = block.get_col_data_offset_unchecked(col);
-                debug!("taos_get_column_data_offset succ, offsets: {offsets:?}");
-                if offsets.is_empty() {
-                    return ptr::null_mut();
-                }
-                rs.offsets = Some(offsets);
-                return rs.offsets.as_ref().unwrap().as_ptr() as *mut _;
-            }
-            error!("taos_get_column_data_offset failed, column index is invalid");
-        } else {
-            error!("taos_get_column_data_offset failed, block is none");
+    match rs.get_column_data_offset(columnIndex as usize) {
+        Ok(offsets) => {
+            debug!("taos_get_column_data_offset succ, offsets: {offsets:?}");
+            maybe_err.clear_err();
+            clear_err_and_ret_succ();
+            offsets
         }
-    } else {
-        error!("taos_get_column_data_offset failed, rs is invalid");
+        Err(err) => {
+            error!("taos_get_column_data_offset failed, err: {err:?}");
+            maybe_err.with_err(Some(err));
+            ptr::null_mut()
+        }
     }
-
-    ptr::null_mut()
 }
 
 #[no_mangle]
@@ -1377,6 +1355,60 @@ impl ResultSetOperations for QueryResultSet {
 
     fn stop_query(&mut self) {
         taos_query::block_in_place_or_global(self.rs.stop());
+    }
+
+    unsafe fn is_null_by_column(
+        &mut self,
+        column_index: usize,
+        result: *mut bool,
+        rows: *mut c_int,
+    ) -> Result<(), TaosError> {
+        let block = self.block.as_ref().ok_or_else(|| {
+            error!("query is_null_by_column failed, block is none");
+            TaosError::new(Code::FAILED, "block is none")
+        })?;
+
+        let ncols = block.ncols();
+        if ncols == 0 || column_index >= ncols {
+            error!("query is_null_by_column failed, column_index:{column_index} is invalid, columns_num: {ncols}");
+            return Err(TaosError::new(
+                Code::INVALID_PARA,
+                "column index is invalid",
+            ));
+        }
+
+        let is_nulls = block.is_null_by_col_unchecked(*rows as _, column_index);
+        debug!("query is_null_by_column, column_index: {column_index}, is_nulls: {is_nulls:?}");
+        *rows = is_nulls.len() as _;
+        let res = slice::from_raw_parts_mut(result, is_nulls.len());
+        for (i, is_null) in is_nulls.iter().enumerate() {
+            res[i] = *is_null;
+        }
+        Ok(())
+    }
+
+    fn get_column_data_offset(&mut self, column_index: usize) -> Result<*mut c_int, TaosError> {
+        let block = self.block.as_ref().ok_or_else(|| {
+            error!("query get_column_data_offset failed, block is none");
+            TaosError::new(Code::FAILED, "block is none")
+        })?;
+
+        let ncols = block.ncols();
+        if ncols == 0 || column_index >= ncols {
+            error!("query get_column_data_offset failed, column_index:{column_index} is invalid, columns_num: {ncols}");
+            return Err(TaosError::new(
+                Code::INVALID_PARA,
+                "column index is invalid",
+            ));
+        }
+
+        let offsets = block.get_col_data_offset_unchecked(column_index);
+        debug!("query get_column_data_offset, column_index: {column_index}, offsets: {offsets:?}");
+        if offsets.is_empty() {
+            return Ok(ptr::null_mut());
+        }
+        self.offsets = Some(offsets);
+        Ok(self.offsets.as_mut().unwrap().as_mut_ptr())
     }
 }
 
