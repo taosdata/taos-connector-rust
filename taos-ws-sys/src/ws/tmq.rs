@@ -1583,7 +1583,7 @@ impl ResultSetOperations for TmqResultSet {
             return Ok(ptr::null_mut());
         }
         self.offsets = Some(offsets);
-        Ok(self.offsets.as_deref().unwrap().as_ptr() as *mut _)
+        Ok(self.offsets.as_mut().unwrap().as_mut_ptr())
     }
 }
 

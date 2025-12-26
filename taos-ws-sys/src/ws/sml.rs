@@ -533,11 +533,17 @@ impl ResultSetOperations for SchemalessResultSet {
         result: *mut bool,
         rows: *mut c_int,
     ) -> Result<(), TaosError> {
-        unreachable!("schemaless result set does not support is_null_by_column")
+        Err(TaosError::new(
+            Code::FAILED,
+            "schemaless result set does not support is_null_by_column",
+        ))
     }
 
     fn get_column_data_offset(&mut self, column_index: usize) -> Result<*mut c_int, TaosError> {
-        unreachable!("schemaless result set does not support get_column_data_offset")
+        Err(TaosError::new(
+            Code::FAILED,
+            "schemaless result set does not support get_column_data_offset",
+        ))
     }
 }
 
@@ -796,26 +802,28 @@ mod tests {
     }
 
     #[test]
-    #[should_panic]
-    fn test_is_null_by_column_unreachable() {
+    fn test_is_null_by_column_error() {
         let mut rs = SchemalessResultSet::new(
             0,
             Precision::Millisecond,
             std::time::Duration::from_millis(0),
         );
         unsafe {
-            let _ = rs.is_null_by_column(0, std::ptr::null_mut(), std::ptr::null_mut());
+            let err = rs
+                .is_null_by_column(0, std::ptr::null_mut(), std::ptr::null_mut())
+                .unwrap_err();
+            assert_eq!(err.code(), Code::FAILED);
         }
     }
 
     #[test]
-    #[should_panic]
-    fn test_get_column_data_offset_unreachable() {
+    fn test_get_column_data_offset_error() {
         let mut rs = SchemalessResultSet::new(
             0,
             Precision::Millisecond,
             std::time::Duration::from_millis(0),
         );
-        let _ = rs.get_column_data_offset(0);
+        let err = rs.get_column_data_offset(0).unwrap_err();
+        assert_eq!(err.code(), Code::FAILED);
     }
 }
