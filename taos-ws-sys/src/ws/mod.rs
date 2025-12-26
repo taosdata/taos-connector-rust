@@ -149,7 +149,6 @@ impl From<&Field> for TAOS_FIELD {
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn taos_connect(
     ip: *const c_char,
     user: *const c_char,
@@ -157,8 +156,9 @@ pub unsafe extern "C" fn taos_connect(
     db: *const c_char,
     port: u16,
 ) -> *mut TAOS {
+    debug!("taos_connect, ip: {ip:?}, user: {user:?}, pass: {pass:?}, db: {db:?}, port: {port}");
     taos_init();
-    match connect(ip, user, pass, db, port) {
+    match connect(ip, user, pass, db, port, ptr::null(), ptr::null()) {
         Ok(taos) => Box::into_raw(Box::new(taos)) as _,
         Err(mut err) => {
             error!("taos_connect failed, err: {err:?}");
@@ -177,6 +177,8 @@ unsafe fn connect(
     pass: *const c_char,
     db: *const c_char,
     port: u16,
+    totp_code: *const c_char,
+    bearer_token: *const c_char,
 ) -> TaosResult<Taos> {
     let addr = if !ip.is_null() {
         let ip = CStr::from_ptr(ip).to_str()?;
@@ -208,7 +210,26 @@ unsafe fn connect(
         None
     };
 
-    let dsn = util::build_dsn(Some(&addr), user, pass, db, None, None, None);
+    let totp_code = if !totp_code.is_null() {
+        Some(CStr::from_ptr(totp_code).to_str()?)
+    } else {
+        None
+    };
+
+    let bearer_token = if !bearer_token.is_null() {
+        Some(CStr::from_ptr(bearer_token).to_str()?)
+    } else {
+        None
+    };
+
+    let dsn = util::DsnBuilder::new()
+        .addr(Some(&addr))
+        .user(user)
+        .pass(pass)
+        .db(db)
+        .totp_code(totp_code)
+        .bearer_token(bearer_token)
+        .build();
     debug!("taos_connect, dsn: {dsn:?}");
 
     let builder = TaosBuilder::from_dsn(dsn)?;
@@ -218,8 +239,8 @@ unsafe fn connect(
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn taos_connect_with_dsn(dsn: *const c_char) -> *mut TAOS {
+    debug!("taos_connect_with_dsn, dsn: {dsn:?}");
     match connect_with_dsn(dsn) {
         Ok(taos) => Box::into_raw(Box::new(taos)) as _,
         Err(mut err) => {
@@ -277,7 +298,6 @@ fn connect_from_dsn(dsn: &str) -> TaosResult<Taos> {
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn taos_close(taos: *mut TAOS) {
     debug!("taos_close, taos: {taos:?}");
     if taos.is_null() {
@@ -290,6 +310,7 @@ pub unsafe extern "C" fn taos_close(taos: *mut TAOS) {
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn taos_options(option: TSDB_OPTION, arg: *const c_void, ...) -> c_int {
+    debug!("taos_options, option: {option:?}, arg: {arg:?}");
     match option {
         TSDB_OPTION::TSDB_OPTION_CONFIGDIR => {
             if arg.is_null() {
@@ -566,7 +587,7 @@ unsafe fn connect_with(options: *const OPTIONS) -> TaosResult<Taos> {
 
 unsafe fn build_dsn_from_options(options: *const OPTIONS) -> TaosResult<String> {
     if options.is_null() {
-        let dsn = util::build_dsn(None, None, None, None, None, None, None);
+        let dsn = util::DsnBuilder::new().build();
         debug!("build_dsn_from_options, options is null, use default dsn: {dsn}");
         return Ok(dsn);
     }
@@ -709,6 +730,69 @@ unsafe fn build_dsn_from_options(options: *const OPTIONS) -> TaosResult<String> 
     }
 
     Ok(format!("{protocol}://{user}:{pass}@{addr}/{db}?{params}"))
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn taos_connect_totp(
+    ip: *const c_char,
+    user: *const c_char,
+    pass: *const c_char,
+    totp: *const c_char,
+    db: *const c_char,
+    port: u16,
+) -> *mut TAOS {
+    debug!("taos_connect_totp, ip: {ip:?}, user: {user:?}, pass: {pass:?}, totp: {totp:?}, db: {db:?}, port: {port}");
+    taos_init();
+    match connect(ip, user, pass, db, port, totp, ptr::null()) {
+        Ok(taos) => Box::into_raw(Box::new(taos)) as _,
+        Err(mut err) => {
+            error!("taos_connect_totp failed, err: {err:?}");
+            if err.code() == WS_ERROR_NO::WEBSOCKET_ERROR.as_code() {
+                err = TaosError::new(Code::new(0x000B), "Unable to establish connection");
+            }
+            set_err_and_get_code(err);
+            ptr::null_mut()
+        }
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn taos_connect_test(
+    ip: *const c_char,
+    user: *const c_char,
+    pass: *const c_char,
+    totp: *const c_char,
+    db: *const c_char,
+    port: u16,
+) -> c_int {
+    debug!("taos_connect_test, ip: {ip:?}, user: {user:?}, pass: {pass:?}, totp: {totp:?}, db: {db:?}, port: {port}");
+    let taos = taos_connect_totp(ip, user, pass, totp, db, port);
+    if taos.is_null() {
+        return error::errno();
+    }
+    0
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn taos_connect_token(
+    ip: *const c_char,
+    token: *const c_char,
+    db: *const c_char,
+    port: u16,
+) -> *mut TAOS {
+    debug!("taos_connect_token, ip: {ip:?}, token: {token:?}, db: {db:?}, port: {port}");
+    taos_init();
+    match connect(ip, ptr::null(), ptr::null(), db, port, ptr::null(), token) {
+        Ok(taos) => Box::into_raw(Box::new(taos)) as _,
+        Err(mut err) => {
+            error!("taos_connect_token failed, err: {err:?}");
+            if err.code() == WS_ERROR_NO::WEBSOCKET_ERROR.as_code() {
+                err = TaosError::new(Code::new(0x000B), "Unable to establish connection");
+            }
+            set_err_and_get_code(err);
+            ptr::null_mut()
+        }
+    }
 }
 
 #[derive(Debug)]
