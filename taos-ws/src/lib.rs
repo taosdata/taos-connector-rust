@@ -983,7 +983,7 @@ impl TaosBuilder {
             WsAuth::Plain(user, pass) => (user.as_str(), pass.as_str()),
         };
 
-        let req = WsConnReq {
+        WsConnReq {
             user: Some(user.to_string()),
             password: Some(password.to_string()),
             db: self.database.clone(),
@@ -994,9 +994,7 @@ impl TaosBuilder {
             connector: self.connector_info.clone(),
             totp_code: self.totp_code.clone(),
             bearer_token: self.bearer_token.clone(),
-        };
-        dbg!(&req);
-        req
+        }
     }
 
     #[inline]

@@ -1127,7 +1127,12 @@ impl crate::prelude::sync::Inlinable for RawBlock {
     fn read_inlined<R: std::io::Read>(reader: &mut R) -> std::io::Result<Self> {
         use crate::prelude::sync::InlinableRead;
         let layout = reader.read_u32()?;
-        let layout = Layout::from_bits(layout).expect("should be layout");
+        let layout = Layout::from_bits(layout).ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "invalid layout bits in raw block",
+            )
+        })?;
 
         let precision = layout.precision();
         let raw: InlineBlock = reader.read_inlinable()?;
@@ -1154,7 +1159,12 @@ impl crate::prelude::sync::Inlinable for RawBlock {
         if layout == 0xFFFFFFFF {
             return Ok(None);
         }
-        let layout = Layout::from_bits(layout).expect("should be layout");
+        let layout = Layout::from_bits(layout).ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "invalid layout bits in raw block",
+            )
+        })?;
 
         let precision = layout.precision();
         let raw: InlineBlock = reader.read_inlinable()?;

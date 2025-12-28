@@ -526,6 +526,25 @@ impl ResultSetOperations for SchemalessResultSet {
     }
 
     fn stop_query(&mut self) {}
+
+    unsafe fn is_null_by_column(
+        &mut self,
+        column_index: usize,
+        result: *mut bool,
+        rows: *mut c_int,
+    ) -> Result<(), TaosError> {
+        Err(TaosError::new(
+            Code::FAILED,
+            "schemaless result set does not support is_null_by_column",
+        ))
+    }
+
+    fn get_column_data_offset(&mut self, column_index: usize) -> Result<*mut c_int, TaosError> {
+        Err(TaosError::new(
+            Code::FAILED,
+            "schemaless result set does not support get_column_data_offset",
+        ))
+    }
 }
 
 #[cfg(test)]
@@ -780,5 +799,31 @@ mod tests {
             test_exec(taos, "drop database test_1742376152");
             taos_close(taos);
         }
+    }
+
+    #[test]
+    fn test_is_null_by_column_error() {
+        let mut rs = SchemalessResultSet::new(
+            0,
+            Precision::Millisecond,
+            std::time::Duration::from_millis(0),
+        );
+        unsafe {
+            let err = rs
+                .is_null_by_column(0, std::ptr::null_mut(), std::ptr::null_mut())
+                .unwrap_err();
+            assert_eq!(err.code(), Code::FAILED);
+        }
+    }
+
+    #[test]
+    fn test_get_column_data_offset_error() {
+        let mut rs = SchemalessResultSet::new(
+            0,
+            Precision::Millisecond,
+            std::time::Duration::from_millis(0),
+        );
+        let err = rs.get_column_data_offset(0).unwrap_err();
+        assert_eq!(err.code(), Code::FAILED);
     }
 }

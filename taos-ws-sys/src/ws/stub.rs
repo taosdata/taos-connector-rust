@@ -47,6 +47,14 @@ pub type __taos_async_datetime_whitelist_fn_t = extern "C" fn(
     pWhiteLists: *mut *mut c_char,
 );
 
+#[repr(C)]
+#[allow(non_camel_case_types)]
+pub enum TSDB_CONNECTION_INFO {
+    TSDB_CONNECTION_INFO_USER,
+    TSDB_CONNECTION_INFO_TOKEN,
+    TSDB_MAX_CONNECTION_INFO,
+}
+
 #[no_mangle]
 pub extern "C" fn taos_cleanup() {}
 
@@ -290,6 +298,16 @@ pub extern "C" fn taos_connect_is_alive(taos: *mut TAOS) -> i32 {
     0
 }
 
+#[no_mangle]
+pub extern "C" fn taos_get_connection_info(
+    taos: *mut TAOS,
+    info: TSDB_CONNECTION_INFO,
+    buffer: *mut c_char,
+    len: *mut c_int,
+) -> c_int {
+    0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -480,6 +498,14 @@ mod tests {
         );
 
         let code = taos_connect_is_alive(ptr::null_mut());
+        assert_eq!(code, 0);
+
+        let code = taos_get_connection_info(
+            ptr::null_mut(),
+            TSDB_CONNECTION_INFO::TSDB_CONNECTION_INFO_USER,
+            ptr::null_mut(),
+            ptr::null_mut(),
+        );
         assert_eq!(code, 0);
     }
 }
