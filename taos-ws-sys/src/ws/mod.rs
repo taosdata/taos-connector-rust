@@ -1827,6 +1827,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn test_taos_connect_totp() {
         use totp::*;
 
@@ -1885,7 +1886,7 @@ mod tests {
             );
             assert!(!taost.is_null());
 
-            let res = taos_query(taos, c"select 1".as_ptr());
+            let res = taos_query(taost, c"select 1".as_ptr());
             assert!(!res.is_null());
 
             let row = taos_fetch_row(res);
@@ -1915,6 +1916,72 @@ mod tests {
             assert_eq!(code, 0);
 
             test_exec(taos, "drop user c_totp_user");
+            taos_close(taos);
+        }
+    }
+
+    #[test]
+    #[ignore]
+    fn test_taos_connect_token() {
+        unsafe {
+            let taos = taos_connect(
+                c"192.168.1.98".as_ptr(),
+                ptr::null(),
+                ptr::null(),
+                ptr::null(),
+                6041,
+            );
+            assert!(!taos.is_null());
+
+            let _ = taos_query(taos, c"drop user c_token_user".as_ptr());
+            test_exec(taos, "create user c_token_user pass 'token_pass_1'");
+
+            let res = taos_query(
+                taos,
+                c"create token test_c_bearer_token from user c_token_user".as_ptr(),
+            );
+            assert!(!res.is_null());
+
+            let row = taos_fetch_row(res);
+            assert!(!row.is_null());
+
+            let fields = taos_fetch_fields(res);
+            assert!(!fields.is_null());
+
+            let num_fields = taos_num_fields(res);
+            assert_eq!(num_fields, 1);
+
+            let mut str = vec![0 as c_char; 1024];
+            let _ = taos_print_row(str.as_mut_ptr(), row, fields, num_fields);
+            let token = CStr::from_ptr(str.as_ptr()).to_str().unwrap();
+
+            taos_free_result(res);
+
+            let token = CString::new(token).unwrap();
+            let taost =
+                taos_connect_token(c"192.168.1.98".as_ptr(), token.as_ptr(), ptr::null(), 6041);
+            assert!(!taost.is_null());
+
+            let res = taos_query(taost, c"select 1".as_ptr());
+            assert!(!res.is_null());
+
+            let row = taos_fetch_row(res);
+            assert!(!row.is_null());
+
+            let fields = taos_fetch_fields(res);
+            assert!(!fields.is_null());
+
+            let num_fields = taos_num_fields(res);
+            assert_eq!(num_fields, 1);
+
+            let mut str = vec![0 as c_char; 1024];
+            let _ = taos_print_row(str.as_mut_ptr(), row, fields, num_fields);
+            assert_eq!("1", CStr::from_ptr(str.as_ptr()).to_str().unwrap());
+
+            taos_free_result(res);
+            taos_close(taost);
+
+            test_exec(taos, "drop user c_token_user");
             taos_close(taos);
         }
     }
