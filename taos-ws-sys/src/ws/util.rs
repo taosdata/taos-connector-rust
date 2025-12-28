@@ -1,8 +1,8 @@
-use std::ffi::CStr;
+use std::ffi::{c_char, CStr};
 
 use libc::{setlocale, LC_CTYPE};
 
-use crate::ws::{self, config};
+use crate::ws::{self, config, TaosResult};
 
 pub fn get_system_locale() -> String {
     #[cfg(target_os = "windows")]
@@ -187,6 +187,14 @@ impl<'a> DsnBuilder<'a> {
         } else {
             format!("{protocol}://{user}:{pass}@{addr}/{db}?{params}{other_params}")
         }
+    }
+}
+
+pub unsafe fn c_char_to_str<'a>(ptr: *const c_char) -> TaosResult<Option<&'a str>> {
+    if !ptr.is_null() {
+        CStr::from_ptr(ptr).to_str().map(Some).map_err(Into::into)
+    } else {
+        Ok(None)
     }
 }
 
