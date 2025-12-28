@@ -44,8 +44,12 @@ cbindgen = "0.27.0"
 syn = { version = "2.0.91", features = ["full", "visit"] }
 
 [dev-dependencies]
+base32 = "0.5.1"
 flume = "0.11"
+hmac = "0.12.1"
 rand = "0.9.1"
+sha1 = "0.10.6"
+sha2 = "0.10.9"
 taos-query = { version = "0.12.4", path = "../taos-query", default-features = false, features = [
     "async",
     "test",

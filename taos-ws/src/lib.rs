@@ -1794,6 +1794,61 @@ mod tests {
         let rows: Vec<String> = rs.deserialize().try_collect().await?;
         assert_eq!(rows, vec!["1".to_string()]);
 
+        taos.exec("drop user totp_user").await?;
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn test_connect_with_totp_twice() -> anyhow::Result<()> {
+        use totp::*;
+
+        let taos = TaosBuilder::from_dsn("ws://192.168.1.98:6041")?
+            .build()
+            .await?;
+
+        taos.exec("drop user tw_totp_user").await.ok();
+
+        let totp_seed = generate_totp_seed(64);
+        taos.exec(format!(
+            "create user tw_totp_user pass 'totp_pass_1' totpseed '{totp_seed}'"
+        ))
+        .await?;
+
+        let mut rs = taos
+            .query(format!("select generate_totp_secret('{totp_seed}')"))
+            .await?;
+        let rows: Vec<String> = rs.deserialize().try_collect().await?;
+        assert_eq!(rows.len(), 1);
+        let totp_secret = &rows[0];
+
+        let secret = generate_totp_secret(totp_seed.as_bytes());
+        let secret = totp_secret_encode(&secret);
+        assert_eq!(&secret, totp_secret);
+
+        let totp_secret = totp_secret_decode(totp_secret).unwrap();
+        let totp_code = generate_totp_code(&totp_secret);
+
+        let taos = TaosBuilder::from_dsn(format!(
+            "ws://tw_totp_user:totp_pass_1@192.168.1.98:6041?totp_code={totp_code}"
+        ))?
+        .build()
+        .await?;
+
+        let mut rs = taos.query("select 1").await?;
+        let rows: Vec<String> = rs.deserialize().try_collect().await?;
+        assert_eq!(rows, vec!["1".to_string()]);
+
+        // Connect again with the same TOTP code
+        let taos = TaosBuilder::from_dsn(format!(
+            "ws://tw_totp_user:totp_pass_1@192.168.1.98:6041?totp_code={totp_code}"
+        ))?
+        .build()
+        .await?;
+
+        taos.exec("drop user tw_totp_user").await?;
+
         Ok(())
     }
 
@@ -1834,6 +1889,12 @@ mod tests {
         let rows: Vec<String> = rs.deserialize().try_collect().await?;
         assert_eq!(rows, vec!["1".to_string()]);
 
+        let taos = TaosBuilder::from_dsn(format!("ws://192.168.1.98:6041?bearer_token={token}"))?
+            .build()
+            .await?;
+
+        taos.exec("drop user token_user").await?;
+
         Ok(())
     }
 
@@ -1859,7 +1920,7 @@ mod tests {
 
         taos.exec("drop user tt_totp_user").await.ok();
 
-        let totp_seed = generate_totp_seed(64);
+        let totp_seed = generate_totp_seed(255);
         taos.exec(format!(
             "create user tt_totp_user pass 'totp_pass_1' totpseed '{totp_seed}'"
         ))
@@ -1925,6 +1986,9 @@ mod tests {
         let mut rs = taos.query("select 1").await?;
         let rows: Vec<String> = rs.deserialize().try_collect().await?;
         assert_eq!(rows, vec!["1".to_string()]);
+
+        taos.exec_many(["drop user tt_totp_user", "drop user tt_token_user"])
+            .await?;
 
         Ok(())
     }

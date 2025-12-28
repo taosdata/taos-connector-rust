@@ -3455,6 +3455,7 @@ name = "taos-ws-sys"
 version = "0.2.2"
 dependencies = [
  "anyhow",
+ "base32",
  "byteorder",
  "bytes",
  "cargo_metadata",
@@ -3465,6 +3466,7 @@ dependencies = [
  "faststr",
  "flume",
  "futures",
+ "hmac",
  "itoa",
  "lazy_static",
  "libc",
@@ -3474,6 +3476,8 @@ dependencies = [
  "rustls",
  "ryu",
  "serde_json",
+ "sha1",
+ "sha2",
  "syn 2.0.100",
  "taos-error",
  "taos-log",
