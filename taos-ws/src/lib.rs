@@ -1840,7 +1840,6 @@ mod tests {
         let rows: Vec<String> = rs.deserialize().try_collect().await?;
         assert_eq!(rows, vec!["1".to_string()]);
 
-        // TODO: connect again with the same TOTP code should fail, but currently it works.
         let taost = TaosBuilder::from_dsn(format!(
             "ws://tw_totp_user:totp_pass_1@192.168.1.98:6041?totp_code={totp_code}"
         ))?
@@ -1977,7 +1976,6 @@ mod tests {
         let rows: Vec<String> = rs.deserialize().try_collect().await?;
         assert_eq!(rows, vec!["1".to_string()]);
 
-        // TODO: expect error
         let taost = TaosBuilder::from_dsn(format!(
             "ws://tt_token_user:token_pass_1@192.168.1.98:6041?totp_code={totp_code}"
         ))?
