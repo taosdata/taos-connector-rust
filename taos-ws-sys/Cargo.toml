@@ -68,3 +68,4 @@ rustls-aws-lc-crypto-provider = [
 ]
 test-new-feat = []
 test-tls = []
+test-enterprise = []

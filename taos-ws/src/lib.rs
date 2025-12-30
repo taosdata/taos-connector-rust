@@ -1753,12 +1753,12 @@ mod tests {
         Ok(())
     }
 
+    #[cfg(feature = "test-enterprise")]
     #[tokio::test]
-    #[ignore]
     async fn test_connect_with_totp() -> anyhow::Result<()> {
         use totp::*;
 
-        let taos = TaosBuilder::from_dsn("ws://192.168.1.98:6041")?
+        let taos = TaosBuilder::from_dsn("ws://localhost:6041")?
             .build()
             .await?;
 
@@ -1785,7 +1785,7 @@ mod tests {
         let totp_code = generate_totp_code(&totp_secret);
 
         let taost = TaosBuilder::from_dsn(format!(
-            "ws://totp_user:totp_pass_1@192.168.1.98:6041?totp_code={totp_code}"
+            "ws://totp_user:totp_pass_1@localhost:6041?totp_code={totp_code}"
         ))?
         .build()
         .await?;
@@ -1799,12 +1799,12 @@ mod tests {
         Ok(())
     }
 
+    #[cfg(feature = "test-enterprise")]
     #[tokio::test]
-    #[ignore]
     async fn test_connect_with_totp_twice() -> anyhow::Result<()> {
         use totp::*;
 
-        let taos = TaosBuilder::from_dsn("ws://192.168.1.98:6041")?
+        let taos = TaosBuilder::from_dsn("ws://localhost:6041")?
             .build()
             .await?;
 
@@ -1831,7 +1831,7 @@ mod tests {
         let totp_code = generate_totp_code(&totp_secret);
 
         let taost = TaosBuilder::from_dsn(format!(
-            "ws://tw_totp_user:totp_pass_1@192.168.1.98:6041?totp_code={totp_code}"
+            "ws://tw_totp_user:totp_pass_1@localhost:6041?totp_code={totp_code}"
         ))?
         .build()
         .await?;
@@ -1841,7 +1841,7 @@ mod tests {
         assert_eq!(rows, vec!["1".to_string()]);
 
         let taost = TaosBuilder::from_dsn(format!(
-            "ws://tw_totp_user:totp_pass_1@192.168.1.98:6041?totp_code={totp_code}"
+            "ws://tw_totp_user:totp_pass_1@localhost:6041?totp_code={totp_code}"
         ))?
         .build()
         .await?;
@@ -1855,10 +1855,10 @@ mod tests {
         Ok(())
     }
 
+    #[cfg(feature = "test-enterprise")]
     #[tokio::test]
-    #[ignore]
     async fn test_connect_with_invalid_totp_code() -> anyhow::Result<()> {
-        let err = TaosBuilder::from_dsn("ws://192.168.1.98:6041?totp_code=xxx")?
+        let err = TaosBuilder::from_dsn("ws://localhost:6041?totp_code=xxx")?
             .build()
             .await
             .unwrap_err();
@@ -1866,10 +1866,10 @@ mod tests {
         Ok(())
     }
 
+    #[cfg(feature = "test-enterprise")]
     #[tokio::test]
-    #[ignore]
     async fn test_connect_with_token() -> anyhow::Result<()> {
-        let taos = TaosBuilder::from_dsn("ws://192.168.1.98:6041")?
+        let taos = TaosBuilder::from_dsn("ws://localhost:6041")?
             .build()
             .await?;
 
@@ -1884,7 +1884,7 @@ mod tests {
         assert_eq!(rows.len(), 1);
         let token = &rows[0];
 
-        let taost = TaosBuilder::from_dsn(format!("ws://192.168.1.98:6041?bearer_token={token}"))?
+        let taost = TaosBuilder::from_dsn(format!("ws://localhost:6041?bearer_token={token}"))?
             .build()
             .await?;
 
@@ -1892,7 +1892,7 @@ mod tests {
         let rows: Vec<String> = rs.deserialize().try_collect().await?;
         assert_eq!(rows, vec!["1".to_string()]);
 
-        let taost = TaosBuilder::from_dsn(format!("ws://192.168.1.98:6041?bearer_token={token}"))?
+        let taost = TaosBuilder::from_dsn(format!("ws://localhost:6041?bearer_token={token}"))?
             .build()
             .await?;
 
@@ -1905,10 +1905,10 @@ mod tests {
         Ok(())
     }
 
+    #[cfg(feature = "test-enterprise")]
     #[tokio::test]
-    #[ignore]
     async fn test_connect_with_invalid_token() -> anyhow::Result<()> {
-        let err = TaosBuilder::from_dsn("ws://192.168.1.98:6041?bearer_token=xxx")?
+        let err = TaosBuilder::from_dsn("ws://localhost:6041?bearer_token=xxx")?
             .build()
             .await
             .unwrap_err();
@@ -1916,12 +1916,12 @@ mod tests {
         Ok(())
     }
 
+    #[cfg(feature = "test-enterprise")]
     #[tokio::test]
-    #[ignore]
     async fn test_connect_with_totp_and_token() -> anyhow::Result<()> {
         use totp::*;
 
-        let taos = TaosBuilder::from_dsn("ws://192.168.1.98:6041")?
+        let taos = TaosBuilder::from_dsn("ws://localhost:6041")?
             .build()
             .await?;
 
@@ -1948,7 +1948,7 @@ mod tests {
         let totp_code = generate_totp_code(&totp_secret);
 
         let taost = TaosBuilder::from_dsn(format!(
-            "ws://tt_totp_user:totp_pass_1@192.168.1.98:6041?totp_code={totp_code}"
+            "ws://tt_totp_user:totp_pass_1@localhost:6041?totp_code={totp_code}"
         ))?
         .build()
         .await?;
@@ -1968,7 +1968,7 @@ mod tests {
         assert_eq!(rows.len(), 1);
         let token = &rows[0];
 
-        let taost = TaosBuilder::from_dsn(format!("ws://192.168.1.98:6041?bearer_token={token}"))?
+        let taost = TaosBuilder::from_dsn(format!("ws://localhost:6041?bearer_token={token}"))?
             .build()
             .await?;
 
@@ -1977,7 +1977,7 @@ mod tests {
         assert_eq!(rows, vec!["1".to_string()]);
 
         let taost = TaosBuilder::from_dsn(format!(
-            "ws://tt_token_user:token_pass_1@192.168.1.98:6041?totp_code={totp_code}"
+            "ws://tt_token_user:token_pass_1@localhost:6041?totp_code={totp_code}"
         ))?
         .build()
         .await?;
@@ -1987,7 +1987,7 @@ mod tests {
         assert_eq!(rows, vec!["1".to_string()]);
 
         let taost = TaosBuilder::from_dsn(format!(
-            "ws://tt_totp_user:totp_pass_1@192.168.1.98:6041?bearer_token={token}"
+            "ws://tt_totp_user:totp_pass_1@localhost:6041?bearer_token={token}"
         ))?
         .build()
         .await?;
@@ -1997,7 +1997,7 @@ mod tests {
         assert_eq!(rows, vec!["1".to_string()]);
 
         let taost = TaosBuilder::from_dsn(format!(
-             "ws://tt_totp_user:totp_pass_1@192.168.1.98:6041?totp_code={totp_code}&bearer_token={token}"
+             "ws://tt_totp_user:totp_pass_1@localhost:6041?totp_code={totp_code}&bearer_token={token}"
         ))?
         .build()
         .await?;

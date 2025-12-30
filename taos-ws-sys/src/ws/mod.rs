@@ -1789,14 +1789,14 @@ mod tests {
         unsafe { taos_close(conn) };
     }
 
+    #[cfg(feature = "test-enterprise")]
     #[test]
-    #[ignore]
     fn test_taos_connect_totp() {
         use totp::*;
 
         unsafe {
             let taos = taos_connect(
-                c"192.168.1.98".as_ptr(),
+                c"localhost".as_ptr(),
                 ptr::null(),
                 ptr::null(),
                 ptr::null(),
@@ -1840,7 +1840,7 @@ mod tests {
 
             let totp = CString::new(totp_code).unwrap();
             let taost = taos_connect_totp(
-                c"192.168.1.98".as_ptr(),
+                c"localhost".as_ptr(),
                 c"c_totp_user".as_ptr(),
                 c"totp_pass_1".as_ptr(),
                 totp.as_ptr(),
@@ -1869,7 +1869,7 @@ mod tests {
             taos_close(taost);
 
             let code = taos_connect_test(
-                c"192.168.1.98".as_ptr(),
+                c"localhost".as_ptr(),
                 c"c_totp_user".as_ptr(),
                 c"totp_pass_1".as_ptr(),
                 totp.as_ptr(),
@@ -1883,12 +1883,12 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "test-enterprise")]
     #[test]
-    #[ignore]
     fn test_taos_connect_token() {
         unsafe {
             let taos = taos_connect(
-                c"192.168.1.98".as_ptr(),
+                c"localhost".as_ptr(),
                 ptr::null(),
                 ptr::null(),
                 ptr::null(),
@@ -1922,7 +1922,7 @@ mod tests {
 
             let token = CString::new(token).unwrap();
             let taost =
-                taos_connect_token(c"192.168.1.98".as_ptr(), token.as_ptr(), ptr::null(), 6041);
+                taos_connect_token(c"localhost".as_ptr(), token.as_ptr(), ptr::null(), 6041);
             assert!(!taost.is_null());
 
             let res = taos_query(taost, c"select 1".as_ptr());
