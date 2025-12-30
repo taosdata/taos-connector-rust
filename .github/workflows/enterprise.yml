@@ -1,4 +1,4 @@
-name: Compatibility
+name: Enterprise
 
 on:
   push:
@@ -15,14 +15,14 @@ jobs:
         run: sudo timedatectl set-timezone Asia/Shanghai
 
       - name: Get TDengine
-        run: wget https://github.com/taosdata/TDengine/releases/download/ver-3.3.6.0/TDengine-server-3.3.6.0-Linux-x64.tar.gz
+        run: wget "${{ secrets.NIGHTLY_TDENGINE_ENTERPRISE_BASE_URL }}/tsdb-nightly-3.0.tar.gz?v=$(date +%s)" -O tsdb-nightly-3.0.tar.gz
 
       - name: Install TDengine
         run: |
-          tar -zxf TDengine-server-3.3.6.0-Linux-x64.tar.gz
-          rm -rf TDengine-server-3.3.6.0-Linux-x64.tar.gz
-          cd TDengine-server-3.3.6.0
-          sudo ./install.sh -e no
+          tar -zxf tsdb-nightly-3.0.tar.gz
+          rm -rf tsdb-nightly-3.0.tar.gz
+          cd tsdb-nightly-3.0
+          sudo ./install.sh
 
       - name: Copy taos.cfg
         run: |
@@ -49,6 +49,9 @@ jobs:
         with:
           toolchain: 1.90.0
 
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
       - name: Install cargo-nextest
         uses: taiki-e/install-action@cargo-nextest
 
@@ -73,12 +76,20 @@ jobs:
           TD_VERSION=3.9.9.9 cargo nextest run -p taos-ws-sys test_taos_get_client_info_injected -- --ignored
           TD_VERSION="$(printf '\xff\xfe')" cargo nextest run -p taos-ws-sys test_taos_get_client_info_default
 
-      - name: Run tests
+      - name: Generate code coverage
         env:
           TDENGINE_CLOUD_URL: ${{ secrets.TDENGINE_CLOUD_URL }}
           TDENGINE_CLOUD_TOKEN: ${{ secrets.TDENGINE_CLOUD_TOKEN }}
         run: |
           sed -i 's/crate-type = \["cdylib", "staticlib"\]/crate-type = ["rlib"]/' taos-ws-sys/Cargo.toml
-          RUST_BACKTRACE=1 cargo nextest run -j 4 --workspace \
-            --features ws-rustls-ring-crypto-provider,test-tls \
-            --no-fail-fast
+          RUST_BACKTRACE=1 cargo llvm-cov nextest -j 4 --workspace \
+            --features ws-rustls-ring-crypto-provider,test-new-feat,test-tls,test-enterprise \
+            --lcov --output-path lcov.info --no-fail-fast
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: lcov.info
+          fail_ci_if_error: true
+          verbose: true
