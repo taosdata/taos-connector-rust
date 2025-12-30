@@ -1,8 +1,8 @@
-use std::ffi::CStr;
+use std::ffi::{c_char, CStr};
 
 use libc::{setlocale, LC_CTYPE};
 
-use crate::ws::{self, config};
+use crate::ws::{self, config, TaosResult};
 
 pub fn get_system_locale() -> String {
     #[cfg(target_os = "windows")]
@@ -53,75 +53,148 @@ pub fn camel_to_snake(s: &str) -> String {
     out
 }
 
-pub fn build_dsn(
-    addr: Option<&str>,
-    user: Option<&str>,
-    pass: Option<&str>,
-    db: Option<&str>,
+#[derive(Default)]
+pub struct DsnBuilder<'a> {
+    addr: Option<&'a str>,
+    user: Option<&'a str>,
+    pass: Option<&'a str>,
+    totp_code: Option<&'a str>,
+    bearer_token: Option<&'a str>,
+    db: Option<&'a str>,
     ws_tls_mode: Option<config::WsTlsMode>,
-    ws_tls_version: Option<&str>,
-    ws_tls_ca: Option<&str>,
-) -> String {
-    let addr = match addr {
-        Some(addr) => addr.to_string(),
-        None => match config::adapter_list() {
+    ws_tls_version: Option<&'a str>,
+    ws_tls_ca: Option<&'a str>,
+}
+
+impl<'a> DsnBuilder<'a> {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn addr(mut self, addr: Option<&'a str>) -> Self {
+        self.addr = addr;
+        self
+    }
+
+    pub fn user(mut self, user: Option<&'a str>) -> Self {
+        self.user = user;
+        self
+    }
+
+    pub fn pass(mut self, pass: Option<&'a str>) -> Self {
+        self.pass = pass;
+        self
+    }
+
+    pub fn totp_code(mut self, totp_code: Option<&'a str>) -> Self {
+        self.totp_code = totp_code;
+        self
+    }
+
+    pub fn bearer_token(mut self, bearer_token: Option<&'a str>) -> Self {
+        self.bearer_token = bearer_token;
+        self
+    }
+
+    pub fn db(mut self, db: Option<&'a str>) -> Self {
+        self.db = db;
+        self
+    }
+
+    pub fn ws_tls_mode(mut self, mode: Option<config::WsTlsMode>) -> Self {
+        self.ws_tls_mode = mode;
+        self
+    }
+
+    pub fn ws_tls_version(mut self, version: Option<&'a str>) -> Self {
+        self.ws_tls_version = version;
+        self
+    }
+
+    pub fn ws_tls_ca(mut self, ca: Option<&'a str>) -> Self {
+        self.ws_tls_ca = ca;
+        self
+    }
+
+    pub fn build(self) -> String {
+        let addr = match self.addr {
             Some(addr) => addr.to_string(),
-            None => format!("{}:{}", ws::DEFAULT_HOST, ws::DEFAULT_PORT),
-        },
-    };
+            None => match config::adapter_list() {
+                Some(addr) => addr.to_string(),
+                None => format!("{}:{}", ws::DEFAULT_HOST, ws::DEFAULT_PORT),
+            },
+        };
 
-    let user = user.unwrap_or(ws::DEFAULT_USER);
-    let pass = pass.unwrap_or(ws::DEFAULT_PASS);
-    let db = db.unwrap_or(ws::DEFAULT_DB);
+        let user = self.user.unwrap_or(ws::DEFAULT_USER);
+        let pass = self.pass.unwrap_or(ws::DEFAULT_PASS);
+        let db = self.db.unwrap_or(ws::DEFAULT_DB);
 
-    let ws_tls_mode = ws_tls_mode.unwrap_or_else(config::ws_tls_mode);
+        let ws_tls_mode = self.ws_tls_mode.unwrap_or_else(config::ws_tls_mode);
 
-    let ws_tls_version =
-        ws_tls_version.map_or_else(|| config::ws_tls_version().to_string(), |s| s.to_string());
+        let ws_tls_version = self
+            .ws_tls_version
+            .map_or_else(|| config::ws_tls_version().to_string(), |s| s.to_string());
 
-    let ws_tls_ca = ws_tls_ca
-        .map(|s| s.to_string())
-        .or_else(|| config::ws_tls_ca().map(|s| s.to_string()));
+        let ws_tls_ca = self
+            .ws_tls_ca
+            .map(|s| s.to_string())
+            .or_else(|| config::ws_tls_ca().map(|s| s.to_string()));
 
-    let compression = config::compression();
-    let conn_retries = config::conn_retries();
-    let retry_backoff_ms = config::retry_backoff_ms();
-    let retry_backoff_max_ms = config::retry_backoff_max_ms();
+        let compression = config::compression();
+        let conn_retries = config::conn_retries();
+        let retry_backoff_ms = config::retry_backoff_ms();
+        let retry_backoff_max_ms = config::retry_backoff_max_ms();
 
-    let protocol = match ws_tls_mode {
-        config::WsTlsMode::Disabled => "ws",
-        _ => "wss",
-    };
+        let protocol = match ws_tls_mode {
+            config::WsTlsMode::Disabled => "ws",
+            _ => "wss",
+        };
 
-    let ws_tls_mode = match ws_tls_mode {
-        config::WsTlsMode::VerifyCa => Some("verify_ca"),
-        config::WsTlsMode::VerifyIdentity => Some("verify_identity"),
-        _ => None,
-    };
+        let ws_tls_mode = match ws_tls_mode {
+            config::WsTlsMode::VerifyCa => Some("verify_ca"),
+            config::WsTlsMode::VerifyIdentity => Some("verify_identity"),
+            _ => None,
+        };
 
-    let tls_mode = match ws_tls_mode {
-        Some(mode) => format!("&tls_mode={mode}"),
-        None => String::new(),
-    };
+        let tls_mode = match ws_tls_mode {
+            Some(mode) => format!("&tls_mode={mode}"),
+            None => String::new(),
+        };
 
-    let tls_ca = match ws_tls_ca {
-        Some(ca) => format!("&tls_ca={ca}"),
-        None => String::new(),
-    };
+        let tls_ca = match ws_tls_ca {
+            Some(ca) => format!("&tls_ca={ca}"),
+            None => String::new(),
+        };
 
-    let tls_params = format!("&tls_version={ws_tls_version}{tls_mode}{tls_ca}");
+        let totp_or_token = match (self.bearer_token, self.totp_code) {
+            (Some(token), _) => format!("&bearer_token={token}"),
+            (_, Some(totp)) => format!("&totp_code={totp}"),
+            _ => String::new(),
+        };
 
-    let params = format!(
-        "compression={compression}\
-        &conn_retries={conn_retries}\
-        &retry_backoff_ms={retry_backoff_ms}\
-        &retry_backoff_max_ms={retry_backoff_max_ms}"
-    );
+        let other_params =
+            format!("&tls_version={ws_tls_version}{tls_mode}{tls_ca}{totp_or_token}");
 
-    if is_cloud_host(&addr) && user == "token" {
-        format!("wss://{addr}/{db}?token={pass}&{params}")
+        let params = format!(
+            "compression={compression}\
+            &conn_retries={conn_retries}\
+            &retry_backoff_ms={retry_backoff_ms}\
+            &retry_backoff_max_ms={retry_backoff_max_ms}"
+        );
+
+        if is_cloud_host(&addr) && user == "token" {
+            format!("wss://{addr}/{db}?token={pass}&{params}")
+        } else {
+            format!("{protocol}://{user}:{pass}@{addr}/{db}?{params}{other_params}")
+        }
+    }
+}
+
+pub unsafe fn c_char_to_str<'a>(ptr: *const c_char) -> TaosResult<Option<&'a str>> {
+    if !ptr.is_null() {
+        CStr::from_ptr(ptr).to_str().map(Some).map_err(Into::into)
     } else {
-        format!("{protocol}://{user}:{pass}@{addr}/{db}?{params}{tls_params}")
+        Ok(None)
     }
 }
 

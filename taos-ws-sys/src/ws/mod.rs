@@ -15,7 +15,6 @@ use taos_log::QidManager;
 use taos_query::common::{Field, Precision, Ty};
 use taos_query::util::generate_req_id;
 use taos_query::TBuilder;
-use taos_ws::query::asyn::WS_ERROR_NO;
 use taos_ws::query::{ConnOption, Error};
 use taos_ws::{Offset, Taos, TaosBuilder};
 use tmq::TmqResultSet;
@@ -158,15 +157,11 @@ pub unsafe extern "C" fn taos_connect(
     port: u16,
 ) -> *mut TAOS {
     taos_init();
-    match connect(ip, user, pass, db, port) {
+    match connect(ip, user, pass, db, port, ptr::null(), ptr::null()) {
         Ok(taos) => Box::into_raw(Box::new(taos)) as _,
-        Err(mut err) => {
+        Err(err) => {
             error!("taos_connect failed, err: {err:?}");
-            if err.code() == WS_ERROR_NO::WEBSOCKET_ERROR.as_code() {
-                err = TaosError::new(Code::new(0x000B), "Unable to establish connection");
-            }
-            set_err_and_get_code(err);
-            ptr::null_mut()
+            handle_connect_error(err)
         }
     }
 }
@@ -177,6 +172,8 @@ unsafe fn connect(
     pass: *const c_char,
     db: *const c_char,
     port: u16,
+    totp_code: *const c_char,
+    bearer_token: *const c_char,
 ) -> TaosResult<Taos> {
     let addr = if !ip.is_null() {
         let ip = CStr::from_ptr(ip).to_str()?;
@@ -190,25 +187,20 @@ unsafe fn connect(
         format!("{host}:{port}")
     };
 
-    let user = if !user.is_null() {
-        Some(CStr::from_ptr(user).to_str()?)
-    } else {
-        None
-    };
+    let user = util::c_char_to_str(user)?;
+    let pass = util::c_char_to_str(pass)?;
+    let db = util::c_char_to_str(db)?;
+    let totp_code = util::c_char_to_str(totp_code)?;
+    let bearer_token = util::c_char_to_str(bearer_token)?;
 
-    let pass = if !pass.is_null() {
-        Some(CStr::from_ptr(pass).to_str()?)
-    } else {
-        None
-    };
-
-    let db = if !db.is_null() {
-        Some(CStr::from_ptr(db).to_str()?)
-    } else {
-        None
-    };
-
-    let dsn = util::build_dsn(Some(&addr), user, pass, db, None, None, None);
+    let dsn = util::DsnBuilder::new()
+        .addr(Some(&addr))
+        .user(user)
+        .pass(pass)
+        .db(db)
+        .totp_code(totp_code)
+        .bearer_token(bearer_token)
+        .build();
     debug!("taos_connect, dsn: {dsn:?}");
 
     let builder = TaosBuilder::from_dsn(dsn)?;
@@ -217,18 +209,23 @@ unsafe fn connect(
     Ok(taos)
 }
 
+fn handle_connect_error(mut err: TaosError) -> *mut TAOS {
+    use taos_ws::query::asyn::WS_ERROR_NO;
+    if err.code() == WS_ERROR_NO::WEBSOCKET_ERROR.as_code() {
+        err = TaosError::new(Code::new(0x000B), "Unable to establish connection");
+    }
+    set_err_and_get_code(err);
+    ptr::null_mut()
+}
+
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn taos_connect_with_dsn(dsn: *const c_char) -> *mut TAOS {
     match connect_with_dsn(dsn) {
         Ok(taos) => Box::into_raw(Box::new(taos)) as _,
-        Err(mut err) => {
+        Err(err) => {
             error!("taos_connect_with_dsn failed, err: {err:?}");
-            if err.code() == WS_ERROR_NO::WEBSOCKET_ERROR.as_code() {
-                err = TaosError::new(Code::new(0x000B), "Unable to establish connection");
-            }
-            set_err_and_get_code(err);
-            ptr::null_mut()
+            handle_connect_error(err)
         }
     }
 }
@@ -279,7 +276,6 @@ fn connect_from_dsn(dsn: &str) -> TaosResult<Taos> {
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn taos_close(taos: *mut TAOS) {
-    debug!("taos_close, taos: {taos:?}");
     if taos.is_null() {
         set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "taos is null"));
         return;
@@ -332,13 +328,12 @@ pub unsafe extern "C" fn taos_options(option: TSDB_OPTION, arg: *const c_void, .
 }
 
 #[no_mangle]
+#[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn taos_options_connection(
     taos: *mut TAOS,
     option: TSDB_OPTION_CONNECTION,
     arg: *const c_void,
 ) -> c_int {
-    debug!("taos_options_connection start, taos: {taos:?}, option: {option:?}, arg: {arg:?}");
-
     if taos.is_null() {
         error!("taos_options_connection failed, taos is null");
         return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "taos is null"));
@@ -412,8 +407,8 @@ impl From<u64> for Qid {
     }
 }
 
-/// Run once.
 #[no_mangle]
+#[instrument(level = "debug", ret)]
 pub extern "C" fn taos_init() -> c_int {
     static ONCE: OnceLock<c_int> = OnceLock::new();
     *ONCE.get_or_init(|| {
@@ -487,12 +482,12 @@ pub struct OPTIONS {
 }
 
 #[no_mangle]
+#[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn taos_set_option(
     options: *mut OPTIONS,
     key: *const c_char,
     value: *const c_char,
 ) {
-    debug!("taos_set_option, options: {options:?}, key: {key:?}, value: {value:?}");
     if options.is_null() || key.is_null() || value.is_null() {
         let _ = set_err_and_get_code(TaosError::new(
             Code::INVALID_PARA,
@@ -543,17 +538,14 @@ const WS_TLS_VERSION: &str = "wsTlsVersion";
 const WS_TLS_CA: &str = "wsTlsCa";
 
 #[no_mangle]
+#[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn taos_connect_with(options: *const OPTIONS) -> *mut TAOS {
     taos_init();
     match connect_with(options) {
         Ok(taos) => Box::into_raw(Box::new(taos)) as _,
-        Err(mut err) => {
+        Err(err) => {
             error!("taos_connect_with failed, err: {err:?}");
-            if err.code() == WS_ERROR_NO::WEBSOCKET_ERROR.as_code() {
-                err = TaosError::new(Code::new(0x000B), "Unable to establish connection");
-            }
-            set_err_and_get_code(err);
-            ptr::null_mut()
+            handle_connect_error(err)
         }
     }
 }
@@ -566,7 +558,7 @@ unsafe fn connect_with(options: *const OPTIONS) -> TaosResult<Taos> {
 
 unsafe fn build_dsn_from_options(options: *const OPTIONS) -> TaosResult<String> {
     if options.is_null() {
-        let dsn = util::build_dsn(None, None, None, None, None, None, None);
+        let dsn = util::DsnBuilder::new().build();
         debug!("build_dsn_from_options, options is null, use default dsn: {dsn}");
         return Ok(dsn);
     }
@@ -709,6 +701,62 @@ unsafe fn build_dsn_from_options(options: *const OPTIONS) -> TaosResult<String> 
     }
 
     Ok(format!("{protocol}://{user}:{pass}@{addr}/{db}?{params}"))
+}
+
+#[no_mangle]
+#[instrument(level = "debug", ret)]
+pub unsafe extern "C" fn taos_connect_totp(
+    ip: *const c_char,
+    user: *const c_char,
+    pass: *const c_char,
+    totp: *const c_char,
+    db: *const c_char,
+    port: u16,
+) -> *mut TAOS {
+    taos_init();
+    match connect(ip, user, pass, db, port, totp, ptr::null()) {
+        Ok(taos) => Box::into_raw(Box::new(taos)) as _,
+        Err(err) => {
+            error!("taos_connect_totp failed, err: {err:?}");
+            handle_connect_error(err)
+        }
+    }
+}
+
+#[no_mangle]
+#[instrument(level = "debug", ret)]
+pub unsafe extern "C" fn taos_connect_test(
+    ip: *const c_char,
+    user: *const c_char,
+    pass: *const c_char,
+    totp: *const c_char,
+    db: *const c_char,
+    port: u16,
+) -> c_int {
+    let taos = taos_connect_totp(ip, user, pass, totp, db, port);
+    if taos.is_null() {
+        return error::errno();
+    }
+    taos_close(taos);
+    0
+}
+
+#[no_mangle]
+#[instrument(level = "debug", ret)]
+pub unsafe extern "C" fn taos_connect_token(
+    ip: *const c_char,
+    token: *const c_char,
+    db: *const c_char,
+    port: u16,
+) -> *mut TAOS {
+    taos_init();
+    match connect(ip, ptr::null(), ptr::null(), db, port, ptr::null(), token) {
+        Ok(taos) => Box::into_raw(Box::new(taos)) as _,
+        Err(err) => {
+            error!("taos_connect_token failed, err: {err:?}");
+            handle_connect_error(err)
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -1739,6 +1787,303 @@ mod tests {
 
         test_exec(conn, "drop database if exists test_1765519301");
         unsafe { taos_close(conn) };
+    }
+
+    #[cfg(feature = "test-enterprise")]
+    #[test]
+    fn test_taos_connect_totp() {
+        use totp::*;
+
+        unsafe {
+            let taos = taos_connect(
+                c"localhost".as_ptr(),
+                ptr::null(),
+                ptr::null(),
+                ptr::null(),
+                6041,
+            );
+            assert!(!taos.is_null());
+
+            let _ = taos_query(taos, c"drop user c_totp_user".as_ptr());
+
+            let totp_seed = generate_totp_seed(64);
+            test_exec(
+                taos,
+                format!("create user c_totp_user pass 'totp_pass_1' totpseed '{totp_seed}'"),
+            );
+
+            let sql = CString::new(format!("select generate_totp_secret('{totp_seed}')")).unwrap();
+            let res = taos_query(taos, sql.as_ptr());
+            assert!(!res.is_null());
+
+            let row = taos_fetch_row(res);
+            assert!(!row.is_null());
+
+            let fields = taos_fetch_fields(res);
+            assert!(!fields.is_null());
+
+            let num_fields = taos_num_fields(res);
+            assert_eq!(num_fields, 1);
+
+            let mut str = vec![0 as c_char; 1024];
+            let _ = taos_print_row(str.as_mut_ptr(), row, fields, num_fields);
+            let totp_secret = CStr::from_ptr(str.as_ptr()).to_str().unwrap();
+
+            taos_free_result(res);
+
+            let secret = generate_totp_secret(totp_seed.as_bytes());
+            let secret = totp_secret_encode(&secret);
+            assert_eq!(&secret, totp_secret);
+
+            let totp_secret = totp_secret_decode(totp_secret).unwrap();
+            let totp_code = generate_totp_code(&totp_secret);
+
+            let totp = CString::new(totp_code).unwrap();
+            let taost = taos_connect_totp(
+                c"localhost".as_ptr(),
+                c"c_totp_user".as_ptr(),
+                c"totp_pass_1".as_ptr(),
+                totp.as_ptr(),
+                ptr::null(),
+                6041,
+            );
+            assert!(!taost.is_null());
+
+            let res = taos_query(taost, c"select 1".as_ptr());
+            assert!(!res.is_null());
+
+            let row = taos_fetch_row(res);
+            assert!(!row.is_null());
+
+            let fields = taos_fetch_fields(res);
+            assert!(!fields.is_null());
+
+            let num_fields = taos_num_fields(res);
+            assert_eq!(num_fields, 1);
+
+            let mut str = vec![0 as c_char; 1024];
+            let _ = taos_print_row(str.as_mut_ptr(), row, fields, num_fields);
+            assert_eq!("1", CStr::from_ptr(str.as_ptr()).to_str().unwrap());
+
+            taos_free_result(res);
+            taos_close(taost);
+
+            let code = taos_connect_test(
+                c"localhost".as_ptr(),
+                c"c_totp_user".as_ptr(),
+                c"totp_pass_1".as_ptr(),
+                totp.as_ptr(),
+                ptr::null(),
+                6041,
+            );
+            assert_eq!(code, 0);
+
+            test_exec(taos, "drop user c_totp_user");
+            taos_close(taos);
+        }
+    }
+
+    #[cfg(feature = "test-enterprise")]
+    #[test]
+    fn test_taos_connect_token() {
+        unsafe {
+            let taos = taos_connect(
+                c"localhost".as_ptr(),
+                ptr::null(),
+                ptr::null(),
+                ptr::null(),
+                6041,
+            );
+            assert!(!taos.is_null());
+
+            let _ = taos_query(taos, c"drop user c_token_user".as_ptr());
+            test_exec(taos, "create user c_token_user pass 'token_pass_1'");
+
+            let res = taos_query(
+                taos,
+                c"create token test_c_bearer_token from user c_token_user".as_ptr(),
+            );
+            assert!(!res.is_null());
+
+            let row = taos_fetch_row(res);
+            assert!(!row.is_null());
+
+            let fields = taos_fetch_fields(res);
+            assert!(!fields.is_null());
+
+            let num_fields = taos_num_fields(res);
+            assert_eq!(num_fields, 1);
+
+            let mut str = vec![0 as c_char; 1024];
+            let _ = taos_print_row(str.as_mut_ptr(), row, fields, num_fields);
+            let token = CStr::from_ptr(str.as_ptr()).to_str().unwrap();
+
+            taos_free_result(res);
+
+            let token = CString::new(token).unwrap();
+            let taost =
+                taos_connect_token(c"localhost".as_ptr(), token.as_ptr(), ptr::null(), 6041);
+            assert!(!taost.is_null());
+
+            let res = taos_query(taost, c"select 1".as_ptr());
+            assert!(!res.is_null());
+
+            let row = taos_fetch_row(res);
+            assert!(!row.is_null());
+
+            let fields = taos_fetch_fields(res);
+            assert!(!fields.is_null());
+
+            let num_fields = taos_num_fields(res);
+            assert_eq!(num_fields, 1);
+
+            let mut str = vec![0 as c_char; 1024];
+            let _ = taos_print_row(str.as_mut_ptr(), row, fields, num_fields);
+            assert_eq!("1", CStr::from_ptr(str.as_ptr()).to_str().unwrap());
+
+            taos_free_result(res);
+            taos_close(taost);
+
+            test_exec(taos, "drop user c_token_user");
+            taos_close(taos);
+        }
+    }
+}
+
+#[cfg(test)]
+mod totp {
+    use byteorder::ByteOrder;
+    use hmac::{Hmac, Mac};
+    use rand::{seq::SliceRandom, Rng};
+
+    const LOWERCASE: &str = "abcdefghijklmnopqrstuvwxyz";
+    const UPPERCASE: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    const DIGITS: &str = "0123456789";
+    const ALL_CHARS: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+
+    pub fn generate_totp_seed(len: usize) -> String {
+        assert!(len >= 3);
+        let mut rng = rand::rng();
+        let mut buf = Vec::with_capacity(len);
+        buf.push(LOWERCASE.as_bytes()[rng.random_range(0..LOWERCASE.len())]);
+        buf.push(UPPERCASE.as_bytes()[rng.random_range(0..UPPERCASE.len())]);
+        buf.push(DIGITS.as_bytes()[rng.random_range(0..DIGITS.len())]);
+        for _ in 3..len {
+            buf.push(ALL_CHARS.as_bytes()[rng.random_range(0..ALL_CHARS.len())]);
+        }
+        buf.shuffle(&mut rng);
+        String::from_utf8(buf).unwrap()
+    }
+
+    pub fn generate_totp_code(secret: &[u8]) -> String {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let counter = now / 30;
+        let code = hotp(secret, counter, 6);
+        format!("{:06}", code)
+    }
+
+    fn hotp(secret: &[u8], counter: u64, digits: usize) -> u32 {
+        let mut mac = Hmac::<sha1::Sha1>::new_from_slice(secret).unwrap();
+        mac.update(&counter.to_be_bytes());
+        let result = mac.finalize().into_bytes();
+        let offset = (result[result.len() - 1] & 0x0F) as usize;
+        let code = byteorder::BigEndian::read_u32(&result[offset..offset + 4]) & 0x7FFFFFFF;
+        let m = 10u32.pow(digits.min(8) as u32);
+        code % m
+    }
+
+    pub fn generate_totp_secret(seed: &[u8]) -> Vec<u8> {
+        let mut mac = Hmac::<sha2::Sha256>::new_from_slice(&[]).unwrap();
+        mac.update(seed);
+        mac.finalize().into_bytes().to_vec()
+    }
+
+    pub fn totp_secret_encode(secret: &[u8]) -> String {
+        base32::encode(base32::Alphabet::Rfc4648 { padding: false }, secret)
+    }
+
+    pub fn totp_secret_decode(secret: &str) -> Option<Vec<u8>> {
+        base32::decode(base32::Alphabet::Rfc4648 { padding: false }, secret)
+    }
+
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn test_generate_totp_seed() {
+            let seed = generate_totp_seed(16);
+            assert_eq!(seed.len(), 16);
+            assert!(seed.chars().any(|c| c.is_lowercase()));
+            assert!(seed.chars().any(|c| c.is_uppercase()));
+            assert!(seed.chars().any(|c| c.is_digit(10)));
+        }
+
+        #[test]
+        fn test_generate_totp_code() {
+            let secret = generate_totp_secret(b"12345678901234567890");
+            let code = generate_totp_code(&secret);
+            assert_eq!(code.len(), 6);
+        }
+
+        #[test]
+        fn test_hotp() {
+            let counter = 1765854733 / 30;
+            let digits = 6;
+            assert_eq!(
+                hotp(
+                    &generate_totp_secret(b"12345678901234567890"),
+                    counter,
+                    digits
+                ),
+                383089
+            );
+            assert_eq!(
+                hotp(
+                    &generate_totp_secret(b"abcdefghijklmnopqrstuvwxyz"),
+                    counter,
+                    digits
+                ),
+                269095
+            );
+            assert_eq!(
+                hotp(
+                    &generate_totp_secret(b"!@#$%^&*()_+-=[]{}|;':,.<>/?`~"),
+                    counter,
+                    digits
+                ),
+                203356
+            );
+        }
+
+        #[test]
+        fn test_generate_totp_secret() {
+            let secret = generate_totp_secret(b"12345678901234567890");
+            let totp_secret = totp_secret_encode(&secret);
+            assert_eq!(
+                totp_secret,
+                "VR62SA7EK3RP7MRTH7QXSIVZXXS57OY2SRUMGLKDJPREZ62OHFEQ"
+            );
+            assert_eq!(totp_secret_decode(&totp_secret).unwrap(), secret);
+
+            let secret = generate_totp_secret(b"abcdefghijklmnopqrstuvwxyz");
+            let totp_secret = totp_secret_encode(&secret);
+            assert_eq!(
+                totp_secret,
+                "OMYPD744HIZB2KZPAUNLEWUFBNRQBILEPWD2FGPUDYCZMFTCRFXQ"
+            );
+            assert_eq!(totp_secret_decode(&totp_secret).unwrap(), secret);
+
+            let secret = generate_totp_secret(b"!@#$%^&*()_+-=[]{}|;':,.<>/?`~");
+            let totp_secret = totp_secret_encode(&secret);
+            assert_eq!(
+                totp_secret,
+                "FURKOZ6REIGLQHP5OMKLZZFUQNOCRDJPCOSDP5ESH2VR3IU7NAYA"
+            );
+            assert_eq!(totp_secret_decode(&totp_secret).unwrap(), secret);
+        }
     }
 }
 

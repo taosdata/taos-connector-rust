@@ -338,6 +338,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "base32"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "022dfe9eb35f19ebbcb51e0b40a5ab759f46ad60cadf7297e0bd085afb50e076"
+
+[[package]]
 name = "base64"
 version = "0.21.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1001,6 +1007,7 @@ checksum = "9ed9a281f7bc9b7576e61468ba615a66a5c8cfdff42420a70aa82701a3b1e292"
 dependencies = [
  "block-buffer",
  "crypto-common",
+ "subtle",
 ]
 
 [[package]]
@@ -1539,6 +1546,15 @@ name = "hex"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
+
+[[package]]
+name = "hmac"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6c49c37c09c17a53d937dfbb742eb3a961d65a994e6bcdcf37e7399d0cc8ab5e"
+dependencies = [
+ "digest",
+]
 
 [[package]]
 name = "http"
@@ -3048,9 +3064,9 @@ dependencies = [
 
 [[package]]
 name = "sha2"
-version = "0.10.8"
+version = "0.10.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "793db75ad2bcafc3ffa7c68b215fee268f537982cd901d132f89c6343f3a3dc8"
+checksum = "a7507d819769d01a365ab707794a4084392c824f54a7a6a7862f8c3d0892b283"
 dependencies = [
  "cfg-if",
  "cpufeatures",
@@ -3400,6 +3416,7 @@ version = "0.12.4"
 dependencies = [
  "anyhow",
  "async-trait",
+ "base32",
  "byteorder",
  "bytes",
  "cfg-if",
@@ -3410,6 +3427,7 @@ dependencies = [
  "flume",
  "futures",
  "futures-util",
+ "hmac",
  "itertools",
  "once_cell",
  "pretty_env_logger",
@@ -3420,6 +3438,8 @@ dependencies = [
  "serde_json",
  "serde_repr",
  "serde_with",
+ "sha1",
+ "sha2",
  "taos-query",
  "thiserror 1.0.69",
  "tokio",
@@ -3435,6 +3455,7 @@ name = "taos-ws-sys"
 version = "0.2.2"
 dependencies = [
  "anyhow",
+ "base32",
  "byteorder",
  "bytes",
  "cargo_metadata",
@@ -3445,6 +3466,7 @@ dependencies = [
  "faststr",
  "flume",
  "futures",
+ "hmac",
  "itoa",
  "lazy_static",
  "libc",
@@ -3454,6 +3476,8 @@ dependencies = [
  "rustls",
  "ryu",
  "serde_json",
+ "sha1",
+ "sha2",
  "syn 2.0.100",
  "taos-error",
  "taos-log",

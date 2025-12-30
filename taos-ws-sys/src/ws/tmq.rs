@@ -427,15 +427,14 @@ unsafe fn consumer_new(conf: *mut tmq_conf_t) -> TaosResult<Tmq> {
             let ws_tls_version = conf.map.get("ws.tls.version");
             let ws_tls_ca = conf.map.get("ws.tls.ca");
 
-            let dsn = util::build_dsn(
-                Some(&addr),
-                user.map(|s| s.as_str()),
-                pass.map(|s| s.as_str()),
-                None,
-                ws_tls_mode,
-                ws_tls_version.map(|s| s.as_str()),
-                ws_tls_ca.map(|s| s.as_str()),
-            );
+            let dsn = util::DsnBuilder::new()
+                .addr(Some(&addr))
+                .user(user.map(|s| s.as_str()))
+                .pass(pass.map(|s| s.as_str()))
+                .ws_tls_mode(ws_tls_mode)
+                .ws_tls_version(ws_tls_version.map(|s| s.as_str()))
+                .ws_tls_ca(ws_tls_ca.map(|s| s.as_str()))
+                .build();
             let mut dsn = Dsn::from_str(&dsn)?;
 
             let mut auto_commit = false;

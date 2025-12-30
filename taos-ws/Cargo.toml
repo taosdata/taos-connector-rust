@@ -50,7 +50,11 @@ git = "https://github.com/taosdata/tokio-tungstenite.git"
 rev = "3420353"
 
 [dev-dependencies]
+base32 = "0.5.1"
+hmac = "0.12.1"
 pretty_env_logger = "0.5.0"
+sha1 = "0.10.6"
+sha2 = "0.10.9"
 tracing-subscriber = { version = "0.3.20", default-features = false, features = [
     "fmt",
 ] }
@@ -78,3 +82,4 @@ rustls-ring-crypto-provider = [
 ]
 deflate = ["tokio-tungstenite/deflate", "tokio-tungstenite/rustls-dangerous"]
 test-new-feat = []
+test-enterprise = []
