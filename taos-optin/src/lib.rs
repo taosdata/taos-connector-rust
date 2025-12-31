@@ -1551,6 +1551,79 @@ mod tests {
 
         Ok(())
     }
+
+    #[cfg(feature = "test-enterprise")]
+    #[test]
+    fn test_connect_with_totp() -> anyhow::Result<()> {
+        use taos_query::prelude::sync::*;
+        use taos_query::util::totp::*;
+
+        let taos = TaosBuilder::from_dsn("taos://localhost:6030")?.build()?;
+        taos.exec("drop user nts_totp_user").ok();
+
+        let totp_seed = generate_totp_seed(64);
+        taos.exec(format!(
+            "create user nts_totp_user pass 'totp_pass_1' totpseed '{totp_seed}'"
+        ))?;
+
+        let mut rs = taos.query(format!("select generate_totp_secret('{totp_seed}')"))?;
+        let rows: Vec<String> = rs.deserialize().try_collect()?;
+        assert_eq!(rows.len(), 1);
+        let totp_secret = &rows[0];
+
+        let secret = generate_totp_secret(totp_seed.as_bytes());
+        let secret = totp_secret_encode(&secret);
+        assert_eq!(&secret, totp_secret);
+
+        let totp_secret = totp_secret_decode(totp_secret).unwrap();
+        let totp_code = generate_totp_code(&totp_secret);
+
+        let taost = TaosBuilder::from_dsn(format!(
+            "taos://nts_totp_user:totp_pass_1@localhost:6030?totp_code={totp_code}"
+        ))?
+        .build()?;
+
+        let mut rs = taost.query("select 1")?;
+        let rows: Vec<String> = rs.deserialize().try_collect()?;
+        assert_eq!(rows, vec!["1".to_string()]);
+
+        taos.exec("drop user nts_totp_user")?;
+
+        Ok(())
+    }
+
+    #[cfg(feature = "test-enterprise")]
+    #[test]
+    fn test_connect_with_token() -> anyhow::Result<()> {
+        use taos_query::prelude::sync::*;
+
+        let taos = TaosBuilder::from_dsn("taos://localhost:6030")?.build()?;
+        taos.exec("drop user nts_token_user").ok();
+        taos.exec("create user nts_token_user pass 'token_pass_1'")?;
+
+        let mut rs = taos.query("create token test_nts_bearer_token from user nts_token_user")?;
+        let rows: Vec<String> = rs.deserialize().try_collect()?;
+        assert_eq!(rows.len(), 1);
+        let token = &rows[0];
+
+        let taost = TaosBuilder::from_dsn(format!("taos://localhost:6030?bearer_token={token}"))?
+            .build()?;
+
+        let mut rs = taost.query("select 1")?;
+        let rows: Vec<String> = rs.deserialize().try_collect()?;
+        assert_eq!(rows, vec!["1".to_string()]);
+
+        let taost = TaosBuilder::from_dsn(format!("taos://localhost:6030?bearer_token={token}"))?
+            .build()?;
+
+        let mut rs = taost.query("select 1")?;
+        let rows: Vec<String> = rs.deserialize().try_collect()?;
+        assert_eq!(rows, vec!["1".to_string()]);
+
+        taos.exec("drop user nts_token_user")?;
+
+        Ok(())
+    }
 }
 
 #[cfg(feature = "test-enterprise")]
