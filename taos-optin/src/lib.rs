@@ -452,14 +452,17 @@ impl taos_query::TBuilder for TaosBuilder {
         }
 
         let params = &dsn.params;
-        if let Some(totp) = params.get("totp_code") {
+        if let Some(totp) = params.get("totpCode").or_else(|| params.get("totp_code")) {
             let totp = CString::new(totp.as_str())
-                .map_err(|e| RawError::from_string(format!("Invalid totp_code: {e}")))?;
+                .map_err(|e| RawError::from_string(format!("Invalid totp code: {e}")))?;
             auth.totp.replace(totp);
         }
-        if let Some(token) = params.get("bearer_token") {
+        if let Some(token) = params
+            .get("bearerToken")
+            .or_else(|| params.get("bearer_token"))
+        {
             let token = CString::new(token.as_str())
-                .map_err(|e| RawError::from_string(format!("Invalid bearer_token: {e}")))?;
+                .map_err(|e| RawError::from_string(format!("Invalid bearer token: {e}")))?;
             auth.token.replace(token);
         }
 
@@ -608,14 +611,17 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
         }
 
         let params = &dsn.params;
-        if let Some(totp) = params.get("totp_code") {
+        if let Some(totp) = params.get("totpCode").or_else(|| params.get("totp_code")) {
             let totp = CString::new(totp.as_str())
-                .map_err(|e| RawError::from_string(format!("Invalid totp_code: {e}")))?;
+                .map_err(|e| RawError::from_string(format!("Invalid totp code: {e}")))?;
             auth.totp.replace(totp);
         }
-        if let Some(token) = params.get("bearer_token") {
+        if let Some(token) = params
+            .get("bearerToken")
+            .or_else(|| params.get("bearer_token"))
+        {
             let token = CString::new(token.as_str())
-                .map_err(|e| RawError::from_string(format!("Invalid bearer_token: {e}")))?;
+                .map_err(|e| RawError::from_string(format!("Invalid bearer token: {e}")))?;
             auth.token.replace(token);
         }
 
@@ -1587,6 +1593,15 @@ mod tests {
         let rows: Vec<String> = rs.deserialize().try_collect()?;
         assert_eq!(rows, vec!["1".to_string()]);
 
+        let taost = TaosBuilder::from_dsn(format!(
+            "taos://nts_totp_user:totp_pass_1@localhost:6030?totpCode={totp_code}"
+        ))?
+        .build()?;
+
+        let mut rs = taost.query("select 1")?;
+        let rows: Vec<String> = rs.deserialize().try_collect()?;
+        assert_eq!(rows, vec!["1".to_string()]);
+
         taos.exec("drop user nts_totp_user")?;
 
         Ok(())
@@ -1615,6 +1630,13 @@ mod tests {
 
         let taost = TaosBuilder::from_dsn(format!("taos://localhost:6030?bearer_token={token}"))?
             .build()?;
+
+        let mut rs = taost.query("select 1")?;
+        let rows: Vec<String> = rs.deserialize().try_collect()?;
+        assert_eq!(rows, vec!["1".to_string()]);
+
+        let taost =
+            TaosBuilder::from_dsn(format!("taos://localhost:6030?bearerToken={token}"))?.build()?;
 
         let mut rs = taost.query("select 1")?;
         let rows: Vec<String> = rs.deserialize().try_collect()?;
@@ -1664,6 +1686,16 @@ mod totp_async_tests {
 
         let taost = TaosBuilder::from_dsn(format!(
             "taos://nt_totp_user:totp_pass_1@localhost:6030?totp_code={totp_code}"
+        ))?
+        .build()
+        .await?;
+
+        let mut rs = taost.query("select 1").await?;
+        let rows: Vec<String> = rs.deserialize().try_collect().await?;
+        assert_eq!(rows, vec!["1".to_string()]);
+
+        let taost = TaosBuilder::from_dsn(format!(
+            "taos://nt_totp_user:totp_pass_1@localhost:6030?totpCode={totp_code}"
         ))?
         .build()
         .await?;
@@ -1766,6 +1798,14 @@ mod totp_async_tests {
         assert_eq!(rows, vec!["1".to_string()]);
 
         let taost = TaosBuilder::from_dsn(format!("taos://localhost:6030?bearer_token={token}"))?
+            .build()
+            .await?;
+
+        let mut rs = taost.query("select 1").await?;
+        let rows: Vec<String> = rs.deserialize().try_collect().await?;
+        assert_eq!(rows, vec!["1".to_string()]);
+
+        let taost = TaosBuilder::from_dsn(format!("taos://localhost:6030?bearerToken={token}"))?
             .build()
             .await?;
 
