@@ -874,6 +874,16 @@ impl ApiEntry {
         }
     }
 
+    fn connect_with_auth(&self, auth: &Auth) -> Result<*mut TAOS, RawError> {
+        if auth.token().is_some() {
+            self.connect_token(auth)
+        } else if auth.totp().is_some() {
+            self.connect_totp(auth)
+        } else {
+            Ok(self.connect(auth))
+        }
+    }
+
     #[instrument("connect_with_retries", skip(self, auth), fields(host = auth.host().and_then(|s| s.to_str().ok()), user = ?auth.user().and_then(|s| s.to_str().ok())))]
     pub(super) fn connect_with_retries(
         &self,
@@ -883,18 +893,9 @@ impl ApiEntry {
         if retries == 0 {
             retries = 1;
         }
-
-        let connect_fn: Box<dyn Fn() -> Result<*mut TAOS, RawError>> = if auth.token().is_some() {
-            Box::new(|| self.connect_token(auth))
-        } else if auth.totp().is_some() {
-            Box::new(|| self.connect_totp(auth))
-        } else {
-            Box::new(|| Ok(self.connect(auth)))
-        };
-
         loop {
             let now = std::time::Instant::now();
-            let ptr = connect_fn()?;
+            let ptr = self.connect_with_auth(auth)?;
             let elapsed = now.elapsed();
             if ptr.is_null() {
                 tracing::trace!(cost = ?elapsed, "connect failed");

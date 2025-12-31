@@ -1827,6 +1827,7 @@ mod tests {
         ));
         assert!(is_greater_than_or_equal_to("3.3.2.x", "3.3.2.0"));
         assert!(is_greater_than_or_equal_to("3.-abc.x", "3.0.0.0"));
+        assert!(!is_greater_than_or_equal_to("3.-abc1.x", "3.1.0.0"));
     }
 }
 
