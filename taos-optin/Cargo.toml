@@ -47,6 +47,10 @@ tokio = { version = "1", features = ["full", "sync"] }
 anyhow = "1"
 pretty_env_logger = "0.5.0"
 serde = { version = "1", features = ["derive"] }
+taos-query = { version = "0.12.4", path = "../taos-query", default-features = false, features = [
+    "async",
+    "test",
+] }
 tokio = { version = "1", features = ["full"] }
 
 [features]
@@ -54,3 +58,4 @@ default = ["backport"]
 backport = []
 serde1 = ["serde", "serde_repr"]
 test-new-feat = []
+test-enterprise = []

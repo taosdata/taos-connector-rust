@@ -892,17 +892,21 @@ fn is_greater_than_or_equal_to(v1: &str, v2: &str) -> bool {
 }
 
 fn compare_versions(v1: &str, v2: &str) -> std::cmp::Ordering {
-    let nums1: Vec<u32> = v1
-        .split('.')
-        .take(4)
-        .map(|s| s.parse().expect(v1))
-        .collect();
-    let nums2: Vec<u32> = v2
-        .split('.')
-        .take(4)
-        .map(|s| s.parse().expect(v2))
-        .collect();
+    fn normalize(v: &str) -> Vec<u32> {
+        v.split(['.', '-'])
+            .take(4)
+            .map(|s| {
+                s.chars()
+                    .take_while(|c| c.is_ascii_digit())
+                    .collect::<String>()
+                    .parse()
+                    .unwrap_or(0)
+            })
+            .collect()
+    }
 
+    let nums1 = normalize(v1);
+    let nums2 = normalize(v2);
     nums1.cmp(&nums2)
 }
 
@@ -1807,6 +1811,23 @@ mod tests {
         };
         let err = qs.send_recv(req).await.unwrap_err();
         assert_eq!(err.code(), WS_ERROR_NO::RECV_MESSAGE_TIMEOUT.as_code());
+    }
+
+    #[test]
+    fn test_is_greater_than_or_equal_to() {
+        assert!(is_greater_than_or_equal_to("3.3.2.0", "3.3.2.0"));
+        assert!(is_greater_than_or_equal_to("3.3.3.0", "3.3.2.0"));
+        assert!(!is_greater_than_or_equal_to("3.3.1.0", "3.3.2.0"));
+        assert!(is_greater_than_or_equal_to("3.3.2.0.alpha", "3.3.2.0"));
+        assert!(is_greater_than_or_equal_to("3.3.2.0-community", "3.3.2.0"));
+        assert!(is_greater_than_or_equal_to("3.3.2-1-alpha", "3.3.2.0"));
+        assert!(!is_greater_than_or_equal_to(
+            "3.3.2-0.alpha",
+            "3.3.2.1-community"
+        ));
+        assert!(is_greater_than_or_equal_to("3.3.2.x", "3.3.2.0"));
+        assert!(is_greater_than_or_equal_to("3.-abc.x", "3.0.0.0"));
+        assert!(!is_greater_than_or_equal_to("3.-abc1.x", "3.1.0.0"));
     }
 }
 

@@ -49,6 +49,24 @@ pub struct ApiEntry {
         db: *const c_char,
         port: u16,
     ) -> *mut TAOS,
+    taos_connect_totp: Option<
+        unsafe extern "C" fn(
+            ip: *const c_char,
+            user: *const c_char,
+            pass: *const c_char,
+            totp: *const c_char,
+            db: *const c_char,
+            port: u16,
+        ) -> *mut TAOS,
+    >,
+    taos_connect_token: Option<
+        unsafe extern "C" fn(
+            ip: *const c_char,
+            token: *const c_char,
+            db: *const c_char,
+            port: u16,
+        ) -> *mut TAOS,
+    >,
     taos_close: unsafe extern "C" fn(taos: *mut TAOS),
 
     // error handler
@@ -572,6 +590,8 @@ impl ApiEntry {
             );
 
             optional_symbol!(
+                taos_connect_totp,
+                taos_connect_token,
                 taos_fetch_block_s,
                 taos_fetch_raw_block,
                 taos_fetch_raw_block_a,
@@ -734,6 +754,8 @@ impl ApiEntry {
                 taos_get_client_info,
                 taos_options,
                 taos_connect,
+                taos_connect_totp,
+                taos_connect_token,
                 taos_close,
 
                 taos_errno,
@@ -804,7 +826,7 @@ impl ApiEntry {
         self
     }
 
-    pub(super) fn connect(&self, auth: &Auth) -> *mut TAOS {
+    fn connect(&self, auth: &Auth) -> *mut TAOS {
         unsafe {
             (self.taos_connect)(
                 auth.host_as_ptr(),
@@ -813,6 +835,52 @@ impl ApiEntry {
                 auth.database_as_ptr(),
                 auth.port(),
             )
+        }
+    }
+
+    fn connect_totp(&self, auth: &Auth) -> Result<*mut TAOS, RawError> {
+        unsafe {
+            if let Some(taos_connect_totp) = self.taos_connect_totp {
+                Ok(taos_connect_totp(
+                    auth.host_as_ptr(),
+                    auth.user_as_ptr(),
+                    auth.password_as_ptr(),
+                    auth.totp_as_ptr(),
+                    auth.database_as_ptr(),
+                    auth.port(),
+                ))
+            } else {
+                Err(RawError::from_string(
+                    "taos_connect_totp is only available in TDengine v3.4.0.0 and above",
+                ))
+            }
+        }
+    }
+
+    fn connect_token(&self, auth: &Auth) -> Result<*mut TAOS, RawError> {
+        unsafe {
+            if let Some(taos_connect_token) = self.taos_connect_token {
+                Ok(taos_connect_token(
+                    auth.host_as_ptr(),
+                    auth.token_as_ptr(),
+                    auth.database_as_ptr(),
+                    auth.port(),
+                ))
+            } else {
+                Err(RawError::from_string(
+                    "taos_connect_token is only available in TDengine v3.4.0.0 and above",
+                ))
+            }
+        }
+    }
+
+    fn connect_with_auth(&self, auth: &Auth) -> Result<*mut TAOS, RawError> {
+        if auth.token().is_some() {
+            self.connect_token(auth)
+        } else if auth.totp().is_some() {
+            self.connect_totp(auth)
+        } else {
+            Ok(self.connect(auth))
         }
     }
 
@@ -827,7 +895,7 @@ impl ApiEntry {
         }
         loop {
             let now = std::time::Instant::now();
-            let ptr = self.connect(auth);
+            let ptr = self.connect_with_auth(auth)?;
             let elapsed = now.elapsed();
             if ptr.is_null() {
                 tracing::trace!(cost = ?elapsed, "connect failed");
