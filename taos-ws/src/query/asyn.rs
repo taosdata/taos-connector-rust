@@ -893,7 +893,7 @@ fn is_greater_than_or_equal_to(v1: &str, v2: &str) -> bool {
 
 fn compare_versions(v1: &str, v2: &str) -> std::cmp::Ordering {
     fn normalize(v: &str) -> Vec<u32> {
-        v.split(|c: char| c == '.' || c == '-')
+        v.split(['.', '-'])
             .take(4)
             .map(|s| {
                 s.chars()
