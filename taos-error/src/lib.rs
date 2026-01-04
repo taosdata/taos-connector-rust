@@ -55,6 +55,7 @@ unsafe impl Sync for Error {}
 
 impl Debug for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        dbg!("Debug");
         if f.alternate() {
             f.debug_struct("Error")
                 .field("code", &self.code)
@@ -123,10 +124,19 @@ impl Display for Error {
             return f.write_str("Unknown error");
         }
 
+        dbg!(f.alternate());
         if f.alternate() {
-            write!(f, "{:#}", self.source)?;
+            dbg!("alternate");
+            return Ok(());
+        }
+
+        if f.alternate() {
+            // dbg!("Display source");
+            // write!(f, "xxxx{:#}", self.source)?;
         } else {
-            write!(f, "{}", self.source)?;
+            // dbg!("Display source1");
+            write!(f, "xxx{}xxx", self.source)?;
+            // dbg!("Display source2");
         }
         Ok(())
     }
@@ -433,6 +443,8 @@ impl serde::de::Error for Error {
 
 #[cfg(test)]
 mod tests {
+    use anyhow::Context;
+
     use super::*;
 
     #[test]
@@ -528,9 +540,70 @@ mod tests {
 
     #[cfg(feature = "serde")]
     #[test]
-    fn test_serde_error() {
+    fn test_serde_error() -> anyhow::Result<()> {
+        use anyhow::Context;
         use serde::de::Error as DeError;
 
-        let _ = Error::custom("");
+        let a = Error::custom("aaaa");
+        // let aa = Err(a).with_context(|| "hello")?;
+        let aa = Err(a)?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_error_str() -> anyhow::Result<()> {
+        let err1 = Error::from_string("This is a test error");
+        // println!("err: {:?}", err1);
+        // println!("============================");
+
+        let err1 = anyhow::Error::from(err1);
+        // let a = Err(err1).with_context(|| "asdf")?;
+        // let a = Err(err1)?;
+        // println!("err display: {}", err1);
+        // println!("============================");
+        println!("err display#: {:#}", err1);
+        // println!("============================");
+        // println!("err debug: {:?}", err1);
+        // println!("============================");
+        // println!("err debug#: {:#?}", err1);
+        // println!("============================");
+        // println!("err???: {:?}", err1);
+        // println!("============================");
+        // println!("err###: {:#}", err1);
+        Ok(())
+    }
+
+    #[test]
+    fn test_a() {
+        let err = Error {
+            code: Code::SUCCESS,
+            context: Some("hello".to_string()),
+            source: Inner::Raw {
+                raw: Cow::from("raw error"),
+            },
+        };
+        let err1 = anyhow::Error::from(err);
+        println!("{:#}", err1);
+    }
+
+    #[test]
+    fn test_anyhow_err() -> anyhow::Result<()> {
+        let err = Error {
+            code: Code::SUCCESS,
+            context: None,
+            source: Inner::Empty {},
+        };
+        println!("{}", err);
+
+        Ok(())
+
+        // Err(anyhow::format_err!("This is an anyhow error"))?
+        // fn raise_anyhow() -> anyhow::Result<()> {
+        //     Err(anyhow::format_err!("This is an anyhow error"))
+        // }
+        // let err = raise_anyhow().unwrap_err();
+        // let taos_err: Error = err.into();
+        // assert_eq!(taos_err.to_string(), "This is an anyhow error");
+        // Ok(())
     }
 }

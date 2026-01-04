@@ -1710,6 +1710,51 @@ mod async_tests {
 
         Ok(())
     }
+
+    #[tokio::test]
+    async fn test_error() -> anyhow::Result<()> {
+        #[derive(Debug, serde::Deserialize)]
+        struct Record {
+            // connector_info: String,
+            ts: i64,
+            c1: i32,
+            c2: i64,
+        }
+
+        let taos = TaosBuilder::from_dsn("ws://localhost:6041")?
+            .build()
+            .await?;
+
+        taos.exec_many([
+            "drop database if exists test_1767163619",
+            "create database test_1767163619",
+            "use test_1767163619",
+            "create table t0 (ts timestamp, c1 varchar(20), c2 varchar(20))",
+            "insert into t0 values (1726803356466, 'hello', 'world')",
+        ])
+        .await?;
+
+        // let mut rs = taos.query("select * from t0").await?;
+        let err = taos
+            .query("select * from t0")
+            .await
+            .with_context(|| "query failed")?
+            .deserialize::<Record>()
+            .try_collect::<Vec<_>>()
+            .await
+            .with_context(|| "deserialize failed")
+            .unwrap_err();
+        // let anyhow::Error { .. } = &err;
+        dbg!(&err);
+
+        let anyhow_err = anyhow::Error::from(err);
+        println!("anyhow_err: {:#}", &anyhow_err);
+        println!("=============================");
+        println!("anyhow_err: {:?}", &anyhow_err);
+        // dbg!(&anyhow_err);
+
+        Ok(())
+    }
 }
 
 #[cfg(feature = "ws-rustls-ring-crypto-provider")]
