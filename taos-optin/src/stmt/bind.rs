@@ -2,6 +2,7 @@ use taos_query::common::itypes::IsValue;
 use taos_query::common::Ty;
 
 use crate::types::{BindFrom, TaosBindV2, TaosBindV3};
+
 impl<T> From<&T> for TaosBindV2
 where
     T: IsValue + Clone,

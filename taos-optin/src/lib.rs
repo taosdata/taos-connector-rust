@@ -20,6 +20,7 @@ const MAX_CONNECT_RETRIES: u8 = 2;
 mod into_c_str;
 mod raw;
 mod stmt;
+mod stmt2;
 
 #[allow(non_camel_case_types)]
 pub(crate) mod types;
@@ -129,7 +130,6 @@ impl taos_query::AsyncQueryable for Taos {
     #[tracing::instrument(level = "trace", skip_all)]
     async fn query<T: AsRef<str> + Send + Sync>(&self, sql: T) -> RawResult<Self::AsyncResultSet> {
         tracing::trace!("Async query with SQL: {}", sql.as_ref());
-
         match self.raw.query_async(sql.as_ref()).await {
             Err(err) if err.code() == 0x2603 => {
                 self.raw.query_async(sql.as_ref()).await.map(ResultSet::new)
@@ -142,7 +142,6 @@ impl taos_query::AsyncQueryable for Taos {
     #[tracing::instrument(level = "trace", skip_all)]
     async fn exec<T: AsRef<str> + Send + Sync>(&self, sql: T) -> RawResult<usize> {
         let sql = sql.as_ref();
-        // tracing::trace!("exec sql: {sql}");
         self.raw.exec_async(sql).await
     }
 

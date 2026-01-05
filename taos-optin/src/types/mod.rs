@@ -3,6 +3,8 @@ use std::mem::ManuallyDrop;
 use std::os::raw::*;
 use std::ptr;
 
+use crate::Taos;
+
 mod field;
 use derive_more::Deref;
 pub use field::from_raw_fields;
@@ -16,6 +18,7 @@ pub use tmq::*;
 #[allow(clippy::upper_case_acronyms)]
 pub type TAOS = c_void;
 pub type TAOS_STMT = c_void;
+pub type TAOS_STMT2 = c_void;
 pub type TAOS_RES = c_void;
 pub type TAOS_ROW = *mut *mut c_void;
 
@@ -24,6 +27,8 @@ pub type taos_async_fetch_cb =
 
 pub type taos_async_query_cb =
     unsafe extern "C" fn(param: *mut c_void, res: *mut c_void, code: c_int);
+
+pub type taos_async_stmt2_exec_cb = taos_async_query_cb;
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -605,4 +610,44 @@ impl Drop for DropMultiBind {
             };
         }
     }
+}
+
+#[repr(C)]
+#[derive(Debug, Clone)]
+pub struct TaosStmt2Option {
+    pub reqid: i64,
+    pub single_stb_insert: bool,
+    pub single_table_bind_once: bool,
+    pub async_exec_fn: taos_async_stmt2_exec_cb,
+    pub userdata: *mut c_void,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone)]
+pub struct TaosStmt2Bind {
+    pub buffer_type: c_int,
+    pub buffer: *mut c_void,
+    pub length: *mut i32,
+    pub is_null: *mut c_char,
+    pub num: c_int,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone)]
+pub struct TaosStmt2Bindv {
+    pub count: c_int,
+    pub tbnames: *mut *mut c_char,
+    pub tags: *mut *mut TaosStmt2Bind,
+    pub bind_cols: *mut *mut TaosStmt2Bind,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone)]
+pub struct TaosFieldAll {
+    pub name: [c_char; 65],
+    pub ty: i8,
+    pub precision: u8,
+    pub scale: u8,
+    pub bytes: i32,
+    pub field_type: u8,
 }
