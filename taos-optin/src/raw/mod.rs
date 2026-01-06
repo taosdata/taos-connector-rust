@@ -546,6 +546,23 @@ pub struct Stmt2Api {
     pub(crate) taos_stmt2_error: Option<unsafe extern "C" fn(stmt: *mut TAOS_STMT2) -> *mut c_char>,
 }
 
+impl Stmt2Api {
+    pub(crate) fn exec(&self, stmt: *mut TAOS_STMT2) -> Result<(), RawError> {
+        let code = unsafe { (self.taos_stmt2_exec.unwrap())(stmt, std::ptr::null_mut()) };
+        if code != 0 {
+            return Err(RawError::from_string(self.err_as_str(stmt)));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn err_as_str(&self, stmt: *mut TAOS_STMT2) -> String {
+        unsafe {
+            let err_ptr = (self.taos_stmt2_error.unwrap())(stmt);
+            CStr::from_ptr(err_ptr).to_string_lossy().to_string()
+        }
+    }
+}
+
 const fn default_lib_name() -> &'static str {
     if cfg!(target_os = "windows") {
         "taos.dll"
