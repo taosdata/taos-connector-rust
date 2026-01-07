@@ -55,7 +55,6 @@ unsafe impl Sync for Error {}
 
 impl Debug for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        dbg!("Debug");
         if f.alternate() {
             f.debug_struct("Error")
                 .field("code", &self.code)
@@ -92,6 +91,7 @@ impl Debug for Error {
                     }
                 }
             }
+
             #[cfg(nightly)]
             {
                 writeln!(f)?;
@@ -118,26 +118,22 @@ impl Display for Error {
             if self.inner.is_empty() {
                 return Ok(());
             }
-            // pretty print error source.
+            // Pretty print error source.
             f.write_str(": ")?;
         } else if self.inner.is_empty() {
             return f.write_str("Unknown error");
         }
+        // Error source
+        write!(f, "{:#}", self.inner)?;
 
-        dbg!(f.alternate());
-        if f.alternate() {
-            dbg!("alternate");
-            return Ok(());
-        }
-
-        if f.alternate() {
-            // dbg!("Display source");
-            // write!(f, "xxxx{:#}", self.source)?;
-        } else {
-            // dbg!("Display source1");
-            write!(f, "xxx{}xxx", self.inner)?;
-            // dbg!("Display source2");
-        }
+        // if f.alternate() {
+        //     // dbg!("Display source");
+        //     write!(f, "xxxx{:#}", self.source)?;
+        // } else {
+        //     // dbg!("Display source1");
+        //     write!(f, "xxx{}xxx", self.source)?;
+        //     // dbg!("Display source2");
+        // }
         Ok(())
     }
 }
@@ -443,8 +439,6 @@ impl serde::de::Error for Error {
 
 #[cfg(test)]
 mod tests {
-    use anyhow::Context;
-
     use super::*;
 
     #[test]
@@ -574,16 +568,28 @@ mod tests {
     }
 
     #[test]
-    fn test_a() {
+    fn test_duplicate() {
         let err = Error {
             code: Code::SUCCESS,
-            context: Some("hello".to_string()),
+            context: Some("context".to_string()),
             inner: Inner::Raw {
                 raw: Cow::from("raw error"),
             },
         };
-        let err1 = anyhow::Error::from(err);
-        println!("{:#}", err1);
+
+        let err = Error {
+            code: Code::SUCCESS,
+            context: Some("higher context".to_string()),
+            inner: Inner::any(err.into()),
+        };
+
+        let s1 = format!("{}", err);
+        let s2 = format!("{}", err);
+        assert_eq!(s1, s2);
+        assert_eq!(
+            s1,
+            "[0x0000] higher context: [0x0000] context: Internal error: `raw error`"
+        );
     }
 
     #[test]
