@@ -3,8 +3,6 @@ use std::mem::ManuallyDrop;
 use std::os::raw::*;
 use std::ptr;
 
-use crate::Taos;
-
 mod field;
 use derive_more::Deref;
 pub use field::from_raw_fields;

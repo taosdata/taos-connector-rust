@@ -4,7 +4,7 @@ use std::{
     future::Future,
     pin::Pin,
     ptr,
-    rc::{Rc, Weak},
+    rc::Rc,
     sync::Arc,
     task::{Context, Poll, Waker},
     time::{Duration, Instant},
@@ -17,7 +17,7 @@ use taos_query::{
 use crate::{
     into_c_str::IntoCStr,
     raw::{ApiEntry, RawRes, RawTaos, Stmt2Api},
-    types::{taos_async_stmt2_exec_cb, TaosStmt2Option, TAOS_RES, TAOS_STMT2},
+    types::{TaosStmt2Option, TAOS_RES, TAOS_STMT2},
     ResultSet,
 };
 
@@ -28,11 +28,14 @@ pub struct Stmt2 {
 
 impl Stmt2Bindable<super::Taos> for Stmt2 {
     fn init(taos: &super::Taos) -> RawResult<Self> {
-        todo!()
+        Ok(Self {
+            raw: RawStmt2::from_raw_taos(&taos.raw)?,
+        })
     }
 
     fn prepare(&mut self, sql: &str) -> RawResult<&mut Self> {
-        todo!()
+        self.raw.prepare(sql)?;
+        Ok(self)
     }
 
     fn bind(&mut self, params: &[Stmt2BindParam]) -> RawResult<&mut Self> {
@@ -40,7 +43,7 @@ impl Stmt2Bindable<super::Taos> for Stmt2 {
     }
 
     fn exec(&mut self) -> RawResult<usize> {
-        todo!()
+        taos_query::block_in_place_or_global(self.raw.exec())
     }
 
     fn affected_rows(&self) -> usize {
@@ -48,18 +51,21 @@ impl Stmt2Bindable<super::Taos> for Stmt2 {
     }
 
     fn result_set(&self) -> RawResult<<super::Taos as Queryable>::ResultSet> {
-        todo!()
+        self.raw.result_set()
     }
 }
 
 #[async_trait::async_trait]
 impl Stmt2AsyncBindable<super::Taos> for Stmt2 {
     async fn init(taos: &super::Taos) -> RawResult<Self> {
-        todo!()
+        Ok(Self {
+            raw: RawStmt2::from_raw_taos(&taos.raw)?,
+        })
     }
 
     async fn prepare(&mut self, sql: &str) -> RawResult<&mut Self> {
-        todo!()
+        self.raw.prepare(sql)?;
+        Ok(self)
     }
 
     async fn bind(&mut self, params: &[Stmt2BindParam]) -> RawResult<&mut Self> {
@@ -67,7 +73,7 @@ impl Stmt2AsyncBindable<super::Taos> for Stmt2 {
     }
 
     async fn exec(&mut self) -> RawResult<usize> {
-        todo!()
+        self.raw.exec().await
     }
 
     async fn affected_rows(&self) -> usize {
@@ -75,7 +81,7 @@ impl Stmt2AsyncBindable<super::Taos> for Stmt2 {
     }
 
     async fn result_set(&self) -> RawResult<<super::Taos as AsyncQueryable>::AsyncResultSet> {
-        todo!()
+        self.raw.result_set()
     }
 }
 
@@ -83,7 +89,7 @@ impl Stmt2AsyncBindable<super::Taos> for Stmt2 {
 pub struct RawStmt2 {
     api: Stmt2Api,
     ptr: *mut TAOS_STMT2,
-    res: Option<RawRes>,
+    res: UnsafeCell<Option<RawRes>>,
     state: Rc<UnsafeCell<Stmt2ExecState>>,
 }
 
@@ -95,21 +101,25 @@ impl Drop for RawStmt2 {
         if let Err(err) = self.close() {
             tracing::error!("failed to close Stmt2: {err}");
         }
+        unsafe {
+            if let Some(mut res) = (&mut *self.res.get()).take() {
+                res.free_result();
+            }
+        }
     }
 }
 
 impl RawStmt2 {
-    #[inline]
     fn from_raw_taos(taos: &RawTaos) -> RawResult<Self> {
         let taos_stmt2_init = taos.c.stmt2.taos_stmt2_init.ok_or_else(|| {
             RawError::from_string(format!(
-                "Stmt2 API missing (requires TDengine >= v3.3.5.0, current: {})",
+                "Stmt2 API missing (requires TDengine >= v3.3.6.0, current: {})",
                 taos.c.version()
             ))
         })?;
 
         let state = Rc::new(UnsafeCell::new(Stmt2ExecState::new(taos.c.clone())));
-        let userdata = Rc::into_raw(state.clone()) as *mut c_void;
+        let userdata = Rc::as_ptr(&state) as *mut c_void;
 
         let mut option = TaosStmt2Option {
             reqid: generate_req_id() as _,
@@ -121,7 +131,6 @@ impl RawStmt2 {
 
         let stmt2_ptr = unsafe { taos_stmt2_init(taos.as_ptr(), &mut option) };
         if stmt2_ptr.is_null() {
-            unsafe { Rc::from_raw(userdata) };
             return Err(RawError::from_string(
                 taos.c.stmt2.err_as_str(ptr::null_mut()),
             ));
@@ -133,12 +142,11 @@ impl RawStmt2 {
         Ok(RawStmt2 {
             api: taos.c.stmt2,
             ptr: stmt2_ptr,
-            res: None,
+            res: UnsafeCell::new(None),
             state,
         })
     }
 
-    #[inline]
     fn prepare<'c, T: IntoCStr<'c>>(&self, sql: T) -> RawResult<()> {
         let sql = sql.into_c_str();
         tracing::trace!("stmt2 prepare, sql: {sql:?}");
@@ -153,7 +161,6 @@ impl RawStmt2 {
 
     // TODO: impl bind
 
-    #[inline]
     async fn exec(&mut self) -> RawResult<usize> {
         let state = unsafe { &mut *self.state.get() };
         state.clear();
@@ -161,30 +168,23 @@ impl RawStmt2 {
         let fut = Stmt2ExecFuture {
             state: self.state.clone(),
         };
-        let (res, affected_rows) = fut.await?;
-        self.res = Some(res);
+        let (affected_rows, res) = fut.await?;
+        unsafe { *self.res.get() = Some(res) };
         Ok(affected_rows)
     }
 
-    #[inline]
     fn close(&self) -> RawResult<()> {
         self.ok(unsafe { (self.api.taos_stmt2_close.unwrap())(self.as_ptr()) })
     }
 
-    #[inline]
-    fn result_set(&mut self) -> RawResult<ResultSet> {
-        match self.res.take() {
+    fn result_set(&self) -> RawResult<ResultSet> {
+        let slot = unsafe { &mut *self.res.get() };
+        match slot.take() {
             Some(res) => Ok(ResultSet::new(res)),
             None => Err(RawError::from_string("No result available from statement")),
         }
     }
 
-    #[inline]
-    const fn as_ptr(&self) -> *mut TAOS_STMT2 {
-        self.ptr
-    }
-
-    #[inline(always)]
     fn ok(&self, code: impl Into<Code>) -> RawResult<()> {
         let code = code.into();
         if code.success() {
@@ -197,12 +197,16 @@ impl RawStmt2 {
             Err(RawError::from_string(err))
         }
     }
+
+    const fn as_ptr(&self) -> *mut TAOS_STMT2 {
+        self.ptr
+    }
 }
 
 struct Stmt2ExecState {
     api: Arc<ApiEntry>,
     stmt2_ptr: Option<*mut TAOS_STMT2>,
-    result: Option<Result<(RawRes, usize), RawError>>,
+    result: Option<Result<(usize, RawRes), RawError>>,
     waiting: bool,
     start_time: Option<Instant>,
     callback_cost: Option<Duration>,
@@ -235,15 +239,17 @@ struct Stmt2ExecFuture {
     state: Rc<UnsafeCell<Stmt2ExecState>>,
 }
 
+unsafe impl Send for Stmt2ExecFuture {}
+
 impl Future for Stmt2ExecFuture {
-    type Output = Result<(RawRes, usize), RawError>;
+    type Output = Result<(usize, RawRes), RawError>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let state = unsafe { &mut *self.state.get() };
         if let Some(result) = state.result.take() {
             tracing::trace!(
-                "Stmt2 exec future woken {:?} after callback",
-                state.start_time.unwrap().elapsed() - state.callback_cost.unwrap()
+                elapsed = ?state.start_time.unwrap().elapsed() - state.callback_cost.unwrap(),
+                "Stmt2 exec future woken after callback",
             );
             return Poll::Ready(result);
         }
@@ -256,61 +262,51 @@ impl Future for Stmt2ExecFuture {
         state.waiting = true;
         state.start_time = Some(Instant::now());
         state.waker = Some(cx.waker().clone());
-        state.api.stmt2.exec(state.stmt2_ptr.unwrap());
+
+        if let Err(err) = state.api.stmt2.exec(state.stmt2_ptr.unwrap()) {
+            tracing::error!(
+                err = %err,
+                stmt2_ptr = ?state.stmt2_ptr.unwrap(),
+                "Failed to start stmt2 exec async"
+            );
+            return Poll::Ready(Err(err));
+        }
+
         Poll::Pending
     }
 }
 
 unsafe extern "C" fn stmt2_exec_cb(param: *mut c_void, res: *mut TAOS_RES, code: c_int) {
+    if res.is_null() && code == 0 {
+        unreachable!("Stmt2 exec callback should be ok or error");
+    }
+
     if param.is_null() {
-        tracing::error!("stmt2 exec callback param should not be null");
+        tracing::error!("Stmt2 exec callback param should not be null");
         return;
     }
 
-    let state = &*(param as *mut Stmt2ExecState);
-    // TODO: use Weak
-    if let Some(state) = state.upgrade() {
-        let s = unsafe { &mut *state.get() };
-        let cost = s.start_time.elapsed();
-        tracing::trace!("Received stmt2 exec callback in {:?}", cost);
-        s.callback_cost.replace(cost);
-        // TODO: res maybe null???
-        if res.is_null() && code == 0 {
-            unreachable!("stmt2 exec callback should be ok or error");
-        }
+    let cell = &*(param as *const UnsafeCell<Stmt2ExecState>);
+    let state = unsafe { &mut *cell.get() };
+    let elapsed = state.start_time.unwrap().elapsed();
+    tracing::trace!(elapsed = ?elapsed, "Received stmt2 exec callback");
+    state.callback_cost.replace(elapsed);
 
-        let result = if code < 0 {
-            let str = s.stmt2.as_ref().map_or_else(
-                || "Unknown error".to_string(),
-                |stmt2| {
-                    let stmt2 = stmt2.upgrade().unwrap();
-                    let stmt2 = unsafe { &*stmt2.get() };
-                    stmt2.err_as_str()
-                },
-            );
-            let err = RawError::new_with_context(
-                code,
-                str,
-                "Error while executing prepared statement".to_string(),
-            );
-            s.api.free_result(res);
-            Err(err)
-        } else {
-            debug_assert!(!res.is_null());
-            // TODO: check?
-            assert_ne!(res as usize, 1, "res should not be 1");
-            let raw_res = RawRes::from_ptr_unchecked(s.api.clone(), res);
-            let affected_rows = raw_res.affected_rows() as usize;
-            // s.api.free_result(res);
-            Ok((raw_res, affected_rows))
-        };
-
-        s.result.replace(result);
-        s.waiting = false;
-        if let Some(waker) = s.waker.take() {
-            waker.wake();
-        }
+    let result = if code < 0 {
+        state.api.free_result(res);
+        let err = state.api.stmt2.err_as_str(state.stmt2_ptr.unwrap());
+        Err(RawError::new(code, err))
     } else {
-        tracing::trace!("Stmt2 exec callback received but no listener");
+        debug_assert!(!res.is_null());
+        assert_ne!(res as usize, 1, "res should not be 1");
+        let raw_res = RawRes::from_ptr_unchecked(state.api.clone(), res);
+        let affected_rows = raw_res.affected_rows() as usize;
+        Ok((affected_rows, raw_res))
+    };
+
+    state.result.replace(result);
+    state.waiting = false;
+    if let Some(waker) = state.waker.take() {
+        waker.wake();
     }
 }

@@ -20,13 +20,14 @@ const MAX_CONNECT_RETRIES: u8 = 2;
 mod into_c_str;
 mod raw;
 mod stmt;
+pub use stmt::Stmt;
 mod stmt2;
+pub use stmt2::Stmt2;
 
 #[allow(non_camel_case_types)]
 pub(crate) mod types;
 
 pub mod tmq;
-pub use stmt::Stmt;
 pub use tmq::{Consumer, TmqBuilder};
 
 pub mod prelude {
