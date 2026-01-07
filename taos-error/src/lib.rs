@@ -123,17 +123,7 @@ impl Display for Error {
         } else if self.inner.is_empty() {
             return f.write_str("Unknown error");
         }
-        // Error source
         write!(f, "{:#}", self.inner)?;
-
-        // if f.alternate() {
-        //     // dbg!("Display source");
-        //     write!(f, "xxxx{:#}", self.source)?;
-        // } else {
-        //     // dbg!("Display source1");
-        //     write!(f, "xxx{}xxx", self.source)?;
-        //     // dbg!("Display source2");
-        // }
         Ok(())
     }
 }
@@ -534,37 +524,10 @@ mod tests {
 
     #[cfg(feature = "serde")]
     #[test]
-    fn test_serde_error() -> anyhow::Result<()> {
-        use anyhow::Context;
+    fn test_serde_error() {
         use serde::de::Error as DeError;
 
-        let a = Error::custom("aaaa");
-        // let aa = Err(a).with_context(|| "hello")?;
-        let aa = Err(a)?;
-        Ok(())
-    }
-
-    #[test]
-    fn test_error_str() -> anyhow::Result<()> {
-        let err1 = Error::from_string("This is a test error");
-        // println!("err: {:?}", err1);
-        // println!("============================");
-
-        let err1 = anyhow::Error::from(err1);
-        // let a = Err(err1).with_context(|| "asdf")?;
-        // let a = Err(err1)?;
-        println!("err display: {}", err1);
-        println!("============================");
-        println!("err display#: {:#}", err1);
-        // println!("============================");
-        println!("err debug: {:?}", err1);
-        println!("============================");
-        println!("err debug#: {:#?}", err1);
-        println!("============================");
-        println!("err???: {:?}", err1);
-        println!("============================");
-        println!("err###: {:#}", err1);
-        Ok(())
+        let _ = Error::custom("");
     }
 
     #[test]
@@ -584,32 +547,17 @@ mod tests {
         };
 
         let s1 = format!("{}", err);
-        let s2 = format!("{}", err);
+        let s2 = format!("{:#}", err);
         assert_eq!(s1, s2);
         assert_eq!(
             s1,
             "[0x0000] higher context: [0x0000] context: Internal error: `raw error`"
         );
-    }
 
-    #[test]
-    fn test_anyhow_err() -> anyhow::Result<()> {
-        let err = Error {
-            code: Code::SUCCESS,
-            context: None,
-            inner: Inner::Empty {},
-        };
-        println!("{}", err);
+        let any_err = anyhow::format_err!("{}", err);
+        assert_eq!(any_err.to_string(), s1);
 
-        Ok(())
-
-        // Err(anyhow::format_err!("This is an anyhow error"))?
-        // fn raise_anyhow() -> anyhow::Result<()> {
-        //     Err(anyhow::format_err!("This is an anyhow error"))
-        // }
-        // let err = raise_anyhow().unwrap_err();
-        // let taos_err: Error = err.into();
-        // assert_eq!(taos_err.to_string(), "This is an anyhow error");
-        // Ok(())
+        let any_err = anyhow::format_err!("{:#}", err);
+        assert_eq!(any_err.to_string(), s1);
     }
 }

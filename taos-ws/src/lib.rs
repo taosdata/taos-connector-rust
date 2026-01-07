@@ -2011,48 +2011,6 @@ mod tests {
 
         Ok(())
     }
-
-    #[tokio::test]
-    async fn test_error() -> anyhow::Result<()> {
-        #[derive(Debug, serde::Deserialize)]
-        struct Record {
-            // connector_info: String,
-            ts: i64,
-            c1: i32,
-        }
-
-        let taos = TaosBuilder::from_dsn("ws://localhost:6041")?
-            .build()
-            .await?;
-
-        taos.exec_many([
-            "drop database if exists test_1767163619",
-            "create database test_1767163619",
-            "use test_1767163619",
-            "create table t0 (ts timestamp, c1 varchar(20))",
-            "insert into t0 values (1726803356466, 'hello')",
-        ])
-        .await?;
-
-        let mut rs = taos.query("select * from t0").await?;
-        // let records: Vec<Record> = rs.deserialize().try_collect().await?;
-
-        // [taos-ws/src/lib.rs:2044:9] &err = Error {
-        //     code: [0xFFFF] Incomplete,
-        //     context: None,
-        //     source: Any(
-        //         "invalid type: string \"hello\", expected i32",
-        //     ),
-        // }
-        let err = rs
-            .deserialize::<Record>()
-            .try_collect::<Vec<_>>()
-            .await
-            .unwrap_err();
-        dbg!(&err);
-
-        Ok(())
-    }
 }
 
 #[cfg(test)]
