@@ -76,6 +76,7 @@ impl<'c> From<&'c std::ffi::CStr> for Inner {
         Self::raw(value.to_string_lossy().to_string().into())
     }
 }
+
 impl From<std::ffi::CString> for Inner {
     #[inline(always)]
     fn from(value: std::ffi::CString) -> Self {

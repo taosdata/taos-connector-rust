@@ -821,7 +821,7 @@ impl ApiEntry {
     pub(super) fn options(&self, opt: TSDB_OPTION, val: &str) -> &Self {
         unsafe {
             let val = CString::new(val.as_bytes()).unwrap();
-            (self.taos_options)(opt, val.as_ptr() as _);
+            (self.taos_options)(opt, val.as_ptr() as _, 0);
         }
         self
     }
