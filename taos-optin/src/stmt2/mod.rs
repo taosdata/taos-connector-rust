@@ -21,6 +21,8 @@ use crate::{
     ResultSet,
 };
 
+mod bind;
+
 #[derive(Debug)]
 pub struct Stmt2 {
     raw: RawStmt2,
@@ -159,7 +161,12 @@ impl RawStmt2 {
         })
     }
 
-    // TODO: impl bind
+    fn bind(&self, params: &[Stmt2BindParam]) -> RawResult<()> {
+        let mut bindv_owned = bind::build_bindv_owned(params)?;
+        self.ok(unsafe {
+            (self.api.taos_stmt2_bind_param.unwrap())(self.as_ptr(), &mut bindv_owned.bindv, -1)
+        })
+    }
 
     async fn exec(&mut self) -> RawResult<usize> {
         let state = unsafe { &mut *self.state.get() };
@@ -190,11 +197,7 @@ impl RawStmt2 {
         if code.success() {
             Ok(())
         } else {
-            let err = unsafe {
-                let err_ptr = (self.api.taos_stmt2_error.unwrap())(self.as_ptr());
-                CStr::from_ptr(err_ptr).to_string_lossy().to_string()
-            };
-            Err(RawError::from_string(err))
+            Err(RawError::from_string(self.api.err_as_str(self.as_ptr())))
         }
     }
 

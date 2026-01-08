@@ -1,7 +1,7 @@
-use std::fmt::Debug;
 use std::mem::ManuallyDrop;
 use std::os::raw::*;
 use std::ptr;
+use std::{ffi::CString, fmt::Debug};
 
 mod field;
 use derive_more::Deref;
@@ -439,15 +439,15 @@ pub trait BindFrom: Sized {
             Value::SmallInt(v) => Self::from_primitive(v),
             Value::Int(v) => Self::from_primitive(v),
             Value::BigInt(v) => Self::from_primitive(v),
+            Value::UTinyInt(v) => Self::from_primitive(v),
+            Value::USmallInt(v) => Self::from_primitive(v),
+            Value::UInt(v) => Self::from_primitive(v),
+            Value::UBigInt(v) => Self::from_primitive(v),
             Value::Float(v) => Self::from_primitive(v),
             Value::Double(v) => Self::from_primitive(v),
             Value::VarChar(v) => Self::from_varchar(v),
             Value::Timestamp(v) => Self::from_timestamp(v.as_raw_i64()),
             Value::NChar(v) => Self::from_nchar(v),
-            Value::UTinyInt(v) => Self::from_primitive(v),
-            Value::USmallInt(v) => Self::from_primitive(v),
-            Value::UInt(v) => Self::from_primitive(v),
-            Value::UBigInt(v) => Self::from_primitive(v),
             Value::Json(v) => Self::from_json(&v.to_string()),
             _ => unimplemented!(),
         }
@@ -511,11 +511,6 @@ impl Drop for TaosBindV2 {
     fn drop(&mut self) {
         unsafe { self.free() }
     }
-}
-
-#[allow(dead_code)]
-pub trait ToMultiBind {
-    fn to_multi_bind(&self) -> TaosMultiBind;
 }
 
 impl Drop for TaosMultiBind {
@@ -633,6 +628,88 @@ pub struct TaosStmt2Bind {
     pub num: c_int,
 }
 
+impl TaosStmt2Bind {
+    fn new(ty: Ty) -> Self {
+        Self {
+            buffer_type: ty as _,
+            buffer: ptr::null_mut(),
+            length: ptr::null_mut(),
+            is_null: ptr::null_mut(),
+            num: 1,
+        }
+    }
+}
+
+#[derive(Debug, Deref)]
+#[repr(transparent)]
+pub struct TaosStmt2BindTag(TaosStmt2Bind);
+
+impl Drop for TaosStmt2Bind {
+    fn drop(&mut self) {
+        if !self.is_null.is_null() {
+            unsafe { Vec::from_raw_parts(self.is_null as *mut i8, self.num as _, self.num as _) };
+        }
+    }
+}
+
+impl BindFrom for TaosStmt2BindTag {
+    fn null() -> Self {
+        let mut bind = TaosStmt2Bind::new(Ty::Null);
+        bind.is_null = box_into_raw(1i8) as _;
+        Self(bind)
+    }
+
+    fn from_primitive<T: IsValue + Clone>(value: &T) -> Self {
+        let mut bind = TaosStmt2Bind::new(T::TY);
+        bind.buffer = box_into_raw(value.clone()) as _;
+        bind.length = box_into_raw(value.fixed_length()) as _;
+        bind.is_null = box_into_raw(0i8) as _;
+        Self(bind)
+    }
+
+    fn from_timestamp(value: i64) -> Self {
+        let mut bind = TaosStmt2Bind::new(Ty::Timestamp);
+        bind.buffer = box_into_raw(value) as _;
+        bind.length = box_into_raw(std::mem::size_of::<i64>() as i32) as _;
+        bind.is_null = box_into_raw(0i8) as _;
+        Self(bind)
+    }
+
+    fn from_varchar(value: &str) -> Self {
+        let mut bind = TaosStmt2Bind::new(Ty::VarChar);
+        bind.buffer = value.as_ptr() as _;
+        bind.length = box_into_raw(value.len() as i32) as _;
+        bind.is_null = box_into_raw(0i8) as _;
+        Self(bind)
+    }
+
+    fn from_nchar(value: &str) -> Self {
+        let mut bind = TaosStmt2Bind::new(Ty::NChar);
+        bind.buffer = value.as_ptr() as _;
+        bind.length = box_into_raw(value.len() as i32) as _;
+        bind.is_null = box_into_raw(0i8) as _;
+        Self(bind)
+    }
+
+    fn from_json(value: &str) -> Self {
+        let mut bind = TaosStmt2Bind::new(Ty::Json);
+        bind.buffer = value.as_ptr() as _;
+        bind.length = box_into_raw(value.len() as i32) as _;
+        bind.is_null = box_into_raw(0i8) as _;
+        Self(bind)
+    }
+}
+
+#[derive(Debug, Deref)]
+#[repr(transparent)]
+pub struct TaosStmt2BindColumn(TaosStmt2Bind);
+
+impl<'a> From<&'a ColumnView> for TaosStmt2BindColumn {
+    fn from(value: &'a ColumnView) -> Self {
+        todo!()
+    }
+}
+
 #[repr(C)]
 #[derive(Debug, Clone)]
 pub struct TaosStmt2Bindv {
@@ -640,6 +717,16 @@ pub struct TaosStmt2Bindv {
     pub tbnames: *mut *mut c_char,
     pub tags: *mut *mut TaosStmt2Bind,
     pub bind_cols: *mut *mut TaosStmt2Bind,
+}
+
+impl Drop for TaosStmt2Bindv {
+    fn drop(&mut self) {
+        let tbnames =
+            unsafe { Vec::from_raw_parts(self.tbnames, self.count as _, self.count as _) };
+        for tbname in tbnames {
+            let _ = unsafe { CString::from_raw(tbname) };
+        }
+    }
 }
 
 #[repr(C)]

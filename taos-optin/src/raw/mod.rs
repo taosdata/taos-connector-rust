@@ -547,6 +547,7 @@ pub struct Stmt2Api {
 }
 
 impl Stmt2Api {
+    // TODO: remove unwrap return err
     pub(crate) fn exec(&self, stmt: *mut TAOS_STMT2) -> Result<(), RawError> {
         let code = unsafe { (self.taos_stmt2_exec.unwrap())(stmt, std::ptr::null_mut()) };
         if code != 0 {
