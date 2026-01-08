@@ -396,6 +396,7 @@ impl BindFrom for TaosBindV3 {
         param.is_null = box_into_raw(0i8) as _;
         Self(param)
     }
+
     fn from_json(v: &str) -> Self {
         let mut param = TaosMultiBind::new(Ty::Json);
         param.buffer_length = v.len();
@@ -404,6 +405,7 @@ impl BindFrom for TaosBindV3 {
         param.is_null = box_into_raw(0i8) as _;
         Self(param)
     }
+
     fn from_nchar(v: &str) -> Self {
         let mut param = TaosMultiBind::new(Ty::NChar);
         param.buffer_length = v.len();
@@ -464,6 +466,7 @@ impl BindFrom for TaosBindV2 {
         null.is_null = Box::into_raw(v) as _;
         null
     }
+
     fn from_timestamp(v: i64) -> Self {
         let mut param = Self::new(Ty::Timestamp);
         param.buffer_length = std::mem::size_of::<i64>();

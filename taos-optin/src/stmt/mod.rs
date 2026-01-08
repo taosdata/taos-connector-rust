@@ -12,7 +12,6 @@ use crate::types::*;
 use crate::{err_or, RawRes, RawTaos, ResultSet};
 
 mod bind;
-mod multi;
 
 #[derive(Debug)]
 pub struct Stmt {
