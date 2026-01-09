@@ -647,7 +647,11 @@ pub struct TaosStmt2BindTag(TaosStmt2Bind);
 impl Drop for TaosStmt2Bind {
     fn drop(&mut self) {
         if !self.is_null.is_null() {
-            unsafe { Vec::from_raw_parts(self.is_null as *mut i8, self.num as _, self.num as _) };
+            unsafe { Vec::from_raw_parts(self.is_null, self.num as _, self.num as _) };
+        }
+        if !self.length.is_null() {
+            // unsafe { Vec::from_raw_parts(self.length, self.num as _, self.num as _) };
+            unsafe { Box::from_raw(self.length) };
         }
     }
 }

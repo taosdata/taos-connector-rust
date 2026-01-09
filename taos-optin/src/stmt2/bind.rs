@@ -6,13 +6,47 @@ use crate::types::{
     BindFrom, TaosStmt2Bind, TaosStmt2BindColumn, TaosStmt2BindTag, TaosStmt2Bindv,
 };
 
-pub struct TaosStmt2BindvOwned {
+pub struct Stmt2BindvGuard {
     pub bindv: TaosStmt2Bindv,
-    _tag_lens: Vec<usize>,
-    _col_lens: Vec<usize>,
+    tag_lens: Vec<usize>,
+    col_lens: Vec<usize>,
 }
 
-pub fn build_bindv_owned(params: &[Stmt2BindParam]) -> RawResult<TaosStmt2BindvOwned> {
+impl Drop for Stmt2BindvGuard {
+    fn drop(&mut self) {
+        unsafe {
+            let count = self.bindv.count as usize;
+            let tbnames = self.bindv.tbnames;
+            let tags = self.bindv.tags;
+            let cols = self.bindv.bind_cols;
+
+            for i in 0..count as isize {
+                let tbname = *tbnames.offset(i);
+                if !tbname.is_null() {
+                    let _ = CString::from_raw(tbname);
+                }
+
+                let tag = *tags.offset(i) as *mut TaosStmt2BindTag;
+                if !tag.is_null() {
+                    let len = self.tag_lens[i as usize];
+                    let _ = Vec::from_raw_parts(tag, len, len);
+                }
+
+                let col = *cols.offset(i) as *mut TaosStmt2BindColumn;
+                if !col.is_null() {
+                    let len = self.col_lens[i as usize];
+                    let _ = Vec::from_raw_parts(col, len, len);
+                }
+            }
+
+            let _ = Vec::from_raw_parts(tbnames, count, count);
+            let _ = Vec::from_raw_parts(tags, count, count);
+            let _ = Vec::from_raw_parts(cols, count, count);
+        }
+    }
+}
+
+pub fn build_bindv(params: &[Stmt2BindParam]) -> RawResult<Stmt2BindvGuard> {
     let count = params.len();
     let mut tbnames = Vec::with_capacity(count);
     let mut tag_ptrs = Vec::with_capacity(count);
@@ -29,36 +63,36 @@ pub fn build_bindv_owned(params: &[Stmt2BindParam]) -> RawResult<TaosStmt2BindvO
         }
 
         if let Some(tags) = param.tags() {
-            let tags = tags
-                .iter()
-                .map(TaosStmt2BindTag::from_value)
-                .collect::<Vec<_>>();
-            let ptr = if tags.is_empty() {
+            let mut ts = Vec::with_capacity(tags.len());
+            for tag in tags {
+                ts.push(TaosStmt2BindTag::from_value(tag));
+            }
+            let ptr = if ts.is_empty() {
                 ptr::null_mut()
             } else {
-                tags.as_ptr() as *mut TaosStmt2Bind
+                ts.as_mut_ptr() as *mut TaosStmt2Bind
             };
             tag_ptrs.push(ptr);
-            tag_lens.push(tags.len());
-            std::mem::forget(tags);
+            tag_lens.push(ts.len());
+            std::mem::forget(ts);
         } else {
             tag_ptrs.push(ptr::null_mut());
             tag_lens.push(0);
         }
 
         if let Some(cols) = param.columns() {
-            let cols = cols
-                .iter()
-                .map(TaosStmt2BindColumn::from)
-                .collect::<Vec<_>>();
-            let ptr = if cols.is_empty() {
+            let mut cs = Vec::with_capacity(cols.len());
+            for col in cols {
+                cs.push(TaosStmt2BindColumn::from(col));
+            }
+            let ptr = if cs.is_empty() {
                 ptr::null_mut()
             } else {
-                cols.as_ptr() as *mut TaosStmt2Bind
+                cs.as_mut_ptr() as *mut TaosStmt2Bind
             };
             col_ptrs.push(ptr);
-            col_lens.push(cols.len());
-            std::mem::forget(cols);
+            col_lens.push(cs.len());
+            std::mem::forget(cs);
         } else {
             col_ptrs.push(ptr::null_mut());
             col_lens.push(0);
@@ -67,18 +101,18 @@ pub fn build_bindv_owned(params: &[Stmt2BindParam]) -> RawResult<TaosStmt2BindvO
 
     let bindv = TaosStmt2Bindv {
         count: count as _,
-        tbnames: tbnames.as_ptr() as _,
-        tags: tag_ptrs.as_ptr() as _,
-        bind_cols: col_ptrs.as_ptr() as _,
+        tbnames: tbnames.as_mut_ptr() as _,
+        tags: tag_ptrs.as_mut_ptr() as _,
+        bind_cols: col_ptrs.as_mut_ptr() as _,
     };
 
     std::mem::forget(tbnames);
     std::mem::forget(tag_ptrs);
     std::mem::forget(col_ptrs);
 
-    Ok(TaosStmt2BindvOwned {
+    Ok(Stmt2BindvGuard {
         bindv,
-        _tag_lens: tag_lens,
-        _col_lens: col_lens,
+        tag_lens,
+        col_lens,
     })
 }

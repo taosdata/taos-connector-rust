@@ -162,7 +162,7 @@ impl RawStmt2 {
     }
 
     fn bind(&self, params: &[Stmt2BindParam]) -> RawResult<()> {
-        let mut bindv_owned = bind::build_bindv_owned(params)?;
+        let mut bindv_owned = bind::build_bindv(params)?;
         self.ok(unsafe {
             (self.api.taos_stmt2_bind_param.unwrap())(self.as_ptr(), &mut bindv_owned.bindv, -1)
         })
