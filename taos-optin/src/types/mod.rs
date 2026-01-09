@@ -1,7 +1,7 @@
+use std::fmt::Debug;
 use std::mem::ManuallyDrop;
 use std::os::raw::*;
 use std::ptr;
-use std::{ffi::CString, fmt::Debug};
 
 mod field;
 use derive_more::Deref;
@@ -626,130 +626,6 @@ pub struct TaosStmt2Bind {
     pub length: *mut i32,
     pub is_null: *mut c_char,
     pub num: c_int,
-}
-
-#[derive(Debug, Deref)]
-#[repr(transparent)]
-pub struct TaosStmt2BindTag(TaosStmt2Bind);
-
-impl TaosStmt2BindTag {
-    fn new(ty: Ty) -> Self {
-        Self(TaosStmt2Bind {
-            buffer_type: ty as _,
-            buffer: ptr::null_mut(),
-            length: ptr::null_mut(),
-            is_null: ptr::null_mut(),
-            num: 1,
-        })
-    }
-}
-
-impl BindFrom for TaosStmt2BindTag {
-    fn null() -> Self {
-        let mut bind = Self::new(Ty::Null);
-        bind.0.is_null = box_into_raw(1i8) as _;
-        bind
-    }
-
-    fn from_primitive<T: IsValue + Clone>(value: &T) -> Self {
-        let mut bind = Self::new(T::TY);
-        bind.0.buffer = box_into_raw(value.clone()) as _;
-        bind.0.length = box_into_raw(value.fixed_length() as i32);
-        bind.0.is_null = box_into_raw(0i8) as _;
-        bind
-    }
-
-    fn from_timestamp(value: i64) -> Self {
-        let mut bind = Self::new(Ty::Timestamp);
-        bind.0.buffer = box_into_raw(value) as _;
-        bind.0.length = box_into_raw(std::mem::size_of::<i64>() as i32);
-        bind.0.is_null = box_into_raw(0i8) as _;
-        bind
-    }
-
-    fn from_varchar(value: &str) -> Self {
-        let mut bind = Self::new(Ty::VarChar);
-        bind.0.buffer = value.as_ptr() as _;
-        bind.0.length = box_into_raw(value.len() as i32);
-        bind.0.is_null = box_into_raw(0i8) as _;
-        bind
-    }
-
-    fn from_nchar(value: &str) -> Self {
-        let mut bind = Self::new(Ty::NChar);
-        bind.0.buffer = value.as_ptr() as _;
-        bind.0.length = box_into_raw(value.len() as i32);
-        bind.0.is_null = box_into_raw(0i8) as _;
-        bind
-    }
-
-    fn from_json(value: &str) -> Self {
-        let mut bind = Self::new(Ty::Json);
-        bind.0.buffer = value.as_ptr() as _;
-        bind.0.length = box_into_raw(value.len() as i32);
-        bind.0.is_null = box_into_raw(0i8) as _;
-        bind
-    }
-}
-
-impl Drop for TaosStmt2BindTag {
-    fn drop(&mut self) {
-        if !self.is_null.is_null() {
-            let _ = unsafe { Box::from_raw(self.is_null as *mut i8) };
-        }
-        if !self.length.is_null() {
-            let _ = unsafe { Box::from_raw(self.length) };
-        }
-        if !self.buffer.is_null() {
-            let ty = Ty::from(self.buffer_type as u8);
-            match ty {
-                Ty::Bool => {
-                    let _ = unsafe { Box::from_raw(self.buffer as *mut bool) };
-                }
-                Ty::TinyInt => {
-                    let _ = unsafe { Box::from_raw(self.buffer as *mut i8) };
-                }
-                Ty::SmallInt => {
-                    let _ = unsafe { Box::from_raw(self.buffer as *mut i16) };
-                }
-                Ty::Int => {
-                    let _ = unsafe { Box::from_raw(self.buffer as *mut i32) };
-                }
-                Ty::BigInt | Ty::Timestamp => {
-                    let _ = unsafe { Box::from_raw(self.buffer as *mut i64) };
-                }
-                Ty::UTinyInt => {
-                    let _ = unsafe { Box::from_raw(self.buffer as *mut u8) };
-                }
-                Ty::USmallInt => {
-                    let _ = unsafe { Box::from_raw(self.buffer as *mut u16) };
-                }
-                Ty::UInt => {
-                    let _ = unsafe { Box::from_raw(self.buffer as *mut u32) };
-                }
-                Ty::UBigInt => {
-                    let _ = unsafe { Box::from_raw(self.buffer as *mut u64) };
-                }
-                Ty::Float => {
-                    let _ = unsafe { Box::from_raw(self.buffer as *mut f32) };
-                }
-                Ty::Double => {
-                    let _ = unsafe { Box::from_raw(self.buffer as *mut f64) };
-                }
-                _ => (),
-            }
-        }
-    }
-}
-
-#[derive(Debug, Deref)]
-#[repr(transparent)]
-pub struct TaosStmt2BindColumn(TaosStmt2Bind);
-
-impl<'a> From<&'a ColumnView> for TaosStmt2BindColumn {
-    fn from(value: &'a ColumnView) -> Self {
-        todo!()
-    }
 }
 
 #[repr(C)]
