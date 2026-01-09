@@ -636,14 +636,3 @@ pub struct TaosStmt2Bindv {
     pub tags: *mut *mut TaosStmt2Bind,
     pub bind_cols: *mut *mut TaosStmt2Bind,
 }
-
-#[repr(C)]
-#[derive(Debug, Clone)]
-pub struct TaosFieldAll {
-    pub name: [c_char; 65],
-    pub ty: i8,
-    pub precision: u8,
-    pub scale: u8,
-    pub bytes: i32,
-    pub field_type: u8,
-}

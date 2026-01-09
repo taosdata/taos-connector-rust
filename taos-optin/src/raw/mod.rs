@@ -21,8 +21,8 @@ use self::query_future::QueryFuture;
 use crate::into_c_str::IntoCStr;
 use crate::types::{
     from_raw_fields, taos_async_fetch_cb, taos_async_query_cb, tmq_commit_cb, tmq_conf_res_t,
-    tmq_conf_t, tmq_list_t, tmq_res_t, tmq_resp_err_t, tmq_t, TaosFieldAll, TaosMultiBind,
-    TaosStmt2Bindv, TaosStmt2Option, TAOS, TAOS_RES, TAOS_ROW, TAOS_STMT, TAOS_STMT2, TSDB_OPTION,
+    tmq_conf_t, tmq_list_t, tmq_res_t, tmq_resp_err_t, tmq_t, TaosMultiBind, TaosStmt2Bindv,
+    TaosStmt2Option, TAOS, TAOS_RES, TAOS_ROW, TAOS_STMT, TAOS_STMT2, TSDB_OPTION,
 };
 use crate::{err_or, Auth};
 
@@ -526,23 +526,6 @@ pub struct Stmt2Api {
 
     pub(crate) taos_stmt2_close: Option<unsafe extern "C" fn(stmt: *mut TAOS_STMT2) -> c_int>,
 
-    pub(crate) taos_stmt2_is_insert:
-        Option<unsafe extern "C" fn(stmt: *mut TAOS_STMT2, insert: *mut c_int) -> c_int>,
-
-    pub(crate) taos_stmt2_get_fields: Option<
-        unsafe extern "C" fn(
-            stmt: *mut TAOS_STMT2,
-            count: *mut c_int,
-            fields: *mut *mut TaosFieldAll,
-        ) -> c_int,
-    >,
-
-    pub(crate) taos_stmt2_free_fields:
-        Option<unsafe extern "C" fn(stmt: *mut TAOS_STMT2, fields: *mut TaosFieldAll)>,
-
-    pub(crate) taos_stmt2_result:
-        Option<unsafe extern "C" fn(stmt: *mut TAOS_STMT2) -> *mut TAOS_RES>,
-
     pub(crate) taos_stmt2_error: Option<unsafe extern "C" fn(stmt: *mut TAOS_STMT2) -> *mut c_char>,
 }
 
@@ -721,10 +704,6 @@ impl ApiEntry {
                 taos_stmt2_bind_param,
                 taos_stmt2_exec,
                 taos_stmt2_close,
-                taos_stmt2_is_insert,
-                taos_stmt2_get_fields,
-                taos_stmt2_free_fields,
-                taos_stmt2_result,
                 taos_stmt2_error
             );
 
@@ -734,10 +713,6 @@ impl ApiEntry {
                 taos_stmt2_bind_param,
                 taos_stmt2_exec,
                 taos_stmt2_close,
-                taos_stmt2_is_insert,
-                taos_stmt2_get_fields,
-                taos_stmt2_free_fields,
-                taos_stmt2_result,
                 taos_stmt2_error,
             };
 

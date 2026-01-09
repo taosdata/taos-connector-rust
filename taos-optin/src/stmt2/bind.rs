@@ -1,8 +1,11 @@
-use std::{ffi::CString, ptr};
+use std::{ffi::CString, ptr, slice};
 
 use derive_more::Deref;
 use taos_query::{
-    common::{itypes::IsValue, ColumnView, Ty},
+    common::{
+        itypes::{IValue, IsValue},
+        ColumnView, Ty,
+    },
     stmt2::Stmt2BindParam,
     RawError, RawResult,
 };
@@ -11,7 +14,7 @@ use crate::types::{BindFrom, TaosStmt2Bind, TaosStmt2Bindv};
 
 #[derive(Debug, Deref)]
 #[repr(transparent)]
-pub struct TaosStmt2BindTag(TaosStmt2Bind);
+struct TaosStmt2BindTag(TaosStmt2Bind);
 
 impl TaosStmt2BindTag {
     fn new(ty: Ty) -> Self {
@@ -78,9 +81,11 @@ impl Drop for TaosStmt2BindTag {
         if !self.is_null.is_null() {
             let _ = unsafe { Box::from_raw(self.is_null as *mut i8) };
         }
+
         if !self.length.is_null() {
             let _ = unsafe { Box::from_raw(self.length) };
         }
+
         if !self.buffer.is_null() {
             let ty = Ty::from(self.buffer_type as u8);
             match ty {
@@ -125,21 +130,167 @@ impl Drop for TaosStmt2BindTag {
 
 #[derive(Debug, Deref)]
 #[repr(transparent)]
-pub struct TaosStmt2BindColumn(TaosStmt2Bind);
+struct TaosStmt2BindColumn(TaosStmt2Bind);
 
-impl<'a> From<&'a ColumnView> for TaosStmt2BindColumn {
-    fn from(value: &'a ColumnView) -> Self {
-        todo!()
+impl TaosStmt2BindColumn {
+    fn from_primitive<T: IValue>(nulls: Vec<bool>, buffer_ptr: *const T) -> Self {
+        Self(TaosStmt2Bind {
+            buffer_type: T::TY as _,
+            buffer: buffer_ptr as _,
+            length: ptr::null_mut(),
+            num: nulls.len() as _,
+            is_null: into_raw_slice(nulls) as _,
+        })
+    }
+
+    fn from_varchar(values: &[Option<impl AsRef<[u8]>>]) -> Self {
+        Self::from_bytes(Ty::VarChar, values)
+    }
+
+    fn from_nchar(values: &[Option<impl AsRef<[u8]>>]) -> Self {
+        Self::from_bytes(Ty::NChar, values)
+    }
+
+    fn from_json(values: &[Option<impl AsRef<[u8]>>]) -> Self {
+        Self::from_bytes(Ty::Json, values)
+    }
+
+    fn from_varbinay(values: &[Option<impl AsRef<[u8]>>]) -> Self {
+        Self::from_bytes(Ty::VarBinary, values)
+    }
+
+    fn from_geometry(values: &[Option<impl AsRef<[u8]>>]) -> Self {
+        Self::from_bytes(Ty::Geometry, values)
+    }
+
+    fn from_bytes(ty: Ty, values: &[Option<impl AsRef<[u8]>>]) -> Self {
+        let num = values.len();
+        let mut nulls = vec![true; num];
+        let mut lengths = vec![0i32; num];
+
+        let mut buffer_size = 0;
+        for (i, value) in values.iter().enumerate() {
+            if let Some(value) = value {
+                let bytes = value.as_ref();
+                nulls[i] = false;
+                lengths[i] = bytes.len() as _;
+                buffer_size += bytes.len();
+            }
+        }
+
+        let mut buffer = vec![0u8; buffer_size];
+        let mut offset = 0;
+        for value in values.iter().flatten() {
+            let bytes = value.as_ref();
+            let end = offset + bytes.len();
+            buffer[offset..end].copy_from_slice(bytes);
+            offset = end;
+        }
+        debug_assert_eq!(offset, buffer_size);
+
+        Self(TaosStmt2Bind {
+            buffer_type: ty as _,
+            buffer: into_raw_slice(buffer) as _,
+            length: into_raw_slice(lengths),
+            is_null: into_raw_slice(nulls) as _,
+            num: num as _,
+        })
     }
 }
 
-pub struct Stmt2BindvGuard {
+impl<'a> From<&'a ColumnView> for TaosStmt2BindColumn {
+    fn from(view: &'a ColumnView) -> Self {
+        use ColumnView::*;
+        match view {
+            Bool(view) => {
+                let nulls: Vec<_> = view.is_null_iter().collect();
+                Self::from_primitive(nulls, view.as_raw_ptr())
+            }
+            TinyInt(view) => {
+                let nulls: Vec<_> = view.is_null_iter().collect();
+                Self::from_primitive(nulls, view.as_raw_ptr())
+            }
+            SmallInt(view) => {
+                let nulls: Vec<_> = view.is_null_iter().collect();
+                Self::from_primitive(nulls, view.as_raw_ptr())
+            }
+            Int(view) => {
+                let nulls: Vec<_> = view.is_null_iter().collect();
+                Self::from_primitive(nulls, view.as_raw_ptr())
+            }
+            BigInt(view) => {
+                let nulls: Vec<_> = view.is_null_iter().collect();
+                Self::from_primitive(nulls, view.as_raw_ptr())
+            }
+            Float(view) => {
+                let nulls: Vec<_> = view.is_null_iter().collect();
+                Self::from_primitive(nulls, view.as_raw_ptr())
+            }
+            Double(view) => {
+                let nulls: Vec<_> = view.is_null_iter().collect();
+                Self::from_primitive(nulls, view.as_raw_ptr())
+            }
+            UTinyInt(view) => {
+                let nulls: Vec<_> = view.is_null_iter().collect();
+                Self::from_primitive(nulls, view.as_raw_ptr())
+            }
+            USmallInt(view) => {
+                let nulls: Vec<_> = view.is_null_iter().collect();
+                Self::from_primitive(nulls, view.as_raw_ptr())
+            }
+            UInt(view) => {
+                let nulls: Vec<_> = view.is_null_iter().collect();
+                Self::from_primitive(nulls, view.as_raw_ptr())
+            }
+            UBigInt(view) => {
+                let nulls: Vec<_> = view.is_null_iter().collect();
+                Self::from_primitive(nulls, view.as_raw_ptr())
+            }
+            Timestamp(view) => {
+                let nulls: Vec<_> = view.is_null_iter().collect();
+                Self::from_primitive(nulls, view.as_raw_ptr())
+            }
+            VarChar(view) => Self::from_varchar(&view.to_vec()),
+            NChar(view) => Self::from_nchar(&view.to_vec()),
+            Json(view) => Self::from_json(&view.to_vec()),
+            VarBinary(view) => Self::from_varbinay(&view.to_vec()),
+            Geometry(view) => Self::from_geometry(&view.to_vec()),
+            Decimal(_) | Decimal64(_) => unimplemented!("decimal type is not supported in stmt2"),
+            Blob(_) => unimplemented!("blob type is not supported in stmt2"),
+        }
+    }
+}
+
+impl Drop for TaosStmt2BindColumn {
+    fn drop(&mut self) {
+        from_raw_slice(self.is_null as *mut bool, self.num as _);
+
+        if !self.buffer.is_null() {
+            let ty = Ty::from(self.buffer_type as u8);
+            if matches!(
+                ty,
+                Ty::VarChar | Ty::NChar | Ty::Json | Ty::VarBinary | Ty::Geometry
+            ) {
+                if !self.length.is_null() {
+                    let lengths =
+                        unsafe { slice::from_raw_parts(self.length as *const _, self.num as _) };
+                    let total: usize = lengths.iter().map(|&l| l as usize).sum();
+                    from_raw_slice(self.buffer as *mut u8, total);
+                }
+            }
+        }
+
+        from_raw_slice(self.length, self.num as _);
+    }
+}
+
+pub struct TaosStmt2BindvGuard {
     pub bindv: TaosStmt2Bindv,
     tag_lens: Vec<usize>,
     col_lens: Vec<usize>,
 }
 
-impl Drop for Stmt2BindvGuard {
+impl Drop for TaosStmt2BindvGuard {
     fn drop(&mut self) {
         unsafe {
             let count = self.bindv.count as usize;
@@ -154,32 +305,26 @@ impl Drop for Stmt2BindvGuard {
                 }
 
                 let tag = *tags.offset(i) as *mut TaosStmt2BindTag;
-                if !tag.is_null() {
-                    let len = self.tag_lens[i as usize];
-                    let _ = Vec::from_raw_parts(tag, len, len);
-                }
+                from_raw_slice(tag, self.tag_lens[i as usize]);
 
                 let col = *cols.offset(i) as *mut TaosStmt2BindColumn;
-                if !col.is_null() {
-                    let len = self.col_lens[i as usize];
-                    let _ = Vec::from_raw_parts(col, len, len);
-                }
+                from_raw_slice(col, self.col_lens[i as usize]);
             }
 
-            let _ = Vec::from_raw_parts(tbnames, count, count);
-            let _ = Vec::from_raw_parts(tags, count, count);
-            let _ = Vec::from_raw_parts(cols, count, count);
+            from_raw_slice(tbnames, count);
+            from_raw_slice(tags, count);
+            from_raw_slice(cols, count);
         }
     }
 }
 
-pub fn build_bindv(params: &[Stmt2BindParam]) -> RawResult<Stmt2BindvGuard> {
+pub fn build_bindv(params: &[Stmt2BindParam]) -> RawResult<TaosStmt2BindvGuard> {
     let count = params.len();
     let mut tbnames = Vec::with_capacity(count);
-    let mut tag_ptrs = Vec::with_capacity(count);
     let mut tag_lens = Vec::with_capacity(count);
-    let mut col_ptrs = Vec::with_capacity(count);
+    let mut tag_ptrs = Vec::with_capacity(count);
     let mut col_lens = Vec::with_capacity(count);
+    let mut col_ptrs = Vec::with_capacity(count);
 
     for param in params {
         if let Some(tbname) = param.table_name() {
@@ -194,17 +339,11 @@ pub fn build_bindv(params: &[Stmt2BindParam]) -> RawResult<Stmt2BindvGuard> {
             for tag in tags {
                 ts.push(TaosStmt2BindTag::from_value(tag));
             }
-            let ptr = if ts.is_empty() {
-                ptr::null_mut()
-            } else {
-                ts.as_mut_ptr() as *mut TaosStmt2Bind
-            };
-            tag_ptrs.push(ptr);
             tag_lens.push(ts.len());
-            std::mem::forget(ts);
+            tag_ptrs.push(into_raw_slice(ts) as *mut TaosStmt2Bind);
         } else {
-            tag_ptrs.push(ptr::null_mut());
             tag_lens.push(0);
+            tag_ptrs.push(ptr::null_mut());
         }
 
         if let Some(cols) = param.columns() {
@@ -212,34 +351,39 @@ pub fn build_bindv(params: &[Stmt2BindParam]) -> RawResult<Stmt2BindvGuard> {
             for col in cols {
                 cs.push(TaosStmt2BindColumn::from(col));
             }
-            let ptr = if cs.is_empty() {
-                ptr::null_mut()
-            } else {
-                cs.as_mut_ptr() as *mut TaosStmt2Bind
-            };
-            col_ptrs.push(ptr);
             col_lens.push(cs.len());
-            std::mem::forget(cs);
+            col_ptrs.push(into_raw_slice(cs) as *mut TaosStmt2Bind);
         } else {
-            col_ptrs.push(ptr::null_mut());
             col_lens.push(0);
+            col_ptrs.push(ptr::null_mut());
         }
     }
 
     let bindv = TaosStmt2Bindv {
         count: count as _,
-        tbnames: tbnames.as_mut_ptr() as _,
-        tags: tag_ptrs.as_mut_ptr() as _,
-        bind_cols: col_ptrs.as_mut_ptr() as _,
+        tbnames: into_raw_slice(tbnames),
+        tags: into_raw_slice(tag_ptrs),
+        bind_cols: into_raw_slice(col_ptrs),
     };
 
-    std::mem::forget(tbnames);
-    std::mem::forget(tag_ptrs);
-    std::mem::forget(col_ptrs);
-
-    Ok(Stmt2BindvGuard {
+    Ok(TaosStmt2BindvGuard {
         bindv,
         tag_lens,
         col_lens,
     })
+}
+
+fn into_raw_slice<T>(v: Vec<T>) -> *mut T {
+    if v.is_empty() {
+        ptr::null_mut()
+    } else {
+        Box::leak(v.into_boxed_slice()).as_mut_ptr()
+    }
+}
+
+fn from_raw_slice<T>(ptr: *mut T, len: usize) {
+    if !ptr.is_null() && len > 0 {
+        let slice = ptr::slice_from_raw_parts_mut(ptr, len);
+        let _ = unsafe { Box::<[T]>::from_raw(slice) };
+    }
 }

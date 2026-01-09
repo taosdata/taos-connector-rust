@@ -1,6 +1,6 @@
 use std::{
     cell::UnsafeCell,
-    ffi::{c_int, c_void, CStr},
+    ffi::{c_int, c_void},
     future::Future,
     pin::Pin,
     ptr,
@@ -41,7 +41,8 @@ impl Stmt2Bindable<super::Taos> for Stmt2 {
     }
 
     fn bind(&mut self, params: &[Stmt2BindParam]) -> RawResult<&mut Self> {
-        todo!()
+        self.raw.bind(params)?;
+        Ok(self)
     }
 
     fn exec(&mut self) -> RawResult<usize> {
@@ -71,7 +72,8 @@ impl Stmt2AsyncBindable<super::Taos> for Stmt2 {
     }
 
     async fn bind(&mut self, params: &[Stmt2BindParam]) -> RawResult<&mut Self> {
-        todo!()
+        self.raw.bind(params)?;
+        Ok(self)
     }
 
     async fn exec(&mut self) -> RawResult<usize> {
