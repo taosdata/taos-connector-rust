@@ -148,8 +148,7 @@ impl Future for QueryFuture<'_> {
 }
 
 impl<'a> QueryFuture<'a> {
-    /// Create a new `TimerFuture` which will complete after the provided
-    /// timeout.
+    /// Create a new `TimerFuture` which will complete after the provided timeout.
     pub fn new<T: IntoCStr<'a>>(taos: RawTaos, sql: T) -> Self {
         let state = Rc::new(UnsafeCell::new(State::new(taos.c.clone())));
         let sql = sql.into_c_str();

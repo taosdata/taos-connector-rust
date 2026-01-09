@@ -15,6 +15,7 @@ macro_rules! _impl_for_raw {
         }
     };
 }
+
 _impl_for_raw!(CString);
 _impl_for_raw!(&'a CStr);
 _impl_for_raw!(&'a CString);
@@ -28,6 +29,7 @@ macro_rules! _impl_for_ref {
         }
     };
 }
+
 _impl_for_ref!(&CString);
 _impl_for_ref!(&&CString);
 
@@ -60,7 +62,6 @@ _impl_for_str!(&str);
 
 #[cfg(test)]
 mod test_into_c_str {
-
     use super::*;
 
     fn from_c_str<'a>(_: impl IntoCStr<'a>) {}
@@ -71,18 +72,21 @@ mod test_into_c_str {
         from_c_str(s);
         from_c_str(s);
     }
+
     #[test]
     fn c_string_to_c_str() {
         let s = CString::new("abc").unwrap();
         from_c_str(&s);
         from_c_str(s);
     }
+
     #[test]
     fn str_to_c_str() {
         let s = "abc";
         from_c_str(s);
         from_c_str(s);
     }
+
     #[test]
     fn string_to_c_str() {
         let s = String::from("abc");

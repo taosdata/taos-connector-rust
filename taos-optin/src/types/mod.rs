@@ -16,6 +16,7 @@ pub use tmq::*;
 #[allow(clippy::upper_case_acronyms)]
 pub type TAOS = c_void;
 pub type TAOS_STMT = c_void;
+pub type TAOS_STMT2 = c_void;
 pub type TAOS_RES = c_void;
 pub type TAOS_ROW = *mut *mut c_void;
 
@@ -24,6 +25,8 @@ pub type taos_async_fetch_cb =
 
 pub type taos_async_query_cb =
     unsafe extern "C" fn(param: *mut c_void, res: *mut c_void, code: c_int);
+
+pub type taos_async_stmt2_exec_cb = taos_async_query_cb;
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -393,6 +396,7 @@ impl BindFrom for TaosBindV3 {
         param.is_null = box_into_raw(0i8) as _;
         Self(param)
     }
+
     fn from_json(v: &str) -> Self {
         let mut param = TaosMultiBind::new(Ty::Json);
         param.buffer_length = v.len();
@@ -401,6 +405,7 @@ impl BindFrom for TaosBindV3 {
         param.is_null = box_into_raw(0i8) as _;
         Self(param)
     }
+
     fn from_nchar(v: &str) -> Self {
         let mut param = TaosMultiBind::new(Ty::NChar);
         param.buffer_length = v.len();
@@ -434,15 +439,15 @@ pub trait BindFrom: Sized {
             Value::SmallInt(v) => Self::from_primitive(v),
             Value::Int(v) => Self::from_primitive(v),
             Value::BigInt(v) => Self::from_primitive(v),
+            Value::UTinyInt(v) => Self::from_primitive(v),
+            Value::USmallInt(v) => Self::from_primitive(v),
+            Value::UInt(v) => Self::from_primitive(v),
+            Value::UBigInt(v) => Self::from_primitive(v),
             Value::Float(v) => Self::from_primitive(v),
             Value::Double(v) => Self::from_primitive(v),
             Value::VarChar(v) => Self::from_varchar(v),
             Value::Timestamp(v) => Self::from_timestamp(v.as_raw_i64()),
             Value::NChar(v) => Self::from_nchar(v),
-            Value::UTinyInt(v) => Self::from_primitive(v),
-            Value::USmallInt(v) => Self::from_primitive(v),
-            Value::UInt(v) => Self::from_primitive(v),
-            Value::UBigInt(v) => Self::from_primitive(v),
             Value::Json(v) => Self::from_json(&v.to_string()),
             _ => unimplemented!(),
         }
@@ -461,6 +466,7 @@ impl BindFrom for TaosBindV2 {
         null.is_null = Box::into_raw(v) as _;
         null
     }
+
     fn from_timestamp(v: i64) -> Self {
         let mut param = Self::new(Ty::Timestamp);
         param.buffer_length = std::mem::size_of::<i64>();
@@ -505,11 +511,6 @@ impl Drop for TaosBindV2 {
     fn drop(&mut self) {
         unsafe { self.free() }
     }
-}
-
-#[allow(dead_code)]
-pub trait ToMultiBind {
-    fn to_multi_bind(&self) -> TaosMultiBind;
 }
 
 impl Drop for TaosMultiBind {
@@ -605,4 +606,33 @@ impl Drop for DropMultiBind {
             };
         }
     }
+}
+
+#[repr(C)]
+#[derive(Debug, Clone)]
+pub struct TaosStmt2Option {
+    pub reqid: i64,
+    pub single_stb_insert: bool,
+    pub single_table_bind_once: bool,
+    pub async_exec_fn: taos_async_stmt2_exec_cb,
+    pub userdata: *mut c_void,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone)]
+pub struct TaosStmt2Bind {
+    pub buffer_type: c_int,
+    pub buffer: *mut c_void,
+    pub length: *mut i32,
+    pub is_null: *mut c_char,
+    pub num: c_int,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone)]
+pub struct TaosStmt2Bindv {
+    pub count: c_int,
+    pub tbnames: *mut *mut c_char,
+    pub tags: *mut *mut TaosStmt2Bind,
+    pub bind_cols: *mut *mut TaosStmt2Bind,
 }
