@@ -628,79 +628,117 @@ pub struct TaosStmt2Bind {
     pub num: c_int,
 }
 
-impl TaosStmt2Bind {
+#[derive(Debug, Deref)]
+#[repr(transparent)]
+pub struct TaosStmt2BindTag(TaosStmt2Bind);
+
+impl TaosStmt2BindTag {
     fn new(ty: Ty) -> Self {
-        Self {
+        Self(TaosStmt2Bind {
             buffer_type: ty as _,
             buffer: ptr::null_mut(),
             length: ptr::null_mut(),
             is_null: ptr::null_mut(),
             num: 1,
-        }
-    }
-}
-
-#[derive(Debug, Deref)]
-#[repr(transparent)]
-pub struct TaosStmt2BindTag(TaosStmt2Bind);
-
-impl Drop for TaosStmt2Bind {
-    fn drop(&mut self) {
-        if !self.is_null.is_null() {
-            unsafe { Vec::from_raw_parts(self.is_null, self.num as _, self.num as _) };
-        }
-        if !self.length.is_null() {
-            // unsafe { Vec::from_raw_parts(self.length, self.num as _, self.num as _) };
-            unsafe { Box::from_raw(self.length) };
-        }
+        })
     }
 }
 
 impl BindFrom for TaosStmt2BindTag {
     fn null() -> Self {
-        let mut bind = TaosStmt2Bind::new(Ty::Null);
-        bind.is_null = box_into_raw(1i8) as _;
-        Self(bind)
+        let mut bind = Self::new(Ty::Null);
+        bind.0.is_null = box_into_raw(1i8) as _;
+        bind
     }
 
     fn from_primitive<T: IsValue + Clone>(value: &T) -> Self {
-        let mut bind = TaosStmt2Bind::new(T::TY);
-        bind.buffer = box_into_raw(value.clone()) as _;
-        bind.length = box_into_raw(value.fixed_length()) as _;
-        bind.is_null = box_into_raw(0i8) as _;
-        Self(bind)
+        let mut bind = Self::new(T::TY);
+        bind.0.buffer = box_into_raw(value.clone()) as _;
+        bind.0.length = box_into_raw(value.fixed_length() as i32);
+        bind.0.is_null = box_into_raw(0i8) as _;
+        bind
     }
 
     fn from_timestamp(value: i64) -> Self {
-        let mut bind = TaosStmt2Bind::new(Ty::Timestamp);
-        bind.buffer = box_into_raw(value) as _;
-        bind.length = box_into_raw(std::mem::size_of::<i64>() as i32) as _;
-        bind.is_null = box_into_raw(0i8) as _;
-        Self(bind)
+        let mut bind = Self::new(Ty::Timestamp);
+        bind.0.buffer = box_into_raw(value) as _;
+        bind.0.length = box_into_raw(std::mem::size_of::<i64>() as i32);
+        bind.0.is_null = box_into_raw(0i8) as _;
+        bind
     }
 
     fn from_varchar(value: &str) -> Self {
-        let mut bind = TaosStmt2Bind::new(Ty::VarChar);
-        bind.buffer = value.as_ptr() as _;
-        bind.length = box_into_raw(value.len() as i32) as _;
-        bind.is_null = box_into_raw(0i8) as _;
-        Self(bind)
+        let mut bind = Self::new(Ty::VarChar);
+        bind.0.buffer = value.as_ptr() as _;
+        bind.0.length = box_into_raw(value.len() as i32);
+        bind.0.is_null = box_into_raw(0i8) as _;
+        bind
     }
 
     fn from_nchar(value: &str) -> Self {
-        let mut bind = TaosStmt2Bind::new(Ty::NChar);
-        bind.buffer = value.as_ptr() as _;
-        bind.length = box_into_raw(value.len() as i32) as _;
-        bind.is_null = box_into_raw(0i8) as _;
-        Self(bind)
+        let mut bind = Self::new(Ty::NChar);
+        bind.0.buffer = value.as_ptr() as _;
+        bind.0.length = box_into_raw(value.len() as i32);
+        bind.0.is_null = box_into_raw(0i8) as _;
+        bind
     }
 
     fn from_json(value: &str) -> Self {
-        let mut bind = TaosStmt2Bind::new(Ty::Json);
-        bind.buffer = value.as_ptr() as _;
-        bind.length = box_into_raw(value.len() as i32) as _;
-        bind.is_null = box_into_raw(0i8) as _;
-        Self(bind)
+        let mut bind = Self::new(Ty::Json);
+        bind.0.buffer = value.as_ptr() as _;
+        bind.0.length = box_into_raw(value.len() as i32);
+        bind.0.is_null = box_into_raw(0i8) as _;
+        bind
+    }
+}
+
+impl Drop for TaosStmt2BindTag {
+    fn drop(&mut self) {
+        if !self.is_null.is_null() {
+            let _ = unsafe { Box::from_raw(self.is_null as *mut i8) };
+        }
+        if !self.length.is_null() {
+            let _ = unsafe { Box::from_raw(self.length) };
+        }
+        if !self.buffer.is_null() {
+            let ty = Ty::from(self.buffer_type as u8);
+            match ty {
+                Ty::Bool => {
+                    let _ = unsafe { Box::from_raw(self.buffer as *mut bool) };
+                }
+                Ty::TinyInt => {
+                    let _ = unsafe { Box::from_raw(self.buffer as *mut i8) };
+                }
+                Ty::SmallInt => {
+                    let _ = unsafe { Box::from_raw(self.buffer as *mut i16) };
+                }
+                Ty::Int => {
+                    let _ = unsafe { Box::from_raw(self.buffer as *mut i32) };
+                }
+                Ty::BigInt | Ty::Timestamp => {
+                    let _ = unsafe { Box::from_raw(self.buffer as *mut i64) };
+                }
+                Ty::UTinyInt => {
+                    let _ = unsafe { Box::from_raw(self.buffer as *mut u8) };
+                }
+                Ty::USmallInt => {
+                    let _ = unsafe { Box::from_raw(self.buffer as *mut u16) };
+                }
+                Ty::UInt => {
+                    let _ = unsafe { Box::from_raw(self.buffer as *mut u32) };
+                }
+                Ty::UBigInt => {
+                    let _ = unsafe { Box::from_raw(self.buffer as *mut u64) };
+                }
+                Ty::Float => {
+                    let _ = unsafe { Box::from_raw(self.buffer as *mut f32) };
+                }
+                Ty::Double => {
+                    let _ = unsafe { Box::from_raw(self.buffer as *mut f64) };
+                }
+                _ => (),
+            }
+        }
     }
 }
 
@@ -721,16 +759,6 @@ pub struct TaosStmt2Bindv {
     pub tbnames: *mut *mut c_char,
     pub tags: *mut *mut TaosStmt2Bind,
     pub bind_cols: *mut *mut TaosStmt2Bind,
-}
-
-impl Drop for TaosStmt2Bindv {
-    fn drop(&mut self) {
-        let tbnames =
-            unsafe { Vec::from_raw_parts(self.tbnames, self.count as _, self.count as _) };
-        for tbname in tbnames {
-            let _ = unsafe { CString::from_raw(tbname) };
-        }
-    }
 }
 
 #[repr(C)]
