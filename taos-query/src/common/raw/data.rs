@@ -1,6 +1,6 @@
-use std::ffi::c_void;
+use std::{collections::VecDeque, ffi::c_void, io::Cursor};
 
-use crate::util::Inlinable;
+use crate::{common::read::ReadTaosExt, util::Inlinable, RawBlock};
 
 const RAW_PTR_OFFSET: usize = std::mem::size_of::<u32>() + std::mem::size_of::<u16>();
 
@@ -71,6 +71,11 @@ impl RawData {
         vec.extend_from_slice(&self.raw_type().to_le_bytes());
         vec.extend_from_slice(self.raw_slice());
         vec
+    }
+
+    pub fn blocks(&self) -> VecDeque<RawBlock> {
+        let mut cursor = Cursor::new(self.raw_slice());
+        cursor.parse_raw_data_blocks().unwrap_or_default()
     }
 }
 
@@ -243,5 +248,16 @@ mod tests {
         assert_eq!(raw.raw_len(), RAW.len() as u32);
         assert_eq!(raw.raw_type(), 0);
         assert_eq!(raw.raw_slice(), RAW);
+    }
+
+    #[test]
+    fn test_rawdata_get_blocks() {
+        let bytes = include_bytes!("../../../tests/dump/raw_5_data.bin");
+        let mut cursor = Cursor::new(bytes);
+        let raw: RawData = Inlinable::read_inlined(&mut cursor).unwrap();
+        let blocks = raw.blocks();
+        for block in blocks {
+            println!("Block: {}", block.pretty_format());
+        }
     }
 }
