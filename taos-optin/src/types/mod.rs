@@ -4,6 +4,7 @@ use std::os::raw::*;
 use std::ptr;
 
 mod field;
+use bytes::Bytes;
 use derive_more::Deref;
 pub use field::from_raw_fields;
 use taos_query::common::itypes::*;
@@ -414,6 +415,14 @@ impl BindFrom for TaosBindV3 {
         param.is_null = box_into_raw(0i8) as _;
         Self(param)
     }
+
+    fn from_varbinary(_: &Bytes) -> Self {
+        unreachable!("VarBinary not supported");
+    }
+
+    fn from_geometry(_: &Bytes) -> Self {
+        unreachable!("Geometry not supported");
+    }
 }
 
 #[derive(Debug, Deref)]
@@ -427,6 +436,8 @@ pub trait BindFrom: Sized {
     fn from_varchar(v: &str) -> Self;
     fn from_nchar(v: &str) -> Self;
     fn from_json(v: &str) -> Self;
+    fn from_varbinary(v: &Bytes) -> Self;
+    fn from_geometry(v: &Bytes) -> Self;
     #[allow(dead_code)]
     fn from_binary(v: &str) -> Self {
         Self::from_varchar(v)
@@ -449,7 +460,9 @@ pub trait BindFrom: Sized {
             Value::Timestamp(v) => Self::from_timestamp(v.as_raw_i64()),
             Value::NChar(v) => Self::from_nchar(v),
             Value::Json(v) => Self::from_json(&v.to_string()),
-            _ => unimplemented!(),
+            Value::VarBinary(v) => Self::from_varbinary(v),
+            Value::Geometry(v) => Self::from_geometry(v),
+            _ => unreachable!("unsupported type"),
         }
     }
 }
@@ -504,6 +517,14 @@ impl BindFrom for TaosBindV2 {
         param.buffer_length = v.fixed_length();
         param.buffer = box_into_raw(v.clone()) as *const T as _;
         param
+    }
+
+    fn from_varbinary(_: &Bytes) -> Self {
+        unreachable!("VarBinary not supported");
+    }
+
+    fn from_geometry(_: &Bytes) -> Self {
+        unreachable!("Geometry not supported");
     }
 }
 

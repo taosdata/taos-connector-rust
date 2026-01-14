@@ -530,14 +530,22 @@ pub struct Stmt2Api {
 }
 
 impl Stmt2Api {
+    fn check_api<T>(&self, api: Option<T>) -> Result<T, RawError> {
+        if let Some(api) = api {
+            Ok(api)
+        } else {
+            Err(RawError::from_string(
+                "Stmt2 API missing (requires TDengine >= v3.3.5.0)",
+            ))
+        }
+    }
+
     pub(crate) fn init(
         &self,
         taos: *mut TAOS,
         option: *mut TaosStmt2Option,
     ) -> Result<*mut TAOS_STMT2, RawError> {
-        let taos_stmt2_init = self.taos_stmt2_init.ok_or_else(|| {
-            RawError::from_string("Stmt2 API missing (requires TDengine >= v3.3.5.0)")
-        })?;
+        let taos_stmt2_init = self.check_api(self.taos_stmt2_init)?;
         let stmt = unsafe { taos_stmt2_init(taos, option) };
         if stmt.is_null() {
             return Err(RawError::from_string(
@@ -553,9 +561,7 @@ impl Stmt2Api {
         sql: *const c_char,
         length: c_ulong,
     ) -> Result<(), RawError> {
-        let taos_stmt2_prepare = self.taos_stmt2_prepare.ok_or_else(|| {
-            RawError::from_string("Stmt2 API missing (requires TDengine >= v3.3.5.0)")
-        })?;
+        let taos_stmt2_prepare = self.check_api(self.taos_stmt2_prepare)?;
         let code = unsafe { taos_stmt2_prepare(stmt, sql, length) };
         if code != 0 {
             return Err(RawError::from_string(self.err_as_str(stmt)?));
@@ -569,9 +575,7 @@ impl Stmt2Api {
         bindv: *mut TaosStmt2Bindv,
         col_idx: i32,
     ) -> Result<(), RawError> {
-        let taos_stmt2_bind_param = self.taos_stmt2_bind_param.ok_or_else(|| {
-            RawError::from_string("Stmt2 API missing (requires TDengine >= v3.3.5.0)")
-        })?;
+        let taos_stmt2_bind_param = self.check_api(self.taos_stmt2_bind_param)?;
         let code = unsafe { taos_stmt2_bind_param(stmt, bindv, col_idx) };
         if code != 0 {
             return Err(RawError::from_string(self.err_as_str(stmt)?));
@@ -580,9 +584,7 @@ impl Stmt2Api {
     }
 
     pub(crate) fn exec(&self, stmt: *mut TAOS_STMT2) -> Result<(), RawError> {
-        let taos_stmt2_exec = self.taos_stmt2_exec.ok_or_else(|| {
-            RawError::from_string("Stmt2 API missing (requires TDengine >= v3.3.5.0)")
-        })?;
+        let taos_stmt2_exec = self.check_api(self.taos_stmt2_exec)?;
         let code = unsafe { taos_stmt2_exec(stmt, std::ptr::null_mut()) };
         if code != 0 {
             return Err(RawError::from_string(self.err_as_str(stmt)?));
@@ -591,9 +593,7 @@ impl Stmt2Api {
     }
 
     pub(crate) fn close(&self, stmt: *mut TAOS_STMT2) -> Result<(), RawError> {
-        let taos_stmt2_close = self.taos_stmt2_close.ok_or_else(|| {
-            RawError::from_string("Stmt2 API missing (requires TDengine >= v3.3.5.0)")
-        })?;
+        let taos_stmt2_close = self.check_api(self.taos_stmt2_close)?;
         let code = unsafe { taos_stmt2_close(stmt) };
         if code != 0 {
             return Err(RawError::from_string(self.err_as_str(stmt)?));
@@ -602,9 +602,7 @@ impl Stmt2Api {
     }
 
     pub(crate) fn err_as_str(&self, stmt: *mut TAOS_STMT2) -> Result<String, RawError> {
-        let taos_stmt2_error = self.taos_stmt2_error.ok_or_else(|| {
-            RawError::from_string("Stmt2 API missing (requires TDengine >= v3.3.5.0)")
-        })?;
+        let taos_stmt2_error = self.check_api(self.taos_stmt2_error)?;
         unsafe {
             let err_ptr = taos_stmt2_error(stmt);
             Ok(CStr::from_ptr(err_ptr).to_string_lossy().to_string())

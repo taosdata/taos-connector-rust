@@ -1,8 +1,10 @@
 use std::{ffi::CString, ptr, slice};
 
+use bytes::Bytes;
 use derive_more::Deref;
 use taos_query::{
     common::{
+        decimal::Decimal,
         itypes::{IValue, IsValue},
         ColumnView, Ty,
     },
@@ -14,9 +16,9 @@ use crate::types::{BindFrom, TaosStmt2Bind, TaosStmt2Bindv};
 
 #[derive(Debug, Deref)]
 #[repr(transparent)]
-struct TaosStmt2BindTag(TaosStmt2Bind);
+struct Stmt2BindTag(TaosStmt2Bind);
 
-impl TaosStmt2BindTag {
+impl Stmt2BindTag {
     fn new(ty: Ty) -> Self {
         Self(TaosStmt2Bind {
             buffer_type: ty as _,
@@ -28,7 +30,7 @@ impl TaosStmt2BindTag {
     }
 }
 
-impl BindFrom for TaosStmt2BindTag {
+impl BindFrom for Stmt2BindTag {
     fn null() -> Self {
         let mut bind = Self::new(Ty::Null);
         bind.0.is_null = Box::into_raw(Box::new(1i8)) as _;
@@ -74,12 +76,28 @@ impl BindFrom for TaosStmt2BindTag {
         bind.0.is_null = Box::into_raw(Box::new(0i8)) as _;
         bind
     }
+
+    fn from_varbinary(value: &Bytes) -> Self {
+        let mut bind = Self::new(Ty::VarBinary);
+        bind.0.buffer = value.as_ptr() as _;
+        bind.0.length = Box::into_raw(Box::new(value.len() as i32));
+        bind.0.is_null = Box::into_raw(Box::new(0i8)) as _;
+        bind
+    }
+
+    fn from_geometry(value: &Bytes) -> Self {
+        let mut bind = Self::new(Ty::Geometry);
+        bind.0.buffer = value.as_ptr() as _;
+        bind.0.length = Box::into_raw(Box::new(value.len() as i32));
+        bind.0.is_null = Box::into_raw(Box::new(0i8)) as _;
+        bind
+    }
 }
 
-impl Drop for TaosStmt2BindTag {
+impl Drop for Stmt2BindTag {
     fn drop(&mut self) {
         if !self.is_null.is_null() {
-            let _ = unsafe { Box::from_raw(self.is_null as *mut i8) };
+            let _ = unsafe { Box::from_raw(self.is_null) };
         }
 
         if !self.length.is_null() {
@@ -130,9 +148,9 @@ impl Drop for TaosStmt2BindTag {
 
 #[derive(Debug, Deref)]
 #[repr(transparent)]
-struct TaosStmt2BindColumn(TaosStmt2Bind);
+struct Stmt2BindColumn(TaosStmt2Bind);
 
-impl TaosStmt2BindColumn {
+impl Stmt2BindColumn {
     fn from_primitive<T: IValue>(nulls: Vec<bool>, buffer_ptr: *const T) -> Self {
         Self(TaosStmt2Bind {
             buffer_type: T::TY as _,
@@ -161,6 +179,26 @@ impl TaosStmt2BindColumn {
 
     fn from_geometry(values: &[Option<impl AsRef<[u8]>>]) -> Self {
         Self::from_bytes(Ty::Geometry, values)
+    }
+
+    fn from_decimal(values: &[Option<Decimal<i128>>]) -> Self {
+        let values: Vec<_> = values
+            .iter()
+            .map(|v| v.as_ref().map(|d| d.to_string().into_bytes()))
+            .collect();
+        Self::from_bytes(Ty::Decimal, &values)
+    }
+
+    fn from_decimal64(values: &[Option<Decimal<i64>>]) -> Self {
+        let values: Vec<_> = values
+            .iter()
+            .map(|v| v.as_ref().map(|d| d.to_string().into_bytes()))
+            .collect();
+        Self::from_bytes(Ty::Decimal64, &values)
+    }
+
+    fn from_blob(values: &[Option<impl AsRef<[u8]>>]) -> Self {
+        Self::from_bytes(Ty::Blob, values)
     }
 
     fn from_bytes(ty: Ty, values: &[Option<impl AsRef<[u8]>>]) -> Self {
@@ -198,7 +236,7 @@ impl TaosStmt2BindColumn {
     }
 }
 
-impl<'a> From<&'a ColumnView> for TaosStmt2BindColumn {
+impl<'a> From<&'a ColumnView> for Stmt2BindColumn {
     fn from(view: &'a ColumnView) -> Self {
         use ColumnView::*;
         match view {
@@ -255,13 +293,14 @@ impl<'a> From<&'a ColumnView> for TaosStmt2BindColumn {
             Json(view) => Self::from_json(&view.to_vec()),
             VarBinary(view) => Self::from_varbinay(&view.to_vec()),
             Geometry(view) => Self::from_geometry(&view.to_vec()),
-            Decimal(_) | Decimal64(_) => unimplemented!("decimal type is not supported in stmt2"),
-            Blob(_) => unimplemented!("blob type is not supported in stmt2"),
+            Decimal(view) => Self::from_decimal(&view.to_vec()),
+            Decimal64(view) => Self::from_decimal64(&view.to_vec()),
+            Blob(view) => Self::from_blob(&view.to_vec()),
         }
     }
 }
 
-impl Drop for TaosStmt2BindColumn {
+impl Drop for Stmt2BindColumn {
     fn drop(&mut self) {
         from_raw_slice(self.is_null as *mut bool, self.num as _);
 
@@ -270,13 +309,12 @@ impl Drop for TaosStmt2BindColumn {
             if matches!(
                 ty,
                 Ty::VarChar | Ty::NChar | Ty::Json | Ty::VarBinary | Ty::Geometry
-            ) {
-                if !self.length.is_null() {
-                    let lengths =
-                        unsafe { slice::from_raw_parts(self.length as *const _, self.num as _) };
-                    let total: usize = lengths.iter().map(|&l| l as usize).sum();
-                    from_raw_slice(self.buffer as *mut u8, total);
-                }
+            ) && !self.length.is_null()
+            {
+                let lengths =
+                    unsafe { slice::from_raw_parts(self.length as *const _, self.num as _) };
+                let total: usize = lengths.iter().map(|&l| l as usize).sum();
+                from_raw_slice(self.buffer as *mut u8, total);
             }
         }
 
@@ -284,13 +322,19 @@ impl Drop for TaosStmt2BindColumn {
     }
 }
 
-pub struct TaosStmt2BindvGuard {
-    pub bindv: TaosStmt2Bindv,
+pub struct Stmt2Bindv {
+    bindv: TaosStmt2Bindv,
     tag_lens: Vec<usize>,
     col_lens: Vec<usize>,
 }
 
-impl Drop for TaosStmt2BindvGuard {
+impl Stmt2Bindv {
+    pub fn as_ptr(&self) -> *const TaosStmt2Bindv {
+        &self.bindv as _
+    }
+}
+
+impl Drop for Stmt2Bindv {
     fn drop(&mut self) {
         unsafe {
             let count = self.bindv.count as usize;
@@ -304,10 +348,10 @@ impl Drop for TaosStmt2BindvGuard {
                     let _ = CString::from_raw(tbname);
                 }
 
-                let tag = *tags.offset(i) as *mut TaosStmt2BindTag;
+                let tag = *tags.offset(i) as *mut Stmt2BindTag;
                 from_raw_slice(tag, self.tag_lens[i as usize]);
 
-                let col = *cols.offset(i) as *mut TaosStmt2BindColumn;
+                let col = *cols.offset(i) as *mut Stmt2BindColumn;
                 from_raw_slice(col, self.col_lens[i as usize]);
             }
 
@@ -318,7 +362,7 @@ impl Drop for TaosStmt2BindvGuard {
     }
 }
 
-pub fn build_bindv(params: &[Stmt2BindParam]) -> RawResult<TaosStmt2BindvGuard> {
+pub fn build_bindv(params: &[Stmt2BindParam]) -> RawResult<Stmt2Bindv> {
     let count = params.len();
     let mut tbnames = Vec::with_capacity(count);
     let mut tag_lens = Vec::with_capacity(count);
@@ -337,7 +381,7 @@ pub fn build_bindv(params: &[Stmt2BindParam]) -> RawResult<TaosStmt2BindvGuard> 
         if let Some(tags) = param.tags() {
             let mut ts = Vec::with_capacity(tags.len());
             for tag in tags {
-                ts.push(TaosStmt2BindTag::from_value(tag));
+                ts.push(Stmt2BindTag::from_value(tag));
             }
             tag_lens.push(ts.len());
             tag_ptrs.push(into_raw_slice(ts) as *mut TaosStmt2Bind);
@@ -349,7 +393,7 @@ pub fn build_bindv(params: &[Stmt2BindParam]) -> RawResult<TaosStmt2BindvGuard> 
         if let Some(cols) = param.columns() {
             let mut cs = Vec::with_capacity(cols.len());
             for col in cols {
-                cs.push(TaosStmt2BindColumn::from(col));
+                cs.push(Stmt2BindColumn::from(col));
             }
             col_lens.push(cs.len());
             col_ptrs.push(into_raw_slice(cs) as *mut TaosStmt2Bind);
@@ -366,7 +410,7 @@ pub fn build_bindv(params: &[Stmt2BindParam]) -> RawResult<TaosStmt2BindvGuard> 
         bind_cols: into_raw_slice(col_ptrs),
     };
 
-    Ok(TaosStmt2BindvGuard {
+    Ok(Stmt2Bindv {
         bindv,
         tag_lens,
         col_lens,

@@ -144,8 +144,8 @@ impl RawStmt2 {
 
     fn bind(&self, params: &[Stmt2BindParam]) -> RawResult<()> {
         tracing::trace!(?params, "Stmt2 bind");
-        let mut bindv_guard = bind::build_bindv(params)?;
-        self.api.bind(self.as_ptr(), &mut bindv_guard.bindv, -1)
+        let bindv = bind::build_bindv(params)?;
+        self.api.bind(self.as_ptr(), bindv.as_ptr() as _, -1)
     }
 
     async fn exec(&mut self) -> RawResult<usize> {
