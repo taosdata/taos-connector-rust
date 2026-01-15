@@ -308,6 +308,15 @@ pub extern "C" fn taos_get_connection_info(
     0
 }
 
+#[no_mangle]
+pub extern "C" fn taos_validate_connection(
+    taos: *mut TAOS,
+    str: *mut c_char,
+    len: *mut i32,
+) -> i32 {
+    0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -506,6 +515,9 @@ mod tests {
             ptr::null_mut(),
             ptr::null_mut(),
         );
+        assert_eq!(code, 0);
+
+        let code = taos_validate_connection(ptr::null_mut(), ptr::null_mut(), ptr::null_mut());
         assert_eq!(code, 0);
     }
 }
