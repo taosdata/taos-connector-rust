@@ -161,6 +161,16 @@ impl Stmt2BindColumn {
         })
     }
 
+    fn from_timestamp(nulls: Vec<bool>, buffer_ptr: *const i64) -> Self {
+        Self(TaosStmt2Bind {
+            buffer_type: Ty::Timestamp as _,
+            buffer: buffer_ptr as _,
+            length: ptr::null_mut(),
+            num: nulls.len() as _,
+            is_null: into_raw_slice(nulls) as _,
+        })
+    }
+
     fn from_varchar(values: &[Option<impl AsRef<[u8]>>]) -> Self {
         Self::from_bytes(Ty::VarChar, values)
     }
@@ -286,7 +296,7 @@ impl<'a> From<&'a ColumnView> for Stmt2BindColumn {
             }
             Timestamp(view) => {
                 let nulls: Vec<_> = view.is_null_iter().collect();
-                Self::from_primitive(nulls, view.as_raw_ptr())
+                Self::from_timestamp(nulls, view.as_raw_ptr())
             }
             VarChar(view) => Self::from_varchar(&view.to_vec()),
             NChar(view) => Self::from_nchar(&view.to_vec()),

@@ -33,12 +33,12 @@ pub use tmq::{Consumer, TmqBuilder};
 pub mod prelude {
     pub use taos_query::prelude::*;
 
-    pub use super::{Consumer, ResultSet, Stmt, Taos, TaosBuilder, TmqBuilder};
+    pub use super::{Consumer, ResultSet, Stmt, Stmt2, Taos, TaosBuilder, TmqBuilder};
 
     pub mod sync {
         pub use taos_query::prelude::sync::*;
 
-        pub use crate::{Consumer, ResultSet, Stmt, Taos, TaosBuilder, TmqBuilder};
+        pub use crate::{Consumer, ResultSet, Stmt, Stmt2, Taos, TaosBuilder, TmqBuilder};
     }
 }
 
