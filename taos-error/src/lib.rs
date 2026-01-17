@@ -46,7 +46,7 @@ pub struct Error {
     /// Error context, use this along with `.msg` or `.source`.
     context: Option<String>,
     /// Error source, from raw or other error type.
-    #[cfg_attr(nightly, backtrace)]
+    // #[cfg_attr(nightly, backtrace)]
     inner: Inner,
 }
 
@@ -96,7 +96,7 @@ impl Debug for Error {
             {
                 writeln!(f)?;
                 writeln!(f, "Backtrace:")?;
-                writeln!(f, "{}", self.source.backtrace())?;
+                writeln!(f, "{}", self.inner.backtrace())?;
             }
 
             Ok(())

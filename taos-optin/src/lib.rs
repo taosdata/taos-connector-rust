@@ -20,23 +20,25 @@ const MAX_CONNECT_RETRIES: u8 = 2;
 mod into_c_str;
 mod raw;
 mod stmt;
+pub use stmt::Stmt;
+mod stmt2;
+pub use stmt2::Stmt2;
 
 #[allow(non_camel_case_types)]
 pub(crate) mod types;
 
 pub mod tmq;
-pub use stmt::Stmt;
 pub use tmq::{Consumer, TmqBuilder};
 
 pub mod prelude {
     pub use taos_query::prelude::*;
 
-    pub use super::{Consumer, ResultSet, Stmt, Taos, TaosBuilder, TmqBuilder};
+    pub use super::{Consumer, ResultSet, Stmt, Stmt2, Taos, TaosBuilder, TmqBuilder};
 
     pub mod sync {
         pub use taos_query::prelude::sync::*;
 
-        pub use crate::{Consumer, ResultSet, Stmt, Taos, TaosBuilder, TmqBuilder};
+        pub use crate::{Consumer, ResultSet, Stmt, Stmt2, Taos, TaosBuilder, TmqBuilder};
     }
 }
 
@@ -129,7 +131,6 @@ impl taos_query::AsyncQueryable for Taos {
     #[tracing::instrument(level = "trace", skip_all)]
     async fn query<T: AsRef<str> + Send + Sync>(&self, sql: T) -> RawResult<Self::AsyncResultSet> {
         tracing::trace!("Async query with SQL: {}", sql.as_ref());
-
         match self.raw.query_async(sql.as_ref()).await {
             Err(err) if err.code() == 0x2603 => {
                 self.raw.query_async(sql.as_ref()).await.map(ResultSet::new)
@@ -142,7 +143,6 @@ impl taos_query::AsyncQueryable for Taos {
     #[tracing::instrument(level = "trace", skip_all)]
     async fn exec<T: AsRef<str> + Send + Sync>(&self, sql: T) -> RawResult<usize> {
         let sql = sql.as_ref();
-        // tracing::trace!("exec sql: {sql}");
         self.raw.exec_async(sql).await
     }
 

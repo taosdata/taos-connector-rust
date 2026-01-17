@@ -21,8 +21,8 @@ use self::query_future::QueryFuture;
 use crate::into_c_str::IntoCStr;
 use crate::types::{
     from_raw_fields, taos_async_fetch_cb, taos_async_query_cb, tmq_commit_cb, tmq_conf_res_t,
-    tmq_conf_t, tmq_list_t, tmq_res_t, tmq_resp_err_t, tmq_t, TaosMultiBind, TAOS, TAOS_RES,
-    TAOS_ROW, TAOS_STMT, TSDB_OPTION,
+    tmq_conf_t, tmq_list_t, tmq_res_t, tmq_resp_err_t, tmq_t, TaosMultiBind, TaosStmt2Bindv,
+    TaosStmt2Option, TAOS, TAOS_RES, TAOS_ROW, TAOS_STMT, TAOS_STMT2, TSDB_OPTION,
 };
 use crate::{err_or, Auth};
 
@@ -87,7 +87,6 @@ pub struct ApiEntry {
     taos_fetch_raw_block_a: Option<
         unsafe extern "C" fn(res: *mut TAOS_RES, fp: taos_async_fetch_cb, param: *mut c_void),
     >,
-    // taos_result_block: Option<unsafe extern "C" fn(taos: *mut TAOS_RES) -> *mut c_void>,
     tmq_write_raw: Option<unsafe extern "C" fn(taos: *mut TAOS, meta: raw_data_t) -> i32>,
     taos_write_raw_block: Option<
         unsafe extern "C" fn(
@@ -151,7 +150,6 @@ pub struct ApiEntry {
         unsafe extern "C" fn(res: *mut TAOS_RES, num: *mut i32, data: *mut *mut c_void) -> c_int,
     >,
 
-    // int taos_get_table_vgId(TAOS *taos, const char *db, const char *table, int *vgId)
     #[allow(non_snake_case)]
     taos_get_table_vgId: Option<
         unsafe extern "C" fn(
@@ -162,7 +160,6 @@ pub struct ApiEntry {
         ) -> c_int,
     >,
 
-    // int taos_get_tables_vgId(TAOS *taos, const char *db, const char *table[], int tableNum, int *vgId);
     #[allow(non_snake_case)]
     taos_get_tables_vgId: Option<
         unsafe extern "C" fn(
@@ -173,12 +170,11 @@ pub struct ApiEntry {
             vgId: *mut i32,
         ) -> c_int,
     >,
-    // stmt
+
     pub(crate) stmt: StmtApi,
-    //  tmq
+    pub(crate) stmt2: Stmt2Api,
     pub(crate) tmq: Option<TmqApi>,
 
-    // sml
     taos_schemaless_insert_raw: Option<
         unsafe extern "C" fn(
             taos: *mut TAOS,
@@ -507,6 +503,113 @@ pub struct StmtApi {
         Option<unsafe extern "C" fn(stmt: *mut TAOS_STMT) -> *const c_char>,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct Stmt2Api {
+    taos_stmt2_init: Option<
+        unsafe extern "C" fn(taos: *mut TAOS, option: *mut TaosStmt2Option) -> *mut TAOS_STMT2,
+    >,
+
+    taos_stmt2_prepare: Option<
+        unsafe extern "C" fn(stmt: *mut TAOS_STMT2, sql: *const c_char, length: c_ulong) -> c_int,
+    >,
+
+    taos_stmt2_bind_param: Option<
+        unsafe extern "C" fn(
+            stmt: *mut TAOS_STMT2,
+            bindv: *mut TaosStmt2Bindv,
+            col_idx: i32,
+        ) -> c_int,
+    >,
+
+    taos_stmt2_exec:
+        Option<unsafe extern "C" fn(stmt: *mut TAOS_STMT2, affected_rows: *mut c_int) -> c_int>,
+
+    taos_stmt2_close: Option<unsafe extern "C" fn(stmt: *mut TAOS_STMT2) -> c_int>,
+
+    taos_stmt2_error: Option<unsafe extern "C" fn(stmt: *mut TAOS_STMT2) -> *mut c_char>,
+}
+
+impl Stmt2Api {
+    fn check_api<T>(&self, api: Option<T>) -> Result<T, RawError> {
+        if let Some(api) = api {
+            Ok(api)
+        } else {
+            Err(RawError::from_string(
+                "Stmt2 API missing (requires TDengine >= v3.3.5.0)",
+            ))
+        }
+    }
+
+    pub(crate) fn init(
+        &self,
+        taos: *mut TAOS,
+        option: *mut TaosStmt2Option,
+    ) -> Result<*mut TAOS_STMT2, RawError> {
+        let taos_stmt2_init = self.check_api(self.taos_stmt2_init)?;
+        let stmt = unsafe { taos_stmt2_init(taos, option) };
+        if stmt.is_null() {
+            return Err(RawError::from_string(
+                self.err_as_str(std::ptr::null_mut())?,
+            ));
+        }
+        Ok(stmt)
+    }
+
+    pub(crate) fn prepare(
+        &self,
+        stmt: *mut TAOS_STMT2,
+        sql: *const c_char,
+        length: c_ulong,
+    ) -> Result<(), RawError> {
+        let taos_stmt2_prepare = self.check_api(self.taos_stmt2_prepare)?;
+        let code = unsafe { taos_stmt2_prepare(stmt, sql, length) };
+        if code != 0 {
+            return Err(RawError::from_string(self.err_as_str(stmt)?));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn bind(
+        &self,
+        stmt: *mut TAOS_STMT2,
+        bindv: *mut TaosStmt2Bindv,
+        col_idx: i32,
+    ) -> Result<(), RawError> {
+        let taos_stmt2_bind_param = self.check_api(self.taos_stmt2_bind_param)?;
+        let code = unsafe { taos_stmt2_bind_param(stmt, bindv, col_idx) };
+        if code != 0 {
+            return Err(RawError::from_string(self.err_as_str(stmt)?));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn exec(&self, stmt: *mut TAOS_STMT2) -> Result<(), RawError> {
+        let taos_stmt2_exec = self.check_api(self.taos_stmt2_exec)?;
+        let code = unsafe { taos_stmt2_exec(stmt, std::ptr::null_mut()) };
+        if code != 0 {
+            return Err(RawError::from_string(self.err_as_str(stmt)?));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn close(&self, stmt: *mut TAOS_STMT2) -> Result<(), RawError> {
+        let taos_stmt2_close = self.check_api(self.taos_stmt2_close)?;
+        let code = unsafe { taos_stmt2_close(stmt) };
+        if code != 0 {
+            return Err(RawError::from_string(self.err_as_str(stmt)?));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn err_as_str(&self, stmt: *mut TAOS_STMT2) -> Result<String, RawError> {
+        let taos_stmt2_error = self.check_api(self.taos_stmt2_error)?;
+        unsafe {
+            let err_ptr = taos_stmt2_error(stmt);
+            Ok(CStr::from_ptr(err_ptr).to_string_lossy().to_string())
+        }
+    }
+}
+
 const fn default_lib_name() -> &'static str {
     if cfg!(target_os = "windows") {
         "taos.dll"
@@ -658,6 +761,24 @@ impl ApiEntry {
                 taos_stmt_errstr,
             };
 
+            optional_symbol!(
+                taos_stmt2_init,
+                taos_stmt2_prepare,
+                taos_stmt2_bind_param,
+                taos_stmt2_exec,
+                taos_stmt2_close,
+                taos_stmt2_error
+            );
+
+            let stmt2 = Stmt2Api {
+                taos_stmt2_init,
+                taos_stmt2_prepare,
+                taos_stmt2_bind_param,
+                taos_stmt2_exec,
+                taos_stmt2_close,
+                taos_stmt2_error,
+            };
+
             let tmq = if version.starts_with('3') {
                 symbol!(
                     tmq_get_res_type,
@@ -788,6 +909,7 @@ impl ApiEntry {
                 taos_get_tables_vgId,
 
                 stmt,
+                stmt2,
                 tmq,
 
                 taos_schemaless_insert_raw,
@@ -929,9 +1051,11 @@ impl ApiEntry {
     pub(crate) fn err_str(&self, res: *mut c_void) -> Cow<'_, str> {
         unsafe { CStr::from_ptr((self.taos_errstr)(res)) }.to_string_lossy()
     }
+
     pub(crate) fn errno(&self, res: *mut c_void) -> i32 {
         unsafe { (self.taos_errno)(res) }
     }
+
     pub(crate) fn free_result(&self, res: *mut c_void) {
         unsafe { (self.taos_free_result)(res) }
     }
@@ -1067,6 +1191,7 @@ impl RawTaos {
         };
         QueryFuture::new(self.clone(), sql.into_owned())
     }
+
     #[inline]
     pub fn exec_async<'a, S: IntoCStr<'a>>(&self, sql: S) -> ExecFuture<'_, 'a> {
         let sql = if self.c.is_v20() {
@@ -1395,10 +1520,7 @@ impl RawRes {
     fn errno(&self) -> Code {
         unsafe { (self.c.taos_errno)(self.as_ptr()) & 0xffff }.into()
     }
-    // #[inline]
-    // fn errstr(&self) -> &CStr {
-    //     unsafe { CStr::from_ptr((self.c.taos_errstr)(self.as_ptr())) }
-    // }
+
     #[inline]
     pub fn err_as_str(&self) -> &'static str {
         unsafe {
@@ -1452,10 +1574,12 @@ impl RawRes {
     pub fn precision(&self) -> Precision {
         unsafe { (self.c.taos_result_precision)(self.as_ptr()) }.into()
     }
+
     #[inline]
     pub fn field_count(&self) -> usize {
         unsafe { (self.c.taos_field_count)(self.as_ptr()) as _ }
     }
+
     pub fn fetch_fields(&self) -> Vec<Field> {
         let len = unsafe { (self.c.taos_field_count)(self.as_ptr()) };
         from_raw_fields(
@@ -1464,6 +1588,7 @@ impl RawRes {
             len as usize,
         )
     }
+
     #[inline]
     pub fn fetch_lengths(&self) -> &[u32] {
         unsafe {
@@ -1473,6 +1598,7 @@ impl RawRes {
             )
         }
     }
+
     #[inline]
     unsafe fn fetch_lengths_raw(&self) -> *const i32 {
         (self.c.taos_fetch_lengths)(self.as_ptr())
@@ -1497,6 +1623,7 @@ impl RawRes {
             self.fetch_raw_block_v2(fields)
         }
     }
+
     #[inline]
     fn fetch_raw_block_v2(&self, fields: &[Field]) -> Result<Option<RawBlock>, RawError> {
         let mut block: *mut *mut c_void = std::ptr::null_mut();
@@ -1505,7 +1632,6 @@ impl RawRes {
             let fetch =
                 unsafe { (taos_fetch_block_s)(self.as_ptr(), &mut num as _, &mut block as _) };
             let lengths = self.fetch_lengths();
-            // dbg!(lengths, fields);
             if fetch == 0 {
                 if num > 0 {
                     let raw = unsafe {
@@ -1545,6 +1671,7 @@ impl RawRes {
             }
         }
     }
+
     #[inline]
     fn fetch_raw_block_v3(&self, fields: &[Field]) -> Result<Option<RawBlock>, RawError> {
         let mut block: *mut c_void = std::ptr::null_mut();
@@ -1561,24 +1688,17 @@ impl RawRes {
                     }
                     tmq_res_t::TMQ_RES_DATA | tmq_res_t::TMQ_RES_METADATA => {
                         let fields = self.fetch_fields();
-
                         let mut raw = RawBlock::parse_from_ptr(block as _, self.precision());
-
                         raw.with_field_names(fields.iter().map(Field::name));
-
                         if let Some(name) = self.tmq_db_name() {
                             raw.with_database_name(name);
                         }
-
                         if let Some(name) = self.tmq_table_name() {
                             raw.with_table_name(name);
                         }
-
                         Some(raw)
                     }
-                    _ => {
-                        todo!()
-                    }
+                    ty => unreachable!("unknown tmq message type: {ty:?}"),
                 }
             } else {
                 None
@@ -1828,6 +1948,7 @@ impl RawRes {
     pub(crate) fn tmq_message_type(&self) -> tmq_res_t {
         unsafe { (self.c.tmq.as_ref().unwrap().tmq_get_res_type)(self.as_ptr()) }
     }
+
     #[inline]
     pub fn tmq_table_name(&self) -> Option<&str> {
         unsafe {
@@ -1839,6 +1960,7 @@ impl RawRes {
             }
         }
     }
+
     #[inline]
     pub(crate) fn tmq_db_name(&self) -> Option<&str> {
         unsafe {
@@ -1850,6 +1972,7 @@ impl RawRes {
             }
         }
     }
+
     #[inline]
     pub fn tmq_topic_name(&self) -> Option<&str> {
         unsafe {
@@ -1861,6 +1984,7 @@ impl RawRes {
             }
         }
     }
+
     #[inline]
     pub fn tmq_vgroup_id(&self) -> Option<i32> {
         unsafe {
@@ -1872,6 +1996,7 @@ impl RawRes {
             }
         }
     }
+
     #[inline]
     pub(crate) fn tmq_get_json_meta(&self) -> Result<JsonMeta, RawError> {
         unsafe {
