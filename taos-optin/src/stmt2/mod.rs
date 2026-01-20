@@ -101,7 +101,7 @@ unsafe impl Sync for RawStmt2 {}
 impl Drop for RawStmt2 {
     fn drop(&mut self) {
         if let Err(err) = self.close() {
-            tracing::error!("failed to close Stmt2: {err}");
+            tracing::error!("Failed to close Stmt2: {err}");
         }
         unsafe {
             if let Some(mut res) = (&mut *self.res.get()).take() {
@@ -206,6 +206,7 @@ impl Stmt2ExecState {
     }
 
     fn clear(&mut self) {
+        // TODO: free res
         self.result = None;
         self.waiting = false;
         self.start_time = None;
