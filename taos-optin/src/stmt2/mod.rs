@@ -103,11 +103,6 @@ impl Drop for RawStmt2 {
         if let Err(err) = self.close() {
             tracing::error!("Failed to close Stmt2: {err}");
         }
-        unsafe {
-            if let Some(mut res) = (&mut *self.res.get()).take() {
-                res.free_result();
-            }
-        }
     }
 }
 
@@ -279,7 +274,6 @@ unsafe extern "C" fn stmt2_exec_cb(param: *mut c_void, res: *mut TAOS_RES, code:
     state.callback_cost.replace(elapsed);
 
     let result = if code < 0 {
-        state.api.free_result(res);
         let err = if let Some(stmt) = state.stmt2 {
             match state.api.stmt2.err_as_str(stmt) {
                 Ok(msg) => RawError::new(code, msg),
@@ -292,7 +286,7 @@ unsafe extern "C" fn stmt2_exec_cb(param: *mut c_void, res: *mut TAOS_RES, code:
     } else {
         debug_assert!(!res.is_null());
         assert_ne!(res as usize, 1, "res should not be 1");
-        let raw_res = RawRes::from_ptr_unchecked(state.api.clone(), res);
+        let raw_res = RawRes::from_ptr_unowned(state.api.clone(), res);
         let affected_rows = raw_res.affected_rows() as usize;
         Ok((affected_rows, raw_res))
     };
@@ -341,6 +335,23 @@ mod tests {
 
         let affected = stmt2.exec().await?;
         assert_eq!(affected, 4);
+
+        stmt2.prepare("select * from t0 where ts = ?").await?;
+
+        let cols = vec![ColumnView::from_millis_timestamp(vec![1726803356466])];
+        let param = Stmt2BindParam::new(None, None, Some(cols));
+        stmt2.bind(&[param]).await?;
+
+        let affected = stmt2.exec().await?;
+        assert_eq!(affected, 0);
+
+        let rows: Vec<Vec<String>> = stmt2
+            .result_set()
+            .await?
+            .deserialize()
+            .try_collect()
+            .await?;
+        dbg!("rows: {:?}", rows);
 
         Ok(())
     }

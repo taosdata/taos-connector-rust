@@ -1505,6 +1505,7 @@ impl RawTaos {
 pub struct RawRes {
     c: Arc<ApiEntry>,
     ptr: *mut TAOS_RES,
+    owned: bool,
 }
 
 unsafe impl Send for RawRes {}
@@ -1547,8 +1548,21 @@ impl RawRes {
     }
 
     #[inline]
-    pub unsafe fn from_ptr_unchecked(c: Arc<ApiEntry>, ptr: *mut TAOS_RES) -> RawRes {
-        Self { c, ptr }
+    pub unsafe fn from_ptr_unchecked(c: Arc<ApiEntry>, ptr: *mut TAOS_RES) -> Self {
+        Self {
+            c,
+            ptr,
+            owned: true,
+        }
+    }
+
+    #[inline]
+    pub unsafe fn from_ptr_unowned(c: Arc<ApiEntry>, ptr: *mut TAOS_RES) -> Self {
+        RawRes {
+            c,
+            ptr,
+            owned: false,
+        }
     }
 
     #[inline]
@@ -1567,7 +1581,9 @@ impl RawRes {
 
     #[inline]
     pub fn free_result(&mut self) {
-        unsafe { (self.c.taos_free_result)(self.as_ptr()) }
+        if self.owned {
+            unsafe { (self.c.taos_free_result)(self.as_ptr()) }
+        }
     }
 
     #[inline]
