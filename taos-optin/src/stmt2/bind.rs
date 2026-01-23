@@ -316,9 +316,10 @@ impl Drop for Stmt2BindColumn {
 
         if !self.buffer.is_null() {
             let ty = Ty::from(self.buffer_type as u8);
+            use Ty::*;
             if matches!(
                 ty,
-                Ty::VarChar | Ty::NChar | Ty::Json | Ty::VarBinary | Ty::Geometry
+                VarChar | NChar | Json | VarBinary | Geometry | Decimal | Decimal64 | Blob
             ) && !self.length.is_null()
             {
                 let lengths =

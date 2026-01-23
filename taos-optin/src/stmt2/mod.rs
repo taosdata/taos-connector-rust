@@ -300,10 +300,13 @@ unsafe extern "C" fn stmt2_exec_cb(param: *mut c_void, res: *mut TAOS_RES, code:
 
 #[cfg(test)]
 mod tests {
+    use serde::Deserialize;
+    use taos_query::common::decimal::Decimal;
+
     use crate::prelude::*;
 
     #[tokio::test]
-    async fn test_stmt2() -> RawResult<()> {
+    async fn test_stmt2_table() -> RawResult<()> {
         let taos = TaosBuilder::from_dsn("taos://localhost:6030")?
             .build()
             .await?;
@@ -312,31 +315,82 @@ mod tests {
             "drop database if exists test_1768466795",
             "create database test_1768466795",
             "use test_1768466795",
-            "create table t0 (ts timestamp, c1 int, c2 varchar(50))",
+            "create table t0 (ts timestamp, c1 bool, c2 tinyint, c3 smallint, c4 int, \
+                c5 bigint, c6 tinyint unsigned, c7 smallint unsigned, c8 int unsigned, \
+                c9 bigint unsigned, c10 float, c11 double, c12 varchar(20), c13 nchar(20), \
+                c14 varbinary(20), c15 geometry(50), c16 blob, c17 decimal(10, 2), \
+                c18 decimal(20, 5))",
         ])
         .await?;
 
         let mut stmt2 = Stmt2::init(&taos).await?;
-        stmt2.prepare("insert into t0 values(?, ?, ?)").await?;
+        stmt2
+            .prepare(
+                "insert into t0 values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            )
+            .await?;
+
+        let tss = vec![1726803356466, 1726803357466, 1726803358466];
+        let c1s = vec![Some(true), None, Some(false)];
+        let c2s = vec![Some(1), None, Some(-1)];
+        let c3s = vec![Some(1), None, Some(-1)];
+        let c4s = vec![Some(1), None, Some(-1)];
+        let c5s = vec![Some(1), None, Some(-1)];
+        let c6s = vec![Some(1), None, Some(1)];
+        let c7s = vec![Some(1), None, Some(1)];
+        let c8s = vec![Some(1), None, Some(1)];
+        let c9s = vec![Some(1), None, Some(1)];
+        let c10s = vec![Some(1.1), None, Some(-1.1)];
+        let c11s = vec![Some(1.11), None, Some(-1.11)];
+        let c12s = vec![Some("hello"), None, Some("world")];
+        let c13s = vec![Some("hello"), None, Some("中文")];
+        let c14s = vec![Some(&b"hello"[..]), None, Some(&b"\x00\x01\x02"[..])];
+        let c15s = vec![
+            Some(
+                &[
+                    1u8, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 240, 63, 0, 0, 0, 0, 0, 0, 240, 63,
+                ][..],
+            ),
+            None,
+            Some(
+                &[
+                    1u8, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 240, 63, 0, 0, 0, 0, 0, 0, 240, 63,
+                ][..],
+            ),
+        ];
+        let c16s = vec![Some(&b"hello blob"[..]), None, Some(&b"world blob"[..])];
+        let c17s = vec![Some(1234567), None, Some(-1234567)];
+        let c18s = vec![Some(123456789012345), None, Some(-123456789012345)];
 
         let cols = vec![
-            ColumnView::from_millis_timestamp(vec![
-                1726803356466,
-                1726803357466,
-                1726803358466,
-                1726803359466,
-            ]),
-            ColumnView::from_ints(vec![99, 100, 101, 102]),
-            ColumnView::from_varchar(vec!["hello", "taos", "stmt2", "world"]),
+            ColumnView::from_millis_timestamp(tss.clone()),
+            ColumnView::from_bools(c1s.clone()),
+            ColumnView::from_tiny_ints(c2s.clone()),
+            ColumnView::from_small_ints(c3s.clone()),
+            ColumnView::from_ints(c4s.clone()),
+            ColumnView::from_big_ints(c5s.clone()),
+            ColumnView::from_unsigned_tiny_ints(c6s.clone()),
+            ColumnView::from_unsigned_small_ints(c7s.clone()),
+            ColumnView::from_unsigned_ints(c8s.clone()),
+            ColumnView::from_unsigned_big_ints(c9s.clone()),
+            ColumnView::from_floats(c10s.clone()),
+            ColumnView::from_doubles(c11s.clone()),
+            ColumnView::from_varchar::<&str, _, _, _>(c12s.clone()),
+            ColumnView::from_nchar::<&str, _, _, _>(c13s.clone()),
+            ColumnView::from_bytes::<&[u8], _, _, _>(c14s.clone()),
+            ColumnView::from_geobytes::<&[u8], _, _, _>(c15s.clone()),
+            ColumnView::from_blob_bytes::<&[u8], _, _, _>(c16s.clone()),
+            ColumnView::from_decimal64(c17s.clone(), 10, 2),
+            ColumnView::from_decimal(c18s.clone(), 20, 5),
         ];
 
         let param = Stmt2BindParam::new(None, None, Some(cols));
         stmt2.bind(&[param]).await?;
 
         let affected = stmt2.exec().await?;
-        assert_eq!(affected, 4);
+        assert_eq!(affected, 3);
 
-        stmt2.prepare("select * from t0 where ts = ?").await?;
+        stmt2.prepare("select * from t0 where ts >= ?").await?;
 
         let cols = vec![ColumnView::from_millis_timestamp(vec![1726803356466])];
         let param = Stmt2BindParam::new(None, None, Some(cols));
@@ -345,13 +399,59 @@ mod tests {
         let affected = stmt2.exec().await?;
         assert_eq!(affected, 0);
 
-        let rows: Vec<Vec<String>> = stmt2
+        #[derive(Debug, Deserialize)]
+        struct Row {
+            ts: i64,
+            c1: Option<bool>,
+            c2: Option<i8>,
+            c3: Option<i16>,
+            c4: Option<i32>,
+            c5: Option<i64>,
+            c6: Option<u8>,
+            c7: Option<u16>,
+            c8: Option<u32>,
+            c9: Option<u64>,
+            c10: Option<f32>,
+            c11: Option<f64>,
+            c12: Option<String>,
+            c13: Option<String>,
+            c14: Option<Vec<u8>>,
+            c15: Option<Vec<u8>>,
+            c16: Option<Vec<u8>>,
+            c17: Option<String>,
+            c18: Option<String>,
+        }
+
+        let rows: Vec<Row> = stmt2
             .result_set()
             .await?
             .deserialize()
             .try_collect()
             .await?;
-        dbg!("rows: {:?}", rows);
+
+        assert_eq!(rows.len(), 3);
+
+        for (i, row) in rows.iter().enumerate() {
+            assert_eq!(row.ts, tss[i]);
+            assert_eq!(row.c1, c1s[i]);
+            assert_eq!(row.c2, c2s[i]);
+            assert_eq!(row.c3, c3s[i]);
+            assert_eq!(row.c4, c4s[i]);
+            assert_eq!(row.c5, c5s[i]);
+            assert_eq!(row.c6, c6s[i]);
+            assert_eq!(row.c7, c7s[i]);
+            assert_eq!(row.c8, c8s[i]);
+            assert_eq!(row.c9, c9s[i]);
+            assert_eq!(row.c10, c10s[i]);
+            assert_eq!(row.c11, c11s[i]);
+            assert_eq!(row.c12.as_deref(), c12s[i]);
+            assert_eq!(row.c13.as_deref(), c13s[i]);
+            assert_eq!(row.c14.as_deref(), c14s[i]);
+            assert_eq!(row.c15.as_deref(), c15s[i]);
+            assert_eq!(row.c16.as_deref(), c16s[i]);
+            assert_eq!(row.c17, c17s[i].map(|v| Decimal::new(v, 10, 2).to_string()));
+            assert_eq!(row.c18, c18s[i].map(|v| Decimal::new(v, 20, 5).to_string()));
+        }
 
         Ok(())
     }
