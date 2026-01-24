@@ -298,7 +298,6 @@ impl RawStmt {
 
 #[cfg(test)]
 mod tests {
-
     use bytes::Bytes;
     use taos_query::util::hex::*;
 
