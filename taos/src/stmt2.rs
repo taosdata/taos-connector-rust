@@ -1,3 +1,4 @@
+use taos_optin::Stmt2 as NativeStmt2;
 use taos_query::stmt2::Stmt2BindParam;
 use taos_query::RawResult;
 use taos_ws::Stmt2 as WsStmt2;
@@ -6,6 +7,7 @@ use crate::{ResultSet, ResultSetInner, TaosInner};
 
 #[derive(Debug)]
 enum Stmt2Inner {
+    Native(NativeStmt2),
     Ws(WsStmt2),
 }
 
@@ -15,13 +17,16 @@ pub struct Stmt2(Stmt2Inner);
 impl taos_query::stmt2::Stmt2Bindable<super::Taos> for Stmt2 {
     fn init(taos: &super::Taos) -> RawResult<Self> {
         match &taos.0 {
-            TaosInner::Native(_) => todo!(),
+            TaosInner::Native(taos) => NativeStmt2::init(taos).map(Stmt2Inner::Native).map(Stmt2),
             TaosInner::Ws(taos) => WsStmt2::init(taos).map(Stmt2Inner::Ws).map(Stmt2),
         }
     }
 
     fn prepare(&mut self, sql: &str) -> RawResult<&mut Self> {
         match &mut self.0 {
+            Stmt2Inner::Native(stmt2) => {
+                stmt2.prepare(sql)?;
+            }
             Stmt2Inner::Ws(stmt2) => {
                 stmt2.prepare(sql)?;
             }
@@ -31,6 +36,9 @@ impl taos_query::stmt2::Stmt2Bindable<super::Taos> for Stmt2 {
 
     fn bind(&mut self, params: &[Stmt2BindParam]) -> RawResult<&mut Self> {
         match &mut self.0 {
+            Stmt2Inner::Native(stmt2) => {
+                stmt2.bind(params)?;
+            }
             Stmt2Inner::Ws(stmt2) => {
                 stmt2.bind(params)?;
             }
@@ -40,18 +48,26 @@ impl taos_query::stmt2::Stmt2Bindable<super::Taos> for Stmt2 {
 
     fn exec(&mut self) -> RawResult<usize> {
         match &mut self.0 {
+            Stmt2Inner::Native(stmt2) => Ok(stmt2.exec()?),
             Stmt2Inner::Ws(stmt2) => Ok(stmt2.exec()?),
         }
     }
 
     fn affected_rows(&self) -> usize {
         match &self.0 {
-            Stmt2Inner::Ws(stmt2) => stmt2.affected_rows(),
+            Stmt2Inner::Native(stmt2) => stmt2.affected_rows(),
+            Stmt2Inner::Ws(stmt2) => {
+                <WsStmt2 as taos_query::stmt2::Stmt2Bindable<taos_ws::Taos>>::affected_rows(stmt2)
+            }
         }
     }
 
     fn result_set(&self) -> RawResult<ResultSet> {
         match &self.0 {
+            Stmt2Inner::Native(stmt2) => stmt2
+                .result_set()
+                .map(ResultSetInner::Native)
+                .map(ResultSet),
             Stmt2Inner::Ws(stmt2) => stmt2.result_set().map(ResultSetInner::Ws).map(ResultSet),
         }
     }
@@ -61,13 +77,19 @@ impl taos_query::stmt2::Stmt2Bindable<super::Taos> for Stmt2 {
 impl taos_query::stmt2::Stmt2AsyncBindable<super::Taos> for Stmt2 {
     async fn init(taos: &super::Taos) -> RawResult<Self> {
         match &taos.0 {
-            TaosInner::Native(_) => todo!(),
+            TaosInner::Native(taos) => NativeStmt2::init(taos)
+                .await
+                .map(Stmt2Inner::Native)
+                .map(Stmt2),
             TaosInner::Ws(taos) => WsStmt2::init(taos).await.map(Stmt2Inner::Ws).map(Stmt2),
         }
     }
 
     async fn prepare(&mut self, sql: &str) -> RawResult<&mut Self> {
         match &mut self.0 {
+            Stmt2Inner::Native(stmt2) => {
+                stmt2.prepare(sql).await?;
+            }
             Stmt2Inner::Ws(stmt2) => {
                 stmt2.prepare(sql).await?;
             }
@@ -77,6 +99,9 @@ impl taos_query::stmt2::Stmt2AsyncBindable<super::Taos> for Stmt2 {
 
     async fn bind(&mut self, params: &[Stmt2BindParam]) -> RawResult<&mut Self> {
         match &mut self.0 {
+            Stmt2Inner::Native(stmt2) => {
+                stmt2.bind(params).await?;
+            }
             Stmt2Inner::Ws(stmt2) => {
                 stmt2.bind(params).await?;
             }
@@ -86,18 +111,30 @@ impl taos_query::stmt2::Stmt2AsyncBindable<super::Taos> for Stmt2 {
 
     async fn exec(&mut self) -> RawResult<usize> {
         match &mut self.0 {
+            Stmt2Inner::Native(stmt2) => Ok(stmt2.exec().await?),
             Stmt2Inner::Ws(stmt2) => Ok(stmt2.exec().await?),
         }
     }
 
     async fn affected_rows(&self) -> usize {
         match &self.0 {
-            Stmt2Inner::Ws(stmt2) => stmt2.affected_rows(),
+            Stmt2Inner::Native(stmt2) => stmt2.affected_rows().await,
+            Stmt2Inner::Ws(stmt2) => {
+                <WsStmt2 as taos_query::stmt2::Stmt2AsyncBindable<taos_ws::Taos>>::affected_rows(
+                    stmt2,
+                )
+                .await
+            }
         }
     }
 
     async fn result_set(&self) -> RawResult<ResultSet> {
         match &self.0 {
+            Stmt2Inner::Native(stmt2) => stmt2
+                .result_set()
+                .await
+                .map(ResultSetInner::Native)
+                .map(ResultSet),
             Stmt2Inner::Ws(stmt2) => stmt2
                 .result_set()
                 .await
