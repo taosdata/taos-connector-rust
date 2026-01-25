@@ -390,6 +390,7 @@ mod tests {
 
         let affected = stmt2.exec().await?;
         assert_eq!(affected, 3);
+        assert_eq!(stmt2.affected_rows(), 3);
 
         stmt2.prepare("select * from t0 where ts >= ?").await?;
 
@@ -399,6 +400,7 @@ mod tests {
 
         let affected = stmt2.exec().await?;
         assert_eq!(affected, 0);
+        assert_eq!(stmt2.affected_rows(), 3);
 
         #[derive(Debug, Deserialize)]
         struct Row {
@@ -1115,6 +1117,7 @@ mod sync_tests {
 
         let affected = stmt2.exec()?;
         assert_eq!(affected, 3);
+        assert_eq!(stmt2.affected_rows(), 3);
 
         stmt2.prepare("select * from t0 where ts >= ?")?;
 
@@ -1124,6 +1127,7 @@ mod sync_tests {
 
         let affected = stmt2.exec()?;
         assert_eq!(affected, 0);
+        assert_eq!(stmt2.affected_rows(), 3);
 
         #[derive(Debug, Deserialize)]
         struct Row {

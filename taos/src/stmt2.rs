@@ -420,6 +420,66 @@ mod tests {
 
         Ok(())
     }
+
+    #[test]
+    fn test_stmt2_native() -> anyhow::Result<()> {
+        let taos = TaosBuilder::from_dsn("taos://localhost:6030")?.build()?;
+        taos.exec_many([
+            "drop database if exists test_1769308834",
+            "create database test_1769308834",
+            "use test_1769308834",
+            "create table t0 (ts timestamp, c1 int)",
+        ])?;
+
+        let mut stmt2 = Stmt2::init(&taos)?;
+        stmt2.prepare("insert into t0 values(?, ?)")?;
+
+        let cols = vec![
+            ColumnView::from_millis_timestamp(vec![
+                1726803356466,
+                1726803357466,
+                1726803358466,
+                1726803359466,
+            ]),
+            ColumnView::from_ints(vec![99, 100, 101, 102]),
+        ];
+
+        let param = Stmt2BindParam::new(None, None, Some(cols));
+        let affected = stmt2.bind(&[param])?.exec()?;
+        assert_eq!(affected, 4);
+        assert_eq!(stmt2.affected_rows(), 4);
+
+        #[derive(Debug, Deserialize)]
+        struct Row {
+            ts: i64,
+            c1: i32,
+        }
+
+        stmt2.prepare("select * from t0 where c1 >= ?")?;
+
+        let cols = vec![ColumnView::from_ints(vec![99])];
+        let param = Stmt2BindParam::new(None, None, Some(cols));
+        let affected = stmt2.bind(&[param])?.exec()?;
+        assert_eq!(affected, 0);
+        assert_eq!(stmt2.affected_rows(), 4);
+
+        let rows: Vec<Row> = stmt2.result_set()?.deserialize().try_collect()?;
+        assert_eq!(rows.len(), 4);
+
+        assert_eq!(rows[0].ts, 1726803356466);
+        assert_eq!(rows[1].ts, 1726803357466);
+        assert_eq!(rows[2].ts, 1726803358466);
+        assert_eq!(rows[3].ts, 1726803359466);
+
+        assert_eq!(rows[0].c1, 99);
+        assert_eq!(rows[1].c1, 100);
+        assert_eq!(rows[2].c1, 101);
+        assert_eq!(rows[3].c1, 102);
+
+        taos.exec("drop database test_1769308834")?;
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -719,6 +779,76 @@ mod async_tests {
         assert_eq!(rows[1].c1, 102);
 
         taos.exec(format!("drop database {db}")).await?;
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_stmt2_native() -> anyhow::Result<()> {
+        let taos = TaosBuilder::from_dsn("taos://localhost:6030")?
+            .build()
+            .await?;
+
+        taos.exec_many([
+            "drop database if exists test_1769309414",
+            "create database test_1769309414",
+            "use test_1769309414",
+            "create table t0 (ts timestamp, c1 int)",
+        ])
+        .await?;
+
+        let mut stmt2 = Stmt2::init(&taos).await?;
+        stmt2.prepare("insert into t0 values(?, ?)").await?;
+
+        let cols = vec![
+            ColumnView::from_millis_timestamp(vec![
+                1726803356466,
+                1726803357466,
+                1726803358466,
+                1726803359466,
+            ]),
+            ColumnView::from_ints(vec![99, 100, 101, 102]),
+        ];
+
+        let param = Stmt2BindParam::new(None, None, Some(cols));
+        let affected = stmt2.bind(&[param]).await?.exec().await?;
+        assert_eq!(affected, 4);
+        assert_eq!(stmt2.affected_rows().await, 4);
+
+        #[derive(Debug, Deserialize)]
+        struct Row {
+            ts: i64,
+            c1: i32,
+        }
+
+        stmt2.prepare("select * from t0 where c1 >= ?").await?;
+
+        let cols = vec![ColumnView::from_ints(vec![99])];
+        let param = Stmt2BindParam::new(None, None, Some(cols));
+        let affected = stmt2.bind(&[param]).await?.exec().await?;
+        assert_eq!(affected, 0);
+        assert_eq!(stmt2.affected_rows().await, 4);
+
+        let rows: Vec<Row> = stmt2
+            .result_set()
+            .await?
+            .deserialize()
+            .try_collect()
+            .await?;
+
+        assert_eq!(rows.len(), 4);
+
+        assert_eq!(rows[0].ts, 1726803356466);
+        assert_eq!(rows[1].ts, 1726803357466);
+        assert_eq!(rows[2].ts, 1726803358466);
+        assert_eq!(rows[3].ts, 1726803359466);
+
+        assert_eq!(rows[0].c1, 99);
+        assert_eq!(rows[1].c1, 100);
+        assert_eq!(rows[2].c1, 101);
+        assert_eq!(rows[3].c1, 102);
+
+        taos.exec("drop database test_1769309414").await?;
 
         Ok(())
     }
