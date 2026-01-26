@@ -359,6 +359,14 @@ impl TaosMultiBind {
     }
 }
 
+impl Drop for TaosMultiBind {
+    fn drop(&mut self) {
+        if !self.is_null.is_null() {
+            unsafe { Vec::from_raw_parts(self.is_null as *mut i8, self.num as _, self.num as _) };
+        }
+    }
+}
+
 impl BindFrom for TaosBindV3 {
     #[inline]
     fn null() -> Self {
@@ -531,14 +539,6 @@ impl BindFrom for TaosBindV2 {
 impl Drop for TaosBindV2 {
     fn drop(&mut self) {
         unsafe { self.free() }
-    }
-}
-
-impl Drop for TaosMultiBind {
-    fn drop(&mut self) {
-        if !self.is_null.is_null() {
-            unsafe { Vec::from_raw_parts(self.is_null as *mut i8, self.num as _, self.num as _) };
-        }
     }
 }
 

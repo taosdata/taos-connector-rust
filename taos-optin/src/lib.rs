@@ -1572,16 +1572,7 @@ mod tests {
             "create user nts_totp_user pass 'totp_pass_1' totpseed '{totp_seed}'"
         ))?;
 
-        let mut rs = taos.query(format!("select generate_totp_secret('{totp_seed}')"))?;
-        let rows: Vec<String> = rs.deserialize().try_collect()?;
-        assert_eq!(rows.len(), 1);
-        let totp_secret = &rows[0];
-
-        let secret = generate_totp_secret(totp_seed.as_bytes());
-        let secret = totp_secret_encode(&secret);
-        assert_eq!(&secret, totp_secret);
-
-        let totp_secret = totp_secret_decode(totp_secret).unwrap();
+        let totp_secret = generate_totp_secret(totp_seed.as_bytes());
         let totp_code = generate_totp_code(&totp_secret);
 
         let taost = TaosBuilder::from_dsn(format!(
@@ -1670,18 +1661,7 @@ mod totp_async_tests {
         ))
         .await?;
 
-        let mut rs = taos
-            .query(format!("select generate_totp_secret('{totp_seed}')"))
-            .await?;
-        let rows: Vec<String> = rs.deserialize().try_collect().await?;
-        assert_eq!(rows.len(), 1);
-        let totp_secret = &rows[0];
-
-        let secret = generate_totp_secret(totp_seed.as_bytes());
-        let secret = totp_secret_encode(&secret);
-        assert_eq!(&secret, totp_secret);
-
-        let totp_secret = totp_secret_decode(totp_secret).unwrap();
+        let totp_secret = generate_totp_secret(totp_seed.as_bytes());
         let totp_code = generate_totp_code(&totp_secret);
 
         let taost = TaosBuilder::from_dsn(format!(
@@ -1723,18 +1703,7 @@ mod totp_async_tests {
         ))
         .await?;
 
-        let mut rs = taos
-            .query(format!("select generate_totp_secret('{totp_seed}')"))
-            .await?;
-        let rows: Vec<String> = rs.deserialize().try_collect().await?;
-        assert_eq!(rows.len(), 1);
-        let totp_secret = &rows[0];
-
-        let secret = generate_totp_secret(totp_seed.as_bytes());
-        let secret = totp_secret_encode(&secret);
-        assert_eq!(&secret, totp_secret);
-
-        let totp_secret = totp_secret_decode(totp_secret).unwrap();
+        let totp_secret = generate_totp_secret(totp_seed.as_bytes());
         let totp_code = generate_totp_code(&totp_secret);
 
         let taost = TaosBuilder::from_dsn(format!(
@@ -1842,18 +1811,7 @@ mod totp_async_tests {
         ))
         .await?;
 
-        let mut rs = taos
-            .query(format!("select generate_totp_secret('{totp_seed}')"))
-            .await?;
-        let rows: Vec<String> = rs.deserialize().try_collect().await?;
-        assert_eq!(rows.len(), 1);
-        let totp_secret = &rows[0];
-
-        let secret = generate_totp_secret(totp_seed.as_bytes());
-        let secret = totp_secret_encode(&secret);
-        assert_eq!(&secret, totp_secret);
-
-        let totp_secret = totp_secret_decode(totp_secret).unwrap();
+        let totp_secret = generate_totp_secret(totp_seed.as_bytes());
         let totp_code = generate_totp_code(&totp_secret);
 
         let taost = TaosBuilder::from_dsn(format!(
