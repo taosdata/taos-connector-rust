@@ -1,4 +1,7 @@
-use std::{ffi::CString, ptr, slice};
+use std::{
+    ffi::{c_char, CString},
+    ptr, slice,
+};
 
 use bytes::Bytes;
 use derive_more::Deref;
@@ -71,7 +74,8 @@ impl BindFrom for Stmt2BindTag {
 
     fn from_json(value: &str) -> Self {
         let mut bind = Self::new(Ty::Json);
-        bind.0.buffer = value.as_ptr() as _;
+        let buffer = CString::new(value).expect("failed to build json tag");
+        bind.0.buffer = buffer.into_raw() as _;
         bind.0.length = Box::into_raw(Box::new(value.len() as i32));
         bind.0.is_null = Box::into_raw(Box::new(0i8)) as _;
         bind
@@ -139,6 +143,9 @@ impl Drop for Stmt2BindTag {
                 }
                 Ty::Double => {
                     let _ = unsafe { Box::from_raw(self.buffer as *mut f64) };
+                }
+                Ty::Json => {
+                    let _ = unsafe { CString::from_raw(self.buffer as *mut c_char) };
                 }
                 _ => (),
             }

@@ -1043,32 +1043,40 @@ mod tests {
         ])
         .await?;
 
-        // let mut stmt2 = Stmt2::init(&taos).await?;
-        // stmt2
-        //     .prepare("insert into t0 using s0 tags (?) values(?, ?)")
-        //     .await?;
+        let mut stmt2 = Stmt2::init(&taos).await?;
+        stmt2
+            .prepare("insert into t0 using s0 tags (?) values(?, ?)")
+            .await?;
 
-        // let tags = vec![Value::Json(r#"{"key":"value"}"#.into())];
-        // let cols = vec![
-        //     ColumnView::from_millis_timestamp(vec![1726803356466, 1726803357466]),
-        //     ColumnView::from_ints(vec![100, 200]),
-        // ];
-        // let param = Stmt2BindParam::new(None, Some(tags), Some(cols));
-        // stmt2.bind(&[param]).await?;
+        let tags = vec![Value::Json(
+            serde_json::from_str(r#"{"key":"value"}"#).unwrap(),
+        )];
+        let cols = vec![
+            ColumnView::from_millis_timestamp(vec![1726803356466, 1726803357466]),
+            ColumnView::from_ints(vec![100, 200]),
+        ];
+        let param = Stmt2BindParam::new(None, Some(tags), Some(cols));
+        stmt2.bind(&[param]).await?;
 
-        // let affected = stmt2.exec().await?;
-        // assert_eq!(affected, 2);
+        let affected = stmt2.exec().await?;
+        assert_eq!(affected, 2);
 
-        // let rows: Vec<String> = stmt2
-        //     .result_set()
-        //     .await?
-        //     .deserialize()
-        //     .try_collect()
-        //     .await?;
+        #[derive(Debug, Deserialize)]
+        struct Tag {
+            tag_value: Option<String>,
+        }
 
-        // for row in rows {
-        //     println!("json: {}", row);
-        // }
+        let tags: Vec<Tag> = taos
+            .query("show tags from t0")
+            .await?
+            .deserialize()
+            .try_collect()
+            .await?;
+
+        assert_eq!(tags.len(), 1);
+        assert_eq!(tags[0].tag_value.as_deref(), Some(r#"{"key":"value"}"#));
+
+        taos.exec("drop database if exists test_1769406117").await?;
 
         Ok(())
     }
