@@ -297,7 +297,7 @@ unsafe extern "C" fn stmt2_exec_cb(param: *mut c_void, res: *mut TAOS_RES, code:
     }
 }
 
-// #[cfg(feature = "test-new-feat")]
+#[cfg(feature = "test-new-feat")]
 #[cfg(test)]
 mod tests {
     use bytes::Bytes;

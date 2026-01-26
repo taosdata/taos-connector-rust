@@ -31,6 +31,59 @@ impl Stmt2BindTag {
             num: 1,
         })
     }
+
+    fn free(&self) {
+        if !self.is_null.is_null() {
+            let _ = unsafe { Box::from_raw(self.is_null) };
+        }
+
+        if !self.length.is_null() {
+            let _ = unsafe { Box::from_raw(self.length) };
+        }
+
+        if !self.buffer.is_null() {
+            let ty = Ty::from(self.buffer_type as u8);
+            match ty {
+                Ty::Bool => {
+                    let _ = unsafe { Box::from_raw(self.buffer as *mut bool) };
+                }
+                Ty::TinyInt => {
+                    let _ = unsafe { Box::from_raw(self.buffer as *mut i8) };
+                }
+                Ty::SmallInt => {
+                    let _ = unsafe { Box::from_raw(self.buffer as *mut i16) };
+                }
+                Ty::Int => {
+                    let _ = unsafe { Box::from_raw(self.buffer as *mut i32) };
+                }
+                Ty::BigInt | Ty::Timestamp => {
+                    let _ = unsafe { Box::from_raw(self.buffer as *mut i64) };
+                }
+                Ty::UTinyInt => {
+                    let _ = unsafe { Box::from_raw(self.buffer as *mut u8) };
+                }
+                Ty::USmallInt => {
+                    let _ = unsafe { Box::from_raw(self.buffer as *mut u16) };
+                }
+                Ty::UInt => {
+                    let _ = unsafe { Box::from_raw(self.buffer as *mut u32) };
+                }
+                Ty::UBigInt => {
+                    let _ = unsafe { Box::from_raw(self.buffer as *mut u64) };
+                }
+                Ty::Float => {
+                    let _ = unsafe { Box::from_raw(self.buffer as *mut f32) };
+                }
+                Ty::Double => {
+                    let _ = unsafe { Box::from_raw(self.buffer as *mut f64) };
+                }
+                Ty::Json => {
+                    let _ = unsafe { CString::from_raw(self.buffer as *mut c_char) };
+                }
+                _ => (),
+            }
+        }
+    }
 }
 
 impl BindFrom for Stmt2BindTag {
@@ -100,56 +153,7 @@ impl BindFrom for Stmt2BindTag {
 
 impl Drop for Stmt2BindTag {
     fn drop(&mut self) {
-        if !self.is_null.is_null() {
-            let _ = unsafe { Box::from_raw(self.is_null) };
-        }
-
-        if !self.length.is_null() {
-            let _ = unsafe { Box::from_raw(self.length) };
-        }
-
-        if !self.buffer.is_null() {
-            let ty = Ty::from(self.buffer_type as u8);
-            match ty {
-                Ty::Bool => {
-                    let _ = unsafe { Box::from_raw(self.buffer as *mut bool) };
-                }
-                Ty::TinyInt => {
-                    let _ = unsafe { Box::from_raw(self.buffer as *mut i8) };
-                }
-                Ty::SmallInt => {
-                    let _ = unsafe { Box::from_raw(self.buffer as *mut i16) };
-                }
-                Ty::Int => {
-                    let _ = unsafe { Box::from_raw(self.buffer as *mut i32) };
-                }
-                Ty::BigInt | Ty::Timestamp => {
-                    let _ = unsafe { Box::from_raw(self.buffer as *mut i64) };
-                }
-                Ty::UTinyInt => {
-                    let _ = unsafe { Box::from_raw(self.buffer as *mut u8) };
-                }
-                Ty::USmallInt => {
-                    let _ = unsafe { Box::from_raw(self.buffer as *mut u16) };
-                }
-                Ty::UInt => {
-                    let _ = unsafe { Box::from_raw(self.buffer as *mut u32) };
-                }
-                Ty::UBigInt => {
-                    let _ = unsafe { Box::from_raw(self.buffer as *mut u64) };
-                }
-                Ty::Float => {
-                    let _ = unsafe { Box::from_raw(self.buffer as *mut f32) };
-                }
-                Ty::Double => {
-                    let _ = unsafe { Box::from_raw(self.buffer as *mut f64) };
-                }
-                Ty::Json => {
-                    let _ = unsafe { CString::from_raw(self.buffer as *mut c_char) };
-                }
-                _ => (),
-            }
-        }
+        self.free();
     }
 }
 
@@ -251,6 +255,27 @@ impl Stmt2BindColumn {
             num: num as _,
         })
     }
+
+    fn free(&self) {
+        from_raw_slice(self.is_null as *mut bool, self.num as _);
+
+        if !self.buffer.is_null() {
+            let ty = Ty::from(self.buffer_type as u8);
+            use Ty::*;
+            if matches!(
+                ty,
+                VarChar | NChar | Json | VarBinary | Geometry | Decimal | Decimal64 | Blob
+            ) && !self.length.is_null()
+            {
+                let lengths =
+                    unsafe { slice::from_raw_parts(self.length as *const _, self.num as _) };
+                let total: usize = lengths.iter().map(|&l| l as usize).sum();
+                from_raw_slice(self.buffer as *mut u8, total);
+            }
+        }
+
+        from_raw_slice(self.length, self.num as _);
+    }
 }
 
 impl<'a> From<&'a ColumnView> for Stmt2BindColumn {
@@ -319,24 +344,7 @@ impl<'a> From<&'a ColumnView> for Stmt2BindColumn {
 
 impl Drop for Stmt2BindColumn {
     fn drop(&mut self) {
-        from_raw_slice(self.is_null as *mut bool, self.num as _);
-
-        if !self.buffer.is_null() {
-            let ty = Ty::from(self.buffer_type as u8);
-            use Ty::*;
-            if matches!(
-                ty,
-                VarChar | NChar | Json | VarBinary | Geometry | Decimal | Decimal64 | Blob
-            ) && !self.length.is_null()
-            {
-                let lengths =
-                    unsafe { slice::from_raw_parts(self.length as *const _, self.num as _) };
-                let total: usize = lengths.iter().map(|&l| l as usize).sum();
-                from_raw_slice(self.buffer as *mut u8, total);
-            }
-        }
-
-        from_raw_slice(self.length, self.num as _);
+        self.free();
     }
 }
 
@@ -350,10 +358,8 @@ impl Stmt2Bindv {
     pub fn as_ptr(&self) -> *const TaosStmt2Bindv {
         &self.bindv as _
     }
-}
 
-impl Drop for Stmt2Bindv {
-    fn drop(&mut self) {
+    fn free(&self) {
         unsafe {
             let count = self.bindv.count as usize;
             let tbnames = self.bindv.tbnames;
@@ -377,6 +383,12 @@ impl Drop for Stmt2Bindv {
             from_raw_slice(tags, count);
             from_raw_slice(cols, count);
         }
+    }
+}
+
+impl Drop for Stmt2Bindv {
+    fn drop(&mut self) {
+        self.free();
     }
 }
 
