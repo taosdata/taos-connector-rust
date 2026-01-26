@@ -194,7 +194,7 @@ impl Stmt2BindColumn {
         Self::from_bytes(Ty::Json, values)
     }
 
-    fn from_varbinay(values: &[Option<impl AsRef<[u8]>>]) -> Self {
+    fn from_varbinary(values: &[Option<impl AsRef<[u8]>>]) -> Self {
         Self::from_bytes(Ty::VarBinary, values)
     }
 
@@ -333,7 +333,7 @@ impl<'a> From<&'a ColumnView> for Stmt2BindColumn {
             VarChar(view) => Self::from_varchar(&view.to_vec()),
             NChar(view) => Self::from_nchar(&view.to_vec()),
             Json(view) => Self::from_json(&view.to_vec()),
-            VarBinary(view) => Self::from_varbinay(&view.to_vec()),
+            VarBinary(view) => Self::from_varbinary(&view.to_vec()),
             Geometry(view) => Self::from_geometry(&view.to_vec()),
             Decimal(view) => Self::from_decimal(&view.to_vec()),
             Decimal64(view) => Self::from_decimal64(&view.to_vec()),
