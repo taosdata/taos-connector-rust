@@ -1,7 +1,7 @@
-use std::fmt::Debug;
 use std::mem::ManuallyDrop;
 use std::os::raw::*;
 use std::ptr;
+use std::{ffi::CString, fmt::Debug};
 
 mod field;
 use derive_more::Deref;
@@ -380,7 +380,7 @@ impl BindFrom for TaosBindV3 {
         let mut param = TaosMultiBind::new(Ty::Timestamp);
         param.buffer_length = std::mem::size_of::<i64>();
         param.buffer = box_into_raw(v) as _;
-        param.length = box_into_raw(param.buffer_length) as _;
+        param.length = box_into_raw(param.buffer_length as i32) as _;
         param.is_null = box_into_raw(0i8) as _;
         Self(param)
     }
@@ -389,23 +389,26 @@ impl BindFrom for TaosBindV3 {
         let mut param = TaosMultiBind::new(Ty::VarChar);
         param.buffer_length = v.len();
         param.buffer = v.as_ptr() as _;
-        param.length = box_into_raw(param.buffer_length) as _;
+        param.length = box_into_raw(param.buffer_length as i32) as _;
         param.is_null = box_into_raw(0i8) as _;
         Self(param)
     }
+
     fn from_json(v: &str) -> Self {
         let mut param = TaosMultiBind::new(Ty::Json);
+        let buffer = CString::new(v).expect("failed to build json tag");
         param.buffer_length = v.len();
-        param.buffer = v.as_ptr() as _;
-        param.length = box_into_raw(param.buffer_length) as _;
+        param.buffer = buffer.into_raw() as _;
+        param.length = box_into_raw(param.buffer_length as i32) as _;
         param.is_null = box_into_raw(0i8) as _;
         Self(param)
     }
+
     fn from_nchar(v: &str) -> Self {
         let mut param = TaosMultiBind::new(Ty::NChar);
         param.buffer_length = v.len();
         param.buffer = v.as_ptr() as _;
-        param.length = box_into_raw(param.buffer_length) as _;
+        param.length = box_into_raw(param.buffer_length as i32) as _;
         param.is_null = box_into_raw(0i8) as _;
         Self(param)
     }
@@ -414,6 +417,63 @@ impl BindFrom for TaosBindV3 {
 #[derive(Debug, Deref)]
 #[repr(transparent)]
 pub struct TaosBindV3(TaosMultiBind);
+
+impl TaosBindV3 {
+    fn free(&self) {
+        if !self.length.is_null() {
+            let _ = unsafe { Box::from_raw(self.length as *mut i32) };
+        }
+
+        if !self.buffer.is_null() {
+            let ty = Ty::from(self.buffer_type as u8);
+            match ty {
+                Ty::Bool => {
+                    let _ = unsafe { Box::from_raw(self.buffer as *mut bool) };
+                }
+                Ty::TinyInt => {
+                    let _ = unsafe { Box::from_raw(self.buffer as *mut i8) };
+                }
+                Ty::SmallInt => {
+                    let _ = unsafe { Box::from_raw(self.buffer as *mut i16) };
+                }
+                Ty::Int => {
+                    let _ = unsafe { Box::from_raw(self.buffer as *mut i32) };
+                }
+                Ty::BigInt | Ty::Timestamp => {
+                    let _ = unsafe { Box::from_raw(self.buffer as *mut i64) };
+                }
+                Ty::UTinyInt => {
+                    let _ = unsafe { Box::from_raw(self.buffer as *mut u8) };
+                }
+                Ty::USmallInt => {
+                    let _ = unsafe { Box::from_raw(self.buffer as *mut u16) };
+                }
+                Ty::UInt => {
+                    let _ = unsafe { Box::from_raw(self.buffer as *mut u32) };
+                }
+                Ty::UBigInt => {
+                    let _ = unsafe { Box::from_raw(self.buffer as *mut u64) };
+                }
+                Ty::Float => {
+                    let _ = unsafe { Box::from_raw(self.buffer as *mut f32) };
+                }
+                Ty::Double => {
+                    let _ = unsafe { Box::from_raw(self.buffer as *mut f64) };
+                }
+                Ty::Json => {
+                    let _ = unsafe { CString::from_raw(self.buffer as *mut c_char) };
+                }
+                _ => (),
+            }
+        }
+    }
+}
+
+impl Drop for TaosBindV3 {
+    fn drop(&mut self) {
+        self.free();
+    }
+}
 
 pub trait BindFrom: Sized {
     fn null() -> Self;
@@ -461,6 +521,7 @@ impl BindFrom for TaosBindV2 {
         null.is_null = Box::into_raw(v) as _;
         null
     }
+
     fn from_timestamp(v: i64) -> Self {
         let mut param = Self::new(Ty::Timestamp);
         param.buffer_length = std::mem::size_of::<i64>();
@@ -597,12 +658,13 @@ impl DropMultiBind {
 impl Drop for DropMultiBind {
     fn drop(&mut self) {
         let ty = Ty::from(self.0.buffer_type as u8);
-        if ty == Ty::VarChar || ty == Ty::NChar {
+        use Ty::*;
+        if matches!(ty, VarChar | NChar | Json | VarBinary | Geometry) {
             let len = self.0.buffer_length * self.0.num as usize;
-            unsafe { Vec::from_raw_parts(self.0.buffer as *mut u8, len, len as _) };
             unsafe {
-                Vec::from_raw_parts(self.0.length as *mut i32, self.0.num as _, self.0.num as _)
-            };
+                Vec::from_raw_parts(self.0.buffer as *mut u8, len, len as _);
+                Vec::from_raw_parts(self.0.length as *mut i32, self.0.num as _, self.0.num as _);
+            }
         }
     }
 }
