@@ -1358,12 +1358,13 @@ impl RawTaos {
 
         tracing::trace!("sml total rows: {}", total_rows);
         match res {
-            Ok(_) => {
+            Ok(mut raw_res) => {
                 tracing::trace!("sml insert success");
+                raw_res.free_result();
                 Ok(())
             }
             Err(e) => {
-                tracing::trace!("sml insert failed: {:?}", e);
+                tracing::trace!("sml insert failed: {e:?}");
                 Err(e)
             }
         }
