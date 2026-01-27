@@ -415,7 +415,9 @@ impl taos_query::TBuilder for TaosBuilder {
             "configDir",
             "libraryPath",
             "maxRetries",
+            "totpCode",
             "totp_code",
+            "bearerToken",
             "bearer_token",
         ];
         PARAMS
