@@ -1535,6 +1535,7 @@ mod tests {
             let opts = make_options(&[(IP, "localhost"), (PORT, "6041"), (COMPRESSION, "1")]);
             let taos = taos_connect_with(&opts as *const _);
             assert!(!taos.is_null());
+            taos_close(taos);
             free_options(&opts);
         }
 
@@ -1542,6 +1543,7 @@ mod tests {
             let opts = make_options(&[(IP, "localhost"), (PORT, "6041"), (COMPRESSION, "0")]);
             let taos = taos_connect_with(&opts as *const _);
             assert!(!taos.is_null());
+            taos_close(taos);
             free_options(&opts);
         }
     }
@@ -1781,6 +1783,7 @@ mod tests {
 
             let taos = taos_connect_with(&opts as *const _);
             assert!(!taos.is_null());
+            taos_close(taos);
 
             free_options(&opts);
         }

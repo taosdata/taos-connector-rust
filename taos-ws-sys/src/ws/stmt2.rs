@@ -1936,6 +1936,7 @@ mod tests {
             );
 
             taos_free_result(res);
+            assert_eq!(taos_stmt2_close(stmt2), 0);
             test_exec(taos, "drop database test_1753168041");
             taos_close(taos);
         }
@@ -2290,7 +2291,9 @@ mod tests {
                 assert_eq!(affected_rows, 10);
             }
 
+            assert_eq!(taos_stmt2_close(stmt2), 0);
             test_exec(taos, "drop database if exists test_1760167825");
+            taos_close(taos);
         }
 
         Ok(())
