@@ -146,8 +146,7 @@ impl Future for ExecFuture<'_, '_> {
 }
 
 impl<'f, 'a> ExecFuture<'f, 'a> {
-    /// Create a new `TimerFuture` which will complete after the provided
-    /// timeout.
+    /// Create a new `TimerFuture` which will complete after the provided timeout.
     pub fn new<T: IntoCStr<'a>>(taos: &'f RawTaos, sql: T) -> Self {
         let state = Rc::new(State::new(taos.c.clone()));
         let sql = sql.into_c_str();

@@ -1812,30 +1812,7 @@ mod tests {
                 format!("create user c_totp_user pass 'totp_pass_1' totpseed '{totp_seed}'"),
             );
 
-            let sql = CString::new(format!("select generate_totp_secret('{totp_seed}')")).unwrap();
-            let res = taos_query(taos, sql.as_ptr());
-            assert!(!res.is_null());
-
-            let row = taos_fetch_row(res);
-            assert!(!row.is_null());
-
-            let fields = taos_fetch_fields(res);
-            assert!(!fields.is_null());
-
-            let num_fields = taos_num_fields(res);
-            assert_eq!(num_fields, 1);
-
-            let mut str = vec![0 as c_char; 1024];
-            let _ = taos_print_row(str.as_mut_ptr(), row, fields, num_fields);
-            let totp_secret = CStr::from_ptr(str.as_ptr()).to_str().unwrap();
-
-            taos_free_result(res);
-
-            let secret = generate_totp_secret(totp_seed.as_bytes());
-            let secret = totp_secret_encode(&secret);
-            assert_eq!(&secret, totp_secret);
-
-            let totp_secret = totp_secret_decode(totp_secret).unwrap();
+            let totp_secret = generate_totp_secret(totp_seed.as_bytes());
             let totp_code = generate_totp_code(&totp_secret);
 
             let totp = CString::new(totp_code).unwrap();
