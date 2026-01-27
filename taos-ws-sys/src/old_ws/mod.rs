@@ -1796,7 +1796,6 @@ mod tests {
 
             let sql = b"show x\0" as *const u8 as _;
             let rs = ws_query(taos, sql);
-
             let code = ws_errno(rs);
             let err = CStr::from_ptr(ws_errstr(rs) as _);
             // Incomplete SQL statement
@@ -1807,6 +1806,7 @@ mod tests {
                 .match_indices("Incomplete SQL statement")
                 .next()
                 .is_some());
+            assert_eq!(ws_free_result(rs), 0);
 
             assert_eq!(ws_close(taos), 0);
         }
@@ -1821,16 +1821,18 @@ mod tests {
 
             let sql = b"show databases\0" as *const u8 as _;
             let rs = ws_query(taos, sql);
-
             let code = ws_errno(rs);
             assert!(code == 0);
             assert!(!ws_is_update_query(rs));
+            assert_eq!(ws_free_result(rs), 0);
 
             let sql = b"create database if not exists ws_is_update\0" as *const u8 as _;
             let rs = ws_query(taos, sql);
             let code = ws_errno(rs);
             assert!(code == 0);
             assert!(ws_is_update_query(rs));
+            assert_eq!(ws_free_result(rs), 0);
+
             assert_eq!(ws_close(taos), 0);
         }
     }

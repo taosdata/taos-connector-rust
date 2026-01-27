@@ -932,9 +932,9 @@ mod tests {
             ws_stmt_execute(stmt, &mut rows);
             assert_eq!(rows, 2);
 
-            assert_eq!(rows, 2);
             ws_stmt_close(stmt);
             query!(b"drop database ws_stmt_i\0");
+            assert_eq!(ws_close(taos), 0);
         }
     }
 
@@ -999,9 +999,8 @@ mod tests {
             ws_stmt_execute(stmt, &mut rows);
             assert_eq!(rows, 2);
 
-            assert_eq!(rows, 2);
             ws_stmt_close(stmt);
-            // query!(b"drop database ws_stmt_i\0");
+            assert_eq!(ws_close(taos), 0);
         }
     }
 
@@ -1106,7 +1105,7 @@ mod tests {
             }
 
             ws_stmt_close(stmt);
-            // query!(b"drop database ws_stmt_i_null\0");
+            assert_eq!(ws_close(taos), 0);
         }
     }
 
@@ -1166,12 +1165,10 @@ mod tests {
             ws_stmt_add_batch(stmt);
             let mut rows = 0;
             ws_stmt_execute(stmt, &mut rows);
-
             assert_eq!(rows, 2);
+
             ws_stmt_close(stmt);
-
             execute!(b"drop database if exists ws_stmt_with_tags\0");
-
             ws_close(taos);
         }
     }
@@ -1232,14 +1229,12 @@ mod tests {
             ws_stmt_add_batch(stmt);
             let mut rows = 0;
             ws_stmt_execute(stmt, &mut rows);
-
             assert_eq!(rows, 2);
 
             let affected_rows_once = ws_stmt_affected_rows_once(stmt);
-
             assert_eq!(affected_rows_once, 2);
-            let affected_rows = ws_stmt_affected_rows(stmt);
 
+            let affected_rows = ws_stmt_affected_rows(stmt);
             assert_eq!(affected_rows, 2);
 
             // add batch again, affected_rows_once should be 2, affected_rows should be 4
@@ -1285,21 +1280,15 @@ mod tests {
             ws_stmt_add_batch(stmt);
             let mut rows = 0;
             ws_stmt_execute(stmt, &mut rows);
-
             assert_eq!(rows, 2);
 
             let affected_rows_once = ws_stmt_affected_rows_once(stmt);
-
             assert_eq!(affected_rows_once, 2);
 
             let affected_rows = ws_stmt_affected_rows(stmt);
-
             assert_eq!(affected_rows, 6);
 
             ws_stmt_close(stmt);
-
-            // execute!(format!("drop database if exists {db}"));
-
             ws_close(taos);
         }
     }
@@ -1359,12 +1348,10 @@ mod tests {
             ws_stmt_add_batch(stmt);
             let mut rows = 0;
             ws_stmt_execute(stmt, &mut rows);
-
             assert_eq!(rows, 2);
+
             ws_stmt_close(stmt);
-
             execute!(b"drop database if exists ws_stmt_with_sub_table\0");
-
             ws_close(taos);
         }
     }
@@ -1524,7 +1511,6 @@ mod tests {
             }
 
             ws_stmt_close(stmt);
-
             ws_close(taos);
         }
     }
@@ -1562,7 +1548,6 @@ mod tests {
             let db = "ws_stmt_num_params";
 
             exec_string!(format!("drop database if exists {db}"));
-
             exec_string!(format!("create database {db} keep 36500"));
             exec_string!(format!(
                 "create table {db}.s1 (ts timestamp, v int, b binary(100)) tags(jt json)"
@@ -1597,10 +1582,8 @@ mod tests {
             ws_stmt_add_batch(stmt);
             let mut rows = 0;
             ws_stmt_execute(stmt, &mut rows);
-
             assert_eq!(rows, 2);
 
-            // get num_params
             let mut num_params = 0;
             let code = ws_stmt_num_params(stmt, &mut num_params);
             if code != 0 {
@@ -1612,9 +1595,7 @@ mod tests {
                 tracing::debug!("num_params: {}", num_params);
             }
 
-            // for each param
             for i in 0..num_params {
-                // get param
                 let mut r#type = 0;
                 let mut bytes = 0;
                 let code = ws_stmt_get_param(stmt, i, &mut r#type, &mut bytes);
@@ -1629,7 +1610,6 @@ mod tests {
             }
 
             ws_stmt_close(stmt);
-
             ws_close(taos);
         }
     }
@@ -1755,7 +1735,6 @@ mod tests {
 
             let mut rows = 0;
             ws_stmt_execute(stmt, &mut rows);
-
             assert_eq!(rows, 2);
 
             // get stmt tag fields
@@ -1791,7 +1770,6 @@ mod tests {
             }
 
             ws_stmt_close(stmt);
-
             ws_close(taos);
         }
     }
