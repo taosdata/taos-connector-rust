@@ -80,7 +80,6 @@ pub(super) mod tmq {
 
         pub fn subscription(&self) -> Topics {
             let tl = Topics::new(self.tmq_api.list_api);
-
             unsafe { (self.tmq_api.tmq_subscription)(self.as_ptr(), &mut tl.as_ptr()) }
                 .ok_or("get topic list failed")
                 .expect("get topic should always success");
@@ -221,29 +220,30 @@ pub(super) mod tmq {
         }
 
         pub fn get_topic_assignment(&self, topic_name: &str) -> Vec<Assignment> {
-            let pt: *mut *mut Assignment = Box::into_raw(Box::new(std::ptr::null_mut()));
             if let Some(tmq_get_topic_assignment) = self.tmq_api.tmq_get_topic_assignment {
                 let mut num: i32 = 0;
+                let mut pt: *mut Assignment = std::ptr::null_mut();
 
                 let tmq_resp = unsafe {
                     tmq_get_topic_assignment(
                         self.as_ptr(),
                         topic_name.into_c_str().as_ptr(),
-                        pt,
+                        &mut pt,
                         &mut num,
                     )
                 };
 
-                if tmq_resp.is_err() || num == 0 {
+                if tmq_resp.is_err() || num == 0 || pt.is_null() {
                     return vec![];
                 }
-                let vec = unsafe { std::slice::from_raw_parts(*pt, num as usize).to_vec() };
+
+                let assignments = unsafe { std::slice::from_raw_parts(pt, num as usize).to_vec() };
                 unsafe {
                     self.tmq_api
                         .tmq_free_assignment
-                        .expect("tmq_free_assignment not found")(*pt);
+                        .expect("tmq_free_assignment not found")(pt);
                 };
-                vec
+                assignments
             } else {
                 vec![]
             }
@@ -671,10 +671,6 @@ pub(super) mod list {
                 ptr: unsafe { api.new_list() },
             }
         }
-
-        // pub(crate) fn append<'a>(&mut self, c_str: impl IntoCStr<'a>) -> Result<()> {
-        //     self.api.append(self.as_ptr(), c_str)
-        // }
 
         pub(crate) fn from_topics<'a, T: IntoCStr<'a>>(
             api: TmqListApi,
