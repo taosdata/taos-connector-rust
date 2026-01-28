@@ -1572,7 +1572,6 @@ pub unsafe extern "C" fn ws_get_current_db(
     }
 
     let rs = ws_query(taos, b"SELECT DATABASE()\0" as *const u8 as _);
-
     if rs.is_null() {
         return set_error_and_get_code(WsError::new(Code::FAILED, "query failed"));
     }
@@ -1580,26 +1579,34 @@ pub unsafe extern "C" fn ws_get_current_db(
     let mut block: *const c_void = std::ptr::null();
     let mut rows = 0;
     let mut code = ws_fetch_raw_block(rs, &mut block, &mut rows);
-
     if code != 0 {
+        ws_free_result(rs);
         return code;
     }
 
     let mut ty: Ty = Ty::Null;
     let mut len_actual = 0u32;
     let res = ws_get_value_in_block(rs, 0, 0, &mut ty as *mut Ty as _, &mut len_actual);
-
     if res.is_null() {
+        ws_free_result(rs);
         return set_error_and_get_code(WsError::new(Code::FAILED, "get value failed"));
     }
 
-    if len_actual < len as u32 {
-        std::ptr::copy_nonoverlapping(res as _, database, len_actual as usize);
+    let copy_len = if len_actual + 1 <= len as u32 {
+        len_actual as usize
     } else {
-        std::ptr::copy_nonoverlapping(res as _, database, len as usize);
+        (len - 1) as usize
+    };
+
+    std::ptr::copy_nonoverlapping(res as _, database, copy_len);
+    *database.add(copy_len) = 0;
+
+    if len as u32 <= len_actual {
         *required = len_actual as _;
         code = -1;
     }
+
+    ws_free_result(rs);
 
     code
 }
@@ -2377,10 +2384,7 @@ mod tests {
             assert_eq!(required, 17);
 
             let database = CStr::from_ptr(database as _);
-            assert_eq!(
-                database,
-                CStr::from_bytes_with_nul(b"ws_get_cur\0").unwrap()
-            );
+            assert_eq!(database, CStr::from_bytes_with_nul(b"ws_get_cu\0").unwrap());
 
             let mut database_buffer = vec![0; 128];
             let database = database_buffer.as_mut_ptr();
