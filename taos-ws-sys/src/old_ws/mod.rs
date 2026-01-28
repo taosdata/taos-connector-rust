@@ -2645,6 +2645,8 @@ mod cloud_tests {
 
             let version = ws_get_server_info(taos);
             tracing::info!("Server version: {:?}", CStr::from_ptr(version as _));
+
+            assert_eq!(ws_close(taos), 0);
         }
 
         Ok(())
