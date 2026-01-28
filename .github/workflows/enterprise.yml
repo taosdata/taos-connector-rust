@@ -92,6 +92,17 @@ jobs:
             --features ws-rustls-ring-crypto-provider,test-new-feat,test-tls,test-enterprise \
             --lcov --output-path lcov.info --no-fail-fast
 
+      - name: Asan
+        env:
+          TDENGINE_CLOUD_URL: ${{ secrets.TDENGINE_CLOUD_URL }}
+          TDENGINE_CLOUD_TOKEN: ${{ secrets.TDENGINE_CLOUD_TOKEN }}
+        run: |
+          sed -i 's/crate-type = \["cdylib", "staticlib"\]/crate-type = ["rlib"]/' taos-ws-sys/Cargo.toml
+          RUST_BACKTRACE=1 RUSTFLAGS="-Zsanitizer=address -C linker=clang" \
+          cargo +nightly nextest run -j 4 --workspace -Z build-std --target x86_64-unknown-linux-gnu \
+          --features ws-rustls-ring-crypto-provider,test-new-feat,test-tls,test-enterprise \
+          --no-fail-fast
+
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
         with:
