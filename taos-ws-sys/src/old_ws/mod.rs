@@ -1592,14 +1592,18 @@ pub unsafe extern "C" fn ws_get_current_db(
         return set_error_and_get_code(WsError::new(Code::FAILED, "get value failed"));
     }
 
-    let copy_len = if len_actual < len as u32 {
+    let copy_len = if len <= 0 {
+        0
+    } else if len_actual < len as u32 {
         len_actual as usize
     } else {
         (len - 1) as usize
     };
 
     std::ptr::copy_nonoverlapping(res as _, database, copy_len);
-    *database.add(copy_len) = 0;
+    if copy_len > 0 {
+        *database.add(copy_len) = 0;
+    }
 
     if len as u32 <= len_actual {
         *required = len_actual as _;
