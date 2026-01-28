@@ -1592,7 +1592,7 @@ pub unsafe extern "C" fn ws_get_current_db(
         return set_error_and_get_code(WsError::new(Code::FAILED, "get value failed"));
     }
 
-    let copy_len = if len_actual + 1 <= len as u32 {
+    let copy_len = if len_actual < len as u32 {
         len_actual as usize
     } else {
         (len - 1) as usize
