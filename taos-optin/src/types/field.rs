@@ -14,6 +14,7 @@ impl CFieldV2 {
     pub fn name(&self) -> &CStr {
         unsafe { CStr::from_ptr(self.name.as_ptr() as _) }
     }
+
     pub fn type_(&self) -> Ty {
         self.type_.into()
     }
@@ -49,6 +50,7 @@ impl CFieldV3 {
     pub fn name(&self) -> &CStr {
         unsafe { CStr::from_ptr(self.name.as_ptr() as _) }
     }
+
     pub fn type_(&self) -> Ty {
         self.type_.into()
     }

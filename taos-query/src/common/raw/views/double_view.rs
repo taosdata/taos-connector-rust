@@ -32,6 +32,7 @@ impl std::ops::Add for View {
         &self + &rhs
     }
 }
+
 impl std::ops::Add for &View {
     type Output = View;
 

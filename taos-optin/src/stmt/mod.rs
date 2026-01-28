@@ -12,7 +12,6 @@ use crate::types::*;
 use crate::{err_or, RawRes, RawTaos, ResultSet};
 
 mod bind;
-mod multi;
 
 #[derive(Debug)]
 pub struct Stmt {
@@ -299,7 +298,6 @@ impl RawStmt {
 
 #[cfg(test)]
 mod tests {
-
     use bytes::Bytes;
     use taos_query::util::hex::*;
 
