@@ -306,13 +306,13 @@ mod tests {
     #[test]
     fn test_tbname_tags() -> anyhow::Result<()> {
         use taos_query::prelude::sync::*;
+
         let builder = TaosBuilder::from_dsn("taos:///")?;
         let taos = builder.build()?;
         taos.query("drop database if exists stt1")?;
         taos.query("create database if not exists stt1 keep 36500")?;
         taos.query("use stt1")?;
         taos.query(
-            // "create stable if not exists st1(ts timestamp, v int) tags(jt json)"
             "create stable if not exists st1(ts timestamp, v int) tags(jt int, t1 varchar(32))",
         )?;
 
@@ -320,7 +320,6 @@ mod tests {
         let sql = "insert into ? using st1 tags(?, ?) values(?, ?)";
         stmt.prepare(sql)?;
 
-        // let tags = vec![TaosBind::from_json(r#"{"name":"value"}"#)];
         let tbname = "tb1";
         stmt.set_tbname(tbname)?;
 
@@ -352,6 +351,84 @@ mod tests {
     }
 
     #[test]
+    fn test_stmt_tags() -> anyhow::Result<()> {
+        use taos_query::common::Timestamp;
+        use taos_query::prelude::sync::*;
+
+        let taos = TaosBuilder::from_dsn("taos:///")?.build()?;
+        taos.exec_many([
+            "drop database if exists test_1769583738",
+            "create database test_1769583738",
+            "use test_1769583738",
+            "create stable s0 (ts timestamp, c1 int) tags (t1 timestamp, t2 bool, t3 tinyint, \
+                t4 smallint, t5 int, t6 bigint, t7 tinyint unsigned, t8 smallint unsigned, \
+                t9 int unsigned, t10 bigint unsigned, t11 float, t12 double, t13 varchar(20), \
+                t14 nchar(20))",
+        ])?;
+
+        let mut stmt = Stmt::init(&taos)?;
+        stmt.prepare(
+            "insert into ? using s0 tags(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) values(?, ?)",
+        )?;
+        stmt.set_tbname("t0")?;
+
+        let tags = vec![
+            Value::Timestamp(Timestamp::new(1726803356466, Precision::Millisecond)),
+            Value::Bool(true),
+            Value::TinyInt(1),
+            Value::SmallInt(1),
+            Value::Int(1),
+            Value::BigInt(1),
+            Value::UTinyInt(1),
+            Value::USmallInt(1),
+            Value::UInt(1),
+            Value::UBigInt(1),
+            Value::Float(1.1),
+            Value::Double(1.1),
+            Value::VarChar("hello".to_string()),
+            Value::NChar("hello".to_string()),
+        ];
+        stmt.set_tags(&tags)?;
+
+        let params = vec![
+            ColumnView::from_millis_timestamp(vec![1726803356466]),
+            ColumnView::from_ints(vec![1]),
+        ];
+        let affected_rows = stmt.bind(&params)?.add_batch()?.execute()?;
+        assert_eq!(affected_rows, 1);
+
+        #[derive(Debug, serde::Deserialize)]
+        struct Tag {
+            tag_value: String,
+        }
+
+        let tags: Vec<Tag> = taos
+            .query("show tags from t0")?
+            .deserialize()
+            .try_collect()?;
+
+        assert_eq!(tags.len(), 14);
+        assert_eq!(tags[0].tag_value, "1726803356466".to_string());
+        assert_eq!(tags[1].tag_value, "true".to_string());
+        assert_eq!(tags[2].tag_value, "1".to_string());
+        assert_eq!(tags[3].tag_value, "1".to_string());
+        assert_eq!(tags[4].tag_value, "1".to_string());
+        assert_eq!(tags[5].tag_value, "1".to_string());
+        assert_eq!(tags[6].tag_value, "1".to_string());
+        assert_eq!(tags[7].tag_value, "1".to_string());
+        assert_eq!(tags[8].tag_value, "1".to_string());
+        assert_eq!(tags[9].tag_value, "1".to_string());
+        assert_eq!(tags[10].tag_value, "1.10000".to_string());
+        assert_eq!(tags[11].tag_value, "1.100000000".to_string());
+        assert_eq!(tags[12].tag_value, "hello".to_string());
+        assert_eq!(tags[13].tag_value, "hello".to_string());
+
+        taos.exec("drop database if exists test_1769583738")?;
+
+        Ok(())
+    }
+
+    #[test]
     fn test_tbname_tags_json() -> anyhow::Result<()> {
         use taos_query::prelude::sync::*;
         let builder = TaosBuilder::from_dsn("taos:///")?;
@@ -368,18 +445,13 @@ mod tests {
         stmt.prepare(sql)?;
 
         let tags = vec![Value::Json(serde_json::from_str(r#"{"name":"value"}"#)?)];
-        // let tags = vec![TaosBind::from(&0i32), TaosBind::from(&0.0f32)];
         println!("tags: {tags:#?}");
         let tbname = "tb1";
         stmt.set_tbname(tbname)?;
 
         stmt.set_tags(&tags)?;
-        // stmt.set_tbname_tags_v3(&tbname, &tags)?;
         println!("bind");
 
-        // todo: get_param not implemented in taosc 3.0
-        // let p = stmt.get_param(0)?;
-        // dbg!(p);
         let params = vec![
             ColumnView::from_millis_timestamp(vec![0]),
             ColumnView::from_ints(vec![0]),

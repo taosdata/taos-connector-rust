@@ -632,7 +632,6 @@ impl<'b> From<&'b ColumnView> for DropMultiBind {
                 let nulls: Vec<_> = view.is_null_iter().collect();
                 DropMultiBind::new(TaosMultiBind::from_primitives_ptr(nulls, view.as_raw_ptr()))
             }
-            VarChar(view) => DropMultiBind::new(TaosMultiBind::from_binary_vec(&view.to_vec())),
             Timestamp(view) => {
                 let nulls: Vec<_> = view.is_null_iter().collect();
                 DropMultiBind::new(TaosMultiBind::from_raw_timestamps_ptr(
@@ -640,7 +639,6 @@ impl<'b> From<&'b ColumnView> for DropMultiBind {
                     view.as_raw_ptr(),
                 ))
             }
-            NChar(view) => DropMultiBind::new(TaosMultiBind::from_string_vec(&view.to_vec())),
             UTinyInt(view) => {
                 let nulls: Vec<_> = view.is_null_iter().collect();
                 DropMultiBind::new(TaosMultiBind::from_primitives_ptr(nulls, view.as_raw_ptr()))
@@ -657,11 +655,13 @@ impl<'b> From<&'b ColumnView> for DropMultiBind {
                 let nulls: Vec<_> = view.is_null_iter().collect();
                 DropMultiBind::new(TaosMultiBind::from_primitives_ptr(nulls, view.as_raw_ptr()))
             }
+            VarChar(view) => DropMultiBind::new(TaosMultiBind::from_binary_vec(&view.to_vec())),
+            NChar(view) => DropMultiBind::new(TaosMultiBind::from_string_vec(&view.to_vec())),
             Json(view) => DropMultiBind::new(TaosMultiBind::from_json(&view.to_vec())),
             VarBinary(view) => DropMultiBind::new(TaosMultiBind::from_bytes(&view.to_vec())),
             Geometry(view) => DropMultiBind::new(TaosMultiBind::from_geobytes(&view.to_vec())),
-            Decimal(_) | Decimal64(_) => unimplemented!("decimal type is not supported in stmt"),
-            Blob(_) => unimplemented!("blob type is not supported in stmt"),
+            Decimal(_) | Decimal64(_) => unreachable!("decimal type is not supported in stmt"),
+            Blob(_) => unreachable!("blob type is not supported in stmt"),
         }
     }
 }
@@ -681,7 +681,7 @@ impl Drop for DropMultiBind {
         if matches!(ty, VarChar | NChar | Json | VarBinary | Geometry) {
             let len = self.0.buffer_length * self.0.num as usize;
             unsafe {
-                Vec::from_raw_parts(self.0.buffer as *mut u8, len, len as _);
+                Vec::from_raw_parts(self.0.buffer as *mut u8, len, len);
                 Vec::from_raw_parts(self.0.length as *mut i32, self.0.num as _, self.0.num as _);
             }
         }
