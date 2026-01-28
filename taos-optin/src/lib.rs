@@ -492,7 +492,8 @@ impl taos_query::TBuilder for TaosBuilder {
     }
 
     fn ping(&self, conn: &mut Self::Target) -> RawResult<()> {
-        conn.raw.query("select server_version()")?;
+        let mut res = conn.raw.query("select server_version()")?;
+        res.free_result();
         Ok(())
     }
 
