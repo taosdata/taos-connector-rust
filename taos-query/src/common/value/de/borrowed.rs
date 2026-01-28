@@ -436,8 +436,6 @@ impl<'de> serde::de::IntoDeserializer<'de, Error> for BorrowedValue<'de> {
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
-
     use super::*;
 
     #[test]
@@ -521,6 +519,7 @@ mod tests {
             VarChar("你好，世界"), "你好，世界"
         };
     }
+
     #[test]
     fn de_string() {
         use serde_json::json;

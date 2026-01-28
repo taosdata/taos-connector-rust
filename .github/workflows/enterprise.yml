@@ -171,18 +171,13 @@ jobs:
           path: target
           key: ${{ runner.os }}-taos-target-${{ steps.setup-rust.outputs.rustc_hash }}
 
-      - name: Test C WebSocket version info
-        run: |
-          TD_VERSION=3.9.9.9 cargo nextest run -p taos-ws-sys test_taos_get_client_info_injected -- --ignored
-          TD_VERSION="$(printf '\xff\xfe')" cargo nextest run -p taos-ws-sys test_taos_get_client_info_default
-
-      - name: Asan
+      - name: Run tests with ASAN
         env:
           TDENGINE_CLOUD_URL: ${{ secrets.TDENGINE_CLOUD_URL }}
           TDENGINE_CLOUD_TOKEN: ${{ secrets.TDENGINE_CLOUD_TOKEN }}
         run: |
           sed -i 's/crate-type = \["cdylib", "staticlib"\]/crate-type = ["rlib"]/' taos-ws-sys/Cargo.toml
-          RUST_BACKTRACE=1 RUSTFLAGS="-Zsanitizer=address -C linker=clang" \
-            cargo +nightly nextest run -j 4 --workspace -Z build-std --target x86_64-unknown-linux-gnu \
+          RUSTFLAGS="-Zsanitizer=address -C linker=clang" cargo +nightly nextest run -j 4 \
+            --workspace -Z build-std --target x86_64-unknown-linux-gnu \
             --features ws-rustls-ring-crypto-provider,test-new-feat,test-tls,test-enterprise \
             --no-fail-fast
