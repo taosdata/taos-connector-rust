@@ -2,9 +2,10 @@
 name = "taos-log"
 version = "0.1.0"
 edition = "2021"
+license.workspace = true
 
 [dependencies]
-tracing = { version = "*", default-features = false }
+tracing = { version = "0.1", default-features = false }
 tracing-subscriber = { version = "0.3.20", default-features = false, features = [
     "fmt",
     "std",
@@ -25,8 +26,8 @@ crossbeam = "0.8.4"
 log = "0.4.22"
 rand = "0.8.5"
 tempfile = "3.21.0"
-tokio = { version = "*", features = ["full"] }
-tracing = { version = "*", features = ["log"] }
+tokio = { version = "1", features = ["full"] }
+tracing = { version = "0.1", features = ["log"] }
 tracing-log = "0.2.0"
 
 [features]
