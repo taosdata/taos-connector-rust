@@ -389,8 +389,6 @@ impl<'de, 'b: 'de> serde::de::IntoDeserializer<'de, Error> for &'b Value {
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
-
     use super::*;
 
     #[test]

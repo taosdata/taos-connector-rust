@@ -1,7 +1,7 @@
-use std::fmt::Debug;
 use std::mem::ManuallyDrop;
 use std::os::raw::*;
 use std::ptr;
+use std::{ffi::CString, fmt::Debug};
 
 mod field;
 use bytes::Bytes;
@@ -392,7 +392,7 @@ impl BindFrom for TaosBindV3 {
         let mut param = TaosMultiBind::new(Ty::Timestamp);
         param.buffer_length = std::mem::size_of::<i64>();
         param.buffer = box_into_raw(v) as _;
-        param.length = box_into_raw(param.buffer_length) as _;
+        param.length = box_into_raw(param.buffer_length as i32) as _;
         param.is_null = box_into_raw(0i8) as _;
         Self(param)
     }
@@ -401,16 +401,17 @@ impl BindFrom for TaosBindV3 {
         let mut param = TaosMultiBind::new(Ty::VarChar);
         param.buffer_length = v.len();
         param.buffer = v.as_ptr() as _;
-        param.length = box_into_raw(param.buffer_length) as _;
+        param.length = box_into_raw(param.buffer_length as i32) as _;
         param.is_null = box_into_raw(0i8) as _;
         Self(param)
     }
 
     fn from_json(v: &str) -> Self {
         let mut param = TaosMultiBind::new(Ty::Json);
+        let buffer = CString::new(v).expect("failed to build json tag");
         param.buffer_length = v.len();
-        param.buffer = v.as_ptr() as _;
-        param.length = box_into_raw(param.buffer_length) as _;
+        param.buffer = buffer.into_raw() as _;
+        param.length = box_into_raw(param.buffer_length as i32) as _;
         param.is_null = box_into_raw(0i8) as _;
         Self(param)
     }
@@ -419,7 +420,7 @@ impl BindFrom for TaosBindV3 {
         let mut param = TaosMultiBind::new(Ty::NChar);
         param.buffer_length = v.len();
         param.buffer = v.as_ptr() as _;
-        param.length = box_into_raw(param.buffer_length) as _;
+        param.length = box_into_raw(param.buffer_length as i32) as _;
         param.is_null = box_into_raw(0i8) as _;
         Self(param)
     }
@@ -436,6 +437,63 @@ impl BindFrom for TaosBindV3 {
 #[derive(Debug, Deref)]
 #[repr(transparent)]
 pub struct TaosBindV3(TaosMultiBind);
+
+impl TaosBindV3 {
+    fn free(&self) {
+        if !self.length.is_null() {
+            let _ = unsafe { Box::from_raw(self.length as *mut i32) };
+        }
+
+        if !self.buffer.is_null() {
+            let ty = Ty::from(self.buffer_type as u8);
+            match ty {
+                Ty::Bool => {
+                    let _ = unsafe { Box::from_raw(self.buffer as *mut bool) };
+                }
+                Ty::TinyInt => {
+                    let _ = unsafe { Box::from_raw(self.buffer as *mut i8) };
+                }
+                Ty::SmallInt => {
+                    let _ = unsafe { Box::from_raw(self.buffer as *mut i16) };
+                }
+                Ty::Int => {
+                    let _ = unsafe { Box::from_raw(self.buffer as *mut i32) };
+                }
+                Ty::BigInt | Ty::Timestamp => {
+                    let _ = unsafe { Box::from_raw(self.buffer as *mut i64) };
+                }
+                Ty::UTinyInt => {
+                    let _ = unsafe { Box::from_raw(self.buffer as *mut u8) };
+                }
+                Ty::USmallInt => {
+                    let _ = unsafe { Box::from_raw(self.buffer as *mut u16) };
+                }
+                Ty::UInt => {
+                    let _ = unsafe { Box::from_raw(self.buffer as *mut u32) };
+                }
+                Ty::UBigInt => {
+                    let _ = unsafe { Box::from_raw(self.buffer as *mut u64) };
+                }
+                Ty::Float => {
+                    let _ = unsafe { Box::from_raw(self.buffer as *mut f32) };
+                }
+                Ty::Double => {
+                    let _ = unsafe { Box::from_raw(self.buffer as *mut f64) };
+                }
+                Ty::Json => {
+                    let _ = unsafe { CString::from_raw(self.buffer as *mut c_char) };
+                }
+                _ => (),
+            }
+        }
+    }
+}
+
+impl Drop for TaosBindV3 {
+    fn drop(&mut self) {
+        self.free();
+    }
+}
 
 pub trait BindFrom: Sized {
     fn null() -> Self;
@@ -574,7 +632,6 @@ impl<'b> From<&'b ColumnView> for DropMultiBind {
                 let nulls: Vec<_> = view.is_null_iter().collect();
                 DropMultiBind::new(TaosMultiBind::from_primitives_ptr(nulls, view.as_raw_ptr()))
             }
-            VarChar(view) => DropMultiBind::new(TaosMultiBind::from_binary_vec(&view.to_vec())),
             Timestamp(view) => {
                 let nulls: Vec<_> = view.is_null_iter().collect();
                 DropMultiBind::new(TaosMultiBind::from_raw_timestamps_ptr(
@@ -582,7 +639,6 @@ impl<'b> From<&'b ColumnView> for DropMultiBind {
                     view.as_raw_ptr(),
                 ))
             }
-            NChar(view) => DropMultiBind::new(TaosMultiBind::from_string_vec(&view.to_vec())),
             UTinyInt(view) => {
                 let nulls: Vec<_> = view.is_null_iter().collect();
                 DropMultiBind::new(TaosMultiBind::from_primitives_ptr(nulls, view.as_raw_ptr()))
@@ -599,11 +655,13 @@ impl<'b> From<&'b ColumnView> for DropMultiBind {
                 let nulls: Vec<_> = view.is_null_iter().collect();
                 DropMultiBind::new(TaosMultiBind::from_primitives_ptr(nulls, view.as_raw_ptr()))
             }
+            VarChar(view) => DropMultiBind::new(TaosMultiBind::from_binary_vec(&view.to_vec())),
+            NChar(view) => DropMultiBind::new(TaosMultiBind::from_string_vec(&view.to_vec())),
             Json(view) => DropMultiBind::new(TaosMultiBind::from_json(&view.to_vec())),
             VarBinary(view) => DropMultiBind::new(TaosMultiBind::from_bytes(&view.to_vec())),
             Geometry(view) => DropMultiBind::new(TaosMultiBind::from_geobytes(&view.to_vec())),
-            Decimal(_) | Decimal64(_) => unimplemented!("decimal type is not supported in stmt"),
-            Blob(_) => unimplemented!("blob type is not supported in stmt"),
+            Decimal(_) | Decimal64(_) => unreachable!("decimal type is not supported in stmt"),
+            Blob(_) => unreachable!("blob type is not supported in stmt"),
         }
     }
 }
@@ -619,12 +677,13 @@ impl DropMultiBind {
 impl Drop for DropMultiBind {
     fn drop(&mut self) {
         let ty = Ty::from(self.0.buffer_type as u8);
-        if ty == Ty::VarChar || ty == Ty::NChar {
+        use Ty::*;
+        if matches!(ty, VarChar | NChar | Json | VarBinary | Geometry) {
             let len = self.0.buffer_length * self.0.num as usize;
-            unsafe { Vec::from_raw_parts(self.0.buffer as *mut u8, len, len as _) };
             unsafe {
-                Vec::from_raw_parts(self.0.length as *mut i32, self.0.num as _, self.0.num as _)
-            };
+                Vec::from_raw_parts(self.0.buffer as *mut u8, len, len);
+                Vec::from_raw_parts(self.0.length as *mut i32, self.0.num as _, self.0.num as _);
+            }
         }
     }
 }

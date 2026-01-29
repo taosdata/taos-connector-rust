@@ -146,7 +146,7 @@ impl<'a> Iterator for Chain<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         match self {
-            Self::Empty => None,
+            Chain::Empty => None,
             Chain::Raw(raw) => raw.next().map(Into::into),
             Chain::Any(chain) => chain.next().map(ToString::to_string).map(Into::into),
         }

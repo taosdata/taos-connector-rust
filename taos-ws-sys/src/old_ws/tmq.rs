@@ -1221,6 +1221,7 @@ mod tests {
 
             execute!(b"drop topic if exists topic_ws_test;\0");
             execute!(b"drop database if exists tmq_test\0");
+            assert_eq!(ws_close(taos), 0);
         }
     }
 }

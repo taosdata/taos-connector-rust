@@ -1572,7 +1572,6 @@ pub unsafe extern "C" fn ws_get_current_db(
     }
 
     let rs = ws_query(taos, b"SELECT DATABASE()\0" as *const u8 as _);
-
     if rs.is_null() {
         return set_error_and_get_code(WsError::new(Code::FAILED, "query failed"));
     }
@@ -1580,26 +1579,38 @@ pub unsafe extern "C" fn ws_get_current_db(
     let mut block: *const c_void = std::ptr::null();
     let mut rows = 0;
     let mut code = ws_fetch_raw_block(rs, &mut block, &mut rows);
-
     if code != 0 {
+        ws_free_result(rs);
         return code;
     }
 
     let mut ty: Ty = Ty::Null;
     let mut len_actual = 0u32;
     let res = ws_get_value_in_block(rs, 0, 0, &mut ty as *mut Ty as _, &mut len_actual);
-
     if res.is_null() {
+        ws_free_result(rs);
         return set_error_and_get_code(WsError::new(Code::FAILED, "get value failed"));
     }
 
-    if len_actual < len as u32 {
-        std::ptr::copy_nonoverlapping(res as _, database, len_actual as usize);
+    let copy_len = if len <= 0 {
+        0
+    } else if len_actual < len as u32 {
+        len_actual as usize
     } else {
-        std::ptr::copy_nonoverlapping(res as _, database, len as usize);
+        (len - 1) as usize
+    };
+
+    std::ptr::copy_nonoverlapping(res as _, database, copy_len);
+    if copy_len > 0 {
+        *database.add(copy_len) = 0;
+    }
+
+    if len as u32 <= len_actual {
         *required = len_actual as _;
         code = -1;
     }
+
+    ws_free_result(rs);
 
     code
 }
@@ -1765,6 +1776,8 @@ mod tests {
 
             let version = ws_get_server_info(taos);
             dbg!(CStr::from_ptr(version as _));
+
+            assert_eq!(ws_close(taos), 0);
         }
     }
 
@@ -1794,7 +1807,6 @@ mod tests {
 
             let sql = b"show x\0" as *const u8 as _;
             let rs = ws_query(taos, sql);
-
             let code = ws_errno(rs);
             let err = CStr::from_ptr(ws_errstr(rs) as _);
             // Incomplete SQL statement
@@ -1805,6 +1817,9 @@ mod tests {
                 .match_indices("Incomplete SQL statement")
                 .next()
                 .is_some());
+            assert_eq!(ws_free_result(rs), 0);
+
+            assert_eq!(ws_close(taos), 0);
         }
     }
 
@@ -1817,16 +1832,19 @@ mod tests {
 
             let sql = b"show databases\0" as *const u8 as _;
             let rs = ws_query(taos, sql);
-
             let code = ws_errno(rs);
             assert!(code == 0);
             assert!(!ws_is_update_query(rs));
+            assert_eq!(ws_free_result(rs), 0);
 
             let sql = b"create database if not exists ws_is_update\0" as *const u8 as _;
             let rs = ws_query(taos, sql);
             let code = ws_errno(rs);
             assert!(code == 0);
             assert!(ws_is_update_query(rs));
+            assert_eq!(ws_free_result(rs), 0);
+
+            assert_eq!(ws_close(taos), 0);
         }
     }
 
@@ -1845,6 +1863,7 @@ mod tests {
         unsafe {
             let taos = ws_connect(std::ptr::null());
             assert!(!taos.is_null());
+            assert_eq!(ws_close(taos), 0);
         }
     }
 
@@ -1876,19 +1895,24 @@ mod tests {
             execute!(b"create database ws_affected_row keep 36500\0");
             execute!(b"create table ws_affected_row.s1 (ts timestamp, v int, b binary(100))\0");
 
-            let row = ws_affected_rows(ws_query(
+            let rs = ws_query(
                 taos,
                 b"insert into ws_affected_row.s1 values (now, 1, 'hello')\0" as *const u8 as _,
-            ));
+            );
+            let row = ws_affected_rows(rs);
             assert_eq!(row, 1);
+            assert_eq!(ws_free_result(rs), 0);
 
-            let row = ws_affected_rows64(ws_query(
+            let rs = ws_query(
                 taos,
                 b"insert into ws_affected_row.s1 values (now, 2, 'world')\0" as *const u8 as _,
-            ));
+            );
+            let row = ws_affected_rows64(rs);
             assert_eq!(row, 1);
+            assert_eq!(ws_free_result(rs), 0);
 
             execute!(b"drop database if exists ws_affected_row\0");
+            assert_eq!(ws_close(taos), 0);
         }
     }
 
@@ -2017,12 +2041,10 @@ mod tests {
         let handle = thread::Builder::new()
             .stack_size(stack_size)
             .spawn(|| {
-                // 在线程中执行连接操作
                 let dsn = "http://localhost:6041?company=kepware";
 
                 init_env();
                 unsafe {
-                    // 将 Rust 的 String 转换为 CString
                     let c_dsn = CString::new(dsn).expect("CString::new failed");
 
                     let taos = ws_connect(c_dsn.as_ptr() as *const u8 as _);
@@ -2036,11 +2058,11 @@ mod tests {
 
                     let version = ws_get_server_info(taos);
                     dbg!(CStr::from_ptr(version as _));
+                    assert_eq!(ws_close(taos), 0);
                 }
             })
             .expect("Failed to spawn thread");
 
-        // 等待线程完成
         handle.join().expect("Thread panicked");
     }
 
@@ -2050,7 +2072,6 @@ mod tests {
 
         init_env();
         unsafe {
-            // 将 Rust 的 String 转换为 CString
             let c_dsn = CString::new(dsn).expect("CString::new failed");
 
             let taos = ws_connect(c_dsn.as_ptr() as *const u8 as _);
@@ -2064,6 +2085,8 @@ mod tests {
 
             let version = ws_get_server_info(taos);
             dbg!(CStr::from_ptr(version as _));
+
+            assert_eq!(ws_close(taos), 0);
         }
     }
 
@@ -2279,8 +2302,10 @@ mod tests {
             }
 
             ws_stop_query(res);
+            assert_eq!(ws_free_result(res), 0);
 
             execute!(b"drop database if exists ws_stop_query\0");
+            assert_eq!(ws_close(taos), 0);
         }
     }
 
@@ -2321,7 +2346,9 @@ mod tests {
             let cols = ws_field_count(res);
             dbg!(cols);
 
+            assert_eq!(ws_free_result(res), 0);
             execute!(b"drop database if exists ws_num_fields\0");
+            assert_eq!(ws_close(taos), 0);
         }
     }
 
@@ -2356,32 +2383,28 @@ mod tests {
             let database = database_buffer.as_mut_ptr();
             let len = database_buffer.len() as c_int;
             let mut required = 0;
-            let r = ws_get_current_db(taos, database, len, &mut required);
-
-            assert_eq!(r, -1);
+            let code = ws_get_current_db(taos, database, len, &mut required);
+            assert_eq!(code, -1);
             assert_eq!(required, 17);
+
             let database = CStr::from_ptr(database as _);
-            assert_eq!(
-                database,
-                CStr::from_bytes_with_nul(b"ws_get_cur\0").unwrap()
-            );
+            assert_eq!(database, CStr::from_bytes_with_nul(b"ws_get_cu\0").unwrap());
 
             let mut database_buffer = vec![0; 128];
             let database = database_buffer.as_mut_ptr();
             let len = database_buffer.len() as c_int;
             let mut required = 0;
-            let r = ws_get_current_db(taos, database, len, &mut required);
-
-            assert_eq!(r, 0);
+            let code = ws_get_current_db(taos, database, len, &mut required);
+            assert_eq!(code, 0);
 
             let database = CStr::from_ptr(database as _);
-
             assert_eq!(
                 database,
                 CStr::from_bytes_with_nul(b"ws_get_current_db\0").unwrap()
             );
 
             execute!(b"drop database if exists ws_get_current_db\0");
+            assert_eq!(ws_close(taos), 0);
         }
     }
 
@@ -2416,9 +2439,7 @@ mod tests {
             execute!(b"INSERT INTO d1001 USING meters TAGS ('California.SanFrancisco', 2) VALUES (NOW, 10.2, 219, 0.32)\0");
 
             let sql = b"select * from meters\0" as *const u8 as _;
-
             let rs = ws_query(taos, sql);
-
             let code = ws_errno(rs);
             let errstr = CStr::from_ptr(ws_errstr(rs));
 
@@ -2432,7 +2453,6 @@ mod tests {
 
             let cols = ws_field_count(rs);
             dbg!(cols);
-            // assert!(num_of_fields == 21);
             let fields = ws_fetch_fields(rs);
             let fields = std::slice::from_raw_parts(fields, cols as usize);
 
@@ -2443,7 +2463,9 @@ mod tests {
             // bi mode will show tbname
             assert!(fields.len() >= 6);
 
+            assert_eq!(ws_free_result(rs), 0);
             execute!(b"drop database if exists ws_bi_mode\0");
+            assert_eq!(ws_close(taos), 0);
         }
     }
 
@@ -2473,8 +2495,6 @@ mod tests {
             execute!(b"create database if not exists schemaless_test\0");
             execute!(b"use schemaless_test\0");
 
-            assert!(!taos.is_null());
-
             let data = "meters,groupid=2,location=California.SanFrancisco current=10.3000002f64,voltage=219i32,phase=0.31f64 1626006833639";
             let c_data = CString::new(data).expect("CString::new failed");
             let lines = c_data.as_ptr() as *const c_char;
@@ -2485,7 +2505,7 @@ mod tests {
             let precision = WS_TSDB_SML_TIMESTAMP_TYPE::WS_TSDB_SML_TIMESTAMP_MILLI_SECONDS as i32;
             let ttl = 0;
             let reqid = 123456u64;
-            let rs = schemaless_insert_raw(
+            let _rs = schemaless_insert_raw(
                 taos,
                 lines as *const c_char,
                 len as i32,
@@ -2494,9 +2514,10 @@ mod tests {
                 precision,
                 ttl,
                 reqid,
-            );
+            )
+            .unwrap();
 
-            rs.unwrap();
+            assert_eq!(ws_close(taos), 0);
         }
     }
 
@@ -2628,6 +2649,8 @@ mod cloud_tests {
 
             let version = ws_get_server_info(taos);
             tracing::info!("Server version: {:?}", CStr::from_ptr(version as _));
+
+            assert_eq!(ws_close(taos), 0);
         }
 
         Ok(())

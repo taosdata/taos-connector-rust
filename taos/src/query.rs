@@ -526,6 +526,7 @@ mod tests {
     #[test]
     fn test_server_version() -> RawResult<()> {
         use taos_query::prelude::sync::*;
+
         let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
         let dsn = Dsn::from_str(&dsn)?;
         let builder = TaosBuilder::from_dsn(dsn).unwrap();
@@ -595,6 +596,7 @@ mod tests {
     #[test]
     fn test_assert_enterprise_edition() -> RawResult<()> {
         use taos_query::prelude::sync::*;
+
         let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
         let dsn = Dsn::from_str(&dsn)?;
         let builder = TaosBuilder::from_dsn(dsn).unwrap();
@@ -612,6 +614,7 @@ mod tests {
     #[test]
     fn test_assert_enterprise_edition_ws() -> RawResult<()> {
         use taos_query::prelude::sync::*;
+
         let dsn = std::env::var("TEST_DSN").unwrap_or("http://localhost:6041".to_string());
         let dsn = Dsn::from_str(&dsn)?;
         let builder = TaosBuilder::from_dsn(dsn).unwrap();
@@ -629,6 +632,7 @@ mod tests {
     #[test]
     fn test_server_version_ws() -> RawResult<()> {
         use taos_query::prelude::sync::*;
+
         let dsn = std::env::var("TEST_WS_DSN").unwrap_or("taosws://localhost:6041".to_string());
         let dsn = Dsn::from_str(&dsn)?;
         let builder = TaosBuilder::from_dsn(dsn).unwrap();
@@ -646,6 +650,7 @@ mod tests {
     #[test]
     fn test_server_is_enterprise_edition_ws() -> RawResult<()> {
         use taos_query::prelude::sync::*;
+
         let dsn = std::env::var("TEST_WS_DSN").unwrap_or("taosws://localhost:6041".to_string());
         let dsn = Dsn::from_str(&dsn)?;
         let builder = TaosBuilder::from_dsn(dsn).unwrap();

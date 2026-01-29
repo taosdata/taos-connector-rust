@@ -344,6 +344,7 @@ impl TaosMultiBind {
     pub fn first_to_json(&self) -> serde_json::Value {
         self.to_json().as_array().unwrap().first().unwrap().clone()
     }
+
     pub fn to_tag_value(&self) -> Value {
         if !self.is_null.is_null() && unsafe { self.is_null.read() != 0 } {
             return Value::Null(self.ty());
@@ -385,7 +386,6 @@ impl TaosMultiBind {
                 assert!(!self.buffer.is_null());
                 let slice =
                     std::slice::from_raw_parts(self.buffer as _, self.length.read() as usize);
-                // let v = std::str::from_utf8_unchecked(slice);
                 Value::Json(serde_json::from_slice(slice).unwrap())
             },
             _ => todo!(),
@@ -468,7 +468,6 @@ impl TaosMultiBind {
                                 let len = *self.length.add(i) as usize;
                                 let bytes = std::slice::from_raw_parts(ptr, len);
                                 Some(std::str::from_utf8_unchecked(bytes))
-                                // Some(bytes.escape_ascii().to_string())
                             }
                         })
                         .collect::<Vec<_>>();
@@ -520,8 +519,6 @@ impl TaosMultiBind {
                                 let len = *self.length.add(i) as usize;
                                 let bytes = std::slice::from_raw_parts(ptr, len);
                                 std::str::from_utf8_unchecked(bytes)
-                                // serde_json::from_slice::<serde_json::Value>(bytes)
-                                //     .expect("input should be valid json format")
                             })
                             .collect::<Vec<_>>();
                         return json!(column);
@@ -550,22 +547,11 @@ impl TaosMultiBind {
                 _ => todo!(),
             }
         }
-        // serde_json::json!([1, 2])
     }
 }
 
 #[cfg(test)]
 impl TaosMultiBind {
-    // pub(crate) fn nulls(n: usize) -> Self {
-    //     TaosMultiBind {
-    //         buffer_type: Ty::Null as _,
-    //         buffer: std::ptr::null_mut(),
-    //         buffer_length: 0,
-    //         length: n as _,
-    //         is_null: std::ptr::null_mut(),
-    //         num: n as _,
-    //     }
-    // }
     pub(crate) fn from_primitives<T: taos_query::common::itypes::IValue>(
         nulls: Vec<bool>,
         values: &[T],
@@ -579,6 +565,7 @@ impl TaosMultiBind {
             num: values.len() as _,
         }
     }
+
     pub(crate) fn from_raw_timestamps(nulls: Vec<bool>, values: &[i64]) -> Self {
         TaosMultiBind {
             buffer_type: Ty::Timestamp as _,
@@ -597,11 +584,9 @@ impl TaosMultiBind {
         nulls.resize(num, false);
         let mut length: std::mem::ManuallyDrop<Vec<i32>> =
             std::mem::ManuallyDrop::new(Vec::with_capacity(num));
-        // unsafe { length.set_len(num) };
         for (i, v) in values.iter().enumerate() {
             if let Some(v) = v {
                 let v = v.as_ref();
-                // length[i] = v.len() as _;
                 length.push(v.len() as _);
                 if v.len() > buffer_length {
                     buffer_length = v.len();
@@ -634,6 +619,7 @@ impl TaosMultiBind {
             num: num as _,
         }
     }
+
     pub(crate) fn from_string_vec(values: &[Option<impl AsRef<str>>]) -> Self {
         let values: Vec<_> = values
             .iter()
@@ -643,24 +629,20 @@ impl TaosMultiBind {
         s.buffer_type = Ty::NChar as _;
         s
     }
-    // pub(crate) fn from_json(values: &[Option<impl AsRef<str>>]) -> Self {
-    //     let values: Vec<_> = values
-    //         .iter()
-    //         .map(|f| f.as_ref().map(|s| s.as_ref().as_bytes()))
-    //         .collect();
-    //     let mut s = Self::from_binary_vec(&values);
-    //     s.buffer_type = Ty::Json as _;
-    //     s
-    // }
-
-    // pub(crate) fn buffer(&self) -> *const c_void {
-    //     self.buffer
-    // }
 }
 
 impl Drop for TaosMultiBind {
     fn drop(&mut self) {
         unsafe { Vec::from_raw_parts(self.is_null as *mut i8, self.num as _, self.num as _) };
+
+        let ty = Ty::from(self.buffer_type);
+        if ty == Ty::VarChar || ty == Ty::NChar {
+            let buffer_size = self.buffer_length * self.num as usize;
+            unsafe {
+                Vec::from_raw_parts(self.buffer as *mut u8, buffer_size, buffer_size);
+                Vec::from_raw_parts(self.length as *mut i32, self.num as _, self.num as _);
+            }
+        }
     }
 }
 
@@ -932,9 +914,9 @@ mod tests {
             ws_stmt_execute(stmt, &mut rows);
             assert_eq!(rows, 2);
 
-            assert_eq!(rows, 2);
             ws_stmt_close(stmt);
             query!(b"drop database ws_stmt_i\0");
+            assert_eq!(ws_close(taos), 0);
         }
     }
 
@@ -977,11 +959,11 @@ mod tests {
             }
 
             let code = ws_stmt_set_tbname(stmt, b"ws_stmt_i_child.`d0`\0".as_ptr() as _);
-
             if code != 0 {
                 dbg!(CStr::from_ptr(ws_errstr(stmt)).to_str().unwrap());
                 panic!()
             }
+
             let params = [
                 TaosMultiBind::from_raw_timestamps(vec![false, false], &[0, 1]),
                 TaosMultiBind::from_primitives(vec![false, false], &[0.0f32, 0.1f32]),
@@ -999,9 +981,8 @@ mod tests {
             ws_stmt_execute(stmt, &mut rows);
             assert_eq!(rows, 2);
 
-            assert_eq!(rows, 2);
             ws_stmt_close(stmt);
-            // query!(b"drop database ws_stmt_i\0");
+            assert_eq!(ws_close(taos), 0);
         }
     }
 
@@ -1048,11 +1029,11 @@ mod tests {
             for tbname in ["t1", "t2", "t3"] {
                 let name = format!("ws_stmt_i_null.`{}`\0", tbname);
                 let code = ws_stmt_set_tbname(stmt, name.as_ptr() as _);
-
                 if code != 0 {
                     dbg!(CStr::from_ptr(ws_errstr(stmt)).to_str().unwrap());
                     panic!()
                 }
+
                 let params = [
                     TaosMultiBind::from_raw_timestamps(vec![false], &[0]),
                     TaosMultiBind::from_primitives(vec![true], &[0u8]),
@@ -1072,6 +1053,7 @@ mod tests {
                 let rs = ws_query(taos, sql.as_bytes().as_ptr() as _);
                 let code = ws_errno(rs);
                 assert!(code == 0);
+
                 loop {
                     let mut ptr = std::ptr::null();
                     let mut rows = 0;
@@ -1079,6 +1061,7 @@ mod tests {
                     if rows == 0 {
                         break;
                     }
+
                     for row in 0..rows {
                         print!("{tbname} row {row}: ");
                         for col in 0..3 {
@@ -1103,10 +1086,12 @@ mod tests {
                         println!();
                     }
                 }
+
+                assert_eq!(ws_free_result(rs), 0);
             }
 
             ws_stmt_close(stmt);
-            // query!(b"drop database ws_stmt_i_null\0");
+            assert_eq!(ws_close(taos), 0);
         }
     }
 
@@ -1166,12 +1151,10 @@ mod tests {
             ws_stmt_add_batch(stmt);
             let mut rows = 0;
             ws_stmt_execute(stmt, &mut rows);
-
             assert_eq!(rows, 2);
+
             ws_stmt_close(stmt);
-
             execute!(b"drop database if exists ws_stmt_with_tags\0");
-
             ws_close(taos);
         }
     }
@@ -1232,14 +1215,12 @@ mod tests {
             ws_stmt_add_batch(stmt);
             let mut rows = 0;
             ws_stmt_execute(stmt, &mut rows);
-
             assert_eq!(rows, 2);
 
             let affected_rows_once = ws_stmt_affected_rows_once(stmt);
-
             assert_eq!(affected_rows_once, 2);
-            let affected_rows = ws_stmt_affected_rows(stmt);
 
+            let affected_rows = ws_stmt_affected_rows(stmt);
             assert_eq!(affected_rows, 2);
 
             // add batch again, affected_rows_once should be 2, affected_rows should be 4
@@ -1285,21 +1266,15 @@ mod tests {
             ws_stmt_add_batch(stmt);
             let mut rows = 0;
             ws_stmt_execute(stmt, &mut rows);
-
             assert_eq!(rows, 2);
 
             let affected_rows_once = ws_stmt_affected_rows_once(stmt);
-
             assert_eq!(affected_rows_once, 2);
 
             let affected_rows = ws_stmt_affected_rows(stmt);
-
             assert_eq!(affected_rows, 6);
 
             ws_stmt_close(stmt);
-
-            // execute!(format!("drop database if exists {db}"));
-
             ws_close(taos);
         }
     }
@@ -1338,12 +1313,12 @@ mod tests {
             if code != 0 {
                 dbg!(CStr::from_ptr(ws_errstr(stmt)).to_str().unwrap());
             }
+
             ws_stmt_set_sub_tbname(stmt, b"sub_t1\0".as_ptr() as _);
 
             let tags = [TaosMultiBind::from_string_vec(&[Some(
                 r#"{"name":"姓名"}"#.to_string(),
             )])];
-
             ws_stmt_set_tags(stmt, tags.as_ptr(), tags.len() as _);
 
             let params = [
@@ -1359,12 +1334,10 @@ mod tests {
             ws_stmt_add_batch(stmt);
             let mut rows = 0;
             ws_stmt_execute(stmt, &mut rows);
-
             assert_eq!(rows, 2);
+
             ws_stmt_close(stmt);
-
             execute!(b"drop database if exists ws_stmt_with_sub_table\0");
-
             ws_close(taos);
         }
     }
@@ -1524,7 +1497,6 @@ mod tests {
             }
 
             ws_stmt_close(stmt);
-
             ws_close(taos);
         }
     }
@@ -1562,7 +1534,6 @@ mod tests {
             let db = "ws_stmt_num_params";
 
             exec_string!(format!("drop database if exists {db}"));
-
             exec_string!(format!("create database {db} keep 36500"));
             exec_string!(format!(
                 "create table {db}.s1 (ts timestamp, v int, b binary(100)) tags(jt json)"
@@ -1575,13 +1546,12 @@ mod tests {
                 dbg!(CStr::from_ptr(ws_errstr(stmt)).to_str().unwrap());
             }
 
-            let table_name = format!("{db}.t1");
+            let table_name = CString::new(format!("{db}.t1")).unwrap();
             ws_stmt_set_tbname(stmt, table_name.as_ptr() as _);
 
             let tags = [TaosMultiBind::from_string_vec(&[Some(
                 r#"{"name":"姓名"}"#.to_string(),
             )])];
-
             ws_stmt_set_tags(stmt, tags.as_ptr(), tags.len() as _);
 
             let params = [
@@ -1597,10 +1567,8 @@ mod tests {
             ws_stmt_add_batch(stmt);
             let mut rows = 0;
             ws_stmt_execute(stmt, &mut rows);
-
             assert_eq!(rows, 2);
 
-            // get num_params
             let mut num_params = 0;
             let code = ws_stmt_num_params(stmt, &mut num_params);
             if code != 0 {
@@ -1612,9 +1580,7 @@ mod tests {
                 tracing::debug!("num_params: {}", num_params);
             }
 
-            // for each param
             for i in 0..num_params {
-                // get param
                 let mut r#type = 0;
                 let mut bytes = 0;
                 let code = ws_stmt_get_param(stmt, i, &mut r#type, &mut bytes);
@@ -1629,7 +1595,6 @@ mod tests {
             }
 
             ws_stmt_close(stmt);
-
             ws_close(taos);
         }
     }
@@ -1736,7 +1701,6 @@ mod tests {
             let tags = [TaosMultiBind::from_string_vec(&[Some(
                 r#"{"name":"姓名"}"#.to_string(),
             )])];
-
             ws_stmt_set_tags(stmt, tags.as_ptr(), tags.len() as _);
 
             let params = [
@@ -1754,8 +1718,11 @@ mod tests {
             assert_eq!(code, 0);
 
             let mut rows = 0;
-            ws_stmt_execute(stmt, &mut rows);
-
+            let code = ws_stmt_execute(stmt, &mut rows);
+            if code != 0 {
+                assert_eq!(ws_stmt_close(stmt), 0);
+                assert_eq!(ws_close(taos), 0);
+            }
             assert_eq!(rows, 2);
 
             // get stmt tag fields
@@ -1791,7 +1758,6 @@ mod tests {
             }
 
             ws_stmt_close(stmt);
-
             ws_close(taos);
         }
     }
@@ -1828,6 +1794,9 @@ mod tests {
             let code = ws_stmt_get_tag_fields(stmt, &mut field_num, &mut fields);
             assert!(code != 0);
             assert!(fields.is_null());
+
+            assert_eq!(ws_stmt_close(stmt), 0);
+            assert_eq!(ws_close(taos), 0);
         }
     }
 }

@@ -285,7 +285,7 @@ pub unsafe extern "C" fn taos_close(taos: *mut TAOS) {
 
 #[no_mangle]
 #[instrument(level = "debug", ret)]
-pub unsafe extern "C" fn taos_options(option: TSDB_OPTION, arg: *const c_void, ...) -> c_int {
+pub unsafe extern "C" fn taos_options(option: TSDB_OPTION, arg: *const c_void, _: ...) -> c_int {
     match option {
         TSDB_OPTION::TSDB_OPTION_CONFIGDIR => {
             if arg.is_null() {
@@ -1535,6 +1535,7 @@ mod tests {
             let opts = make_options(&[(IP, "localhost"), (PORT, "6041"), (COMPRESSION, "1")]);
             let taos = taos_connect_with(&opts as *const _);
             assert!(!taos.is_null());
+            taos_close(taos);
             free_options(&opts);
         }
 
@@ -1542,6 +1543,7 @@ mod tests {
             let opts = make_options(&[(IP, "localhost"), (PORT, "6041"), (COMPRESSION, "0")]);
             let taos = taos_connect_with(&opts as *const _);
             assert!(!taos.is_null());
+            taos_close(taos);
             free_options(&opts);
         }
     }
@@ -1781,6 +1783,7 @@ mod tests {
 
             let taos = taos_connect_with(&opts as *const _);
             assert!(!taos.is_null());
+            taos_close(taos);
 
             free_options(&opts);
         }
@@ -1992,6 +1995,7 @@ mod cloud_tests {
         let dsn = CString::new(dsn).unwrap();
         let taos = unsafe { taos_connect_with_dsn(dsn.as_ptr()) };
         assert!(!taos.is_null());
+        unsafe { taos_close(taos) };
 
         Ok(())
     }

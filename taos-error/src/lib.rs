@@ -8,7 +8,6 @@ use std::str::FromStr;
 pub use code::Code;
 use mdsn::DsnError;
 use source::Inner;
-use thiserror::Error;
 
 mod code;
 mod source;
@@ -39,19 +38,24 @@ mod source;
 ///
 /// # Display representations
 #[must_use]
-#[derive(Error)]
 pub struct Error {
     /// Error code, will be displayed when code is not 0xFFFF.
     code: Code,
     /// Error context, use this along with `.msg` or `.source`.
     context: Option<String>,
     /// Error source, from raw or other error type.
-    #[cfg_attr(nightly, backtrace)]
-    inner: Inner,
+    source: Inner,
 }
 
 unsafe impl Send for Error {}
 unsafe impl Sync for Error {}
+
+impl std::error::Error for Error {
+    #[cfg(nightly)]
+    fn provide<'a>(&'a self, request: &mut std::error::Request<'a>) {
+        self.source.provide(request);
+    }
+}
 
 impl Debug for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -59,7 +63,7 @@ impl Debug for Error {
             f.debug_struct("Error")
                 .field("code", &self.code)
                 .field("context", &self.context)
-                .field("source", &self.inner)
+                .field("source", &self.source)
                 .finish()
         } else {
             // Error code prefix
@@ -72,17 +76,17 @@ impl Debug for Error {
                 writeln!(f)?;
                 writeln!(f, "Caused by:")?;
 
-                let chain = self.inner.chain();
+                let chain = self.source.chain();
                 for (idx, source) in chain.enumerate() {
                     writeln!(f, "{idx:4}: {source}")?;
                 }
             } else {
-                let mut chain = self.inner.chain();
+                let mut chain = self.source.chain();
                 if let Some(context) = chain.next() {
                     f.write_fmt(format_args!("{context}"))?;
                 }
 
-                if self.inner.deep() {
+                if self.source.deep() {
                     writeln!(f)?;
                     writeln!(f)?;
                     writeln!(f, "Caused by:")?;
@@ -115,15 +119,15 @@ impl Display for Error {
         if let Some(context) = self.context.as_deref() {
             write!(f, "{context}")?;
 
-            if self.inner.is_empty() {
+            if self.source.is_empty() {
                 return Ok(());
             }
             // Pretty print error source.
             f.write_str(": ")?;
-        } else if self.inner.is_empty() {
+        } else if self.source.is_empty() {
             return f.write_str("Unknown error");
         }
-        write!(f, "{:#}", self.inner)?;
+        write!(f, "{:#}", self.source)?;
         Ok(())
     }
 }
@@ -139,7 +143,7 @@ impl From<anyhow::Error> for Error {
         Self {
             code: Code::FAILED,
             context: None,
-            inner: Inner::any(error),
+            source: Inner::any(error),
         }
     }
 }
@@ -168,7 +172,7 @@ impl Error {
         Self {
             code: code.into(),
             context: Some(context.into()),
-            inner: err.into().into(),
+            source: err.into().into(),
         }
     }
 
@@ -177,7 +181,7 @@ impl Error {
         Self {
             code: code.into(),
             context: None,
-            inner: err.into().into(),
+            source: err.into().into(),
         }
     }
 
@@ -203,7 +207,7 @@ impl Error {
 
     #[inline]
     pub fn message(&self) -> String {
-        self.inner.to_string()
+        self.source.to_string()
     }
 
     #[inline(always)]
@@ -215,7 +219,7 @@ impl Error {
             Self {
                 code,
                 context: None,
-                inner: Inner::empty(),
+                source: Inner::empty(),
             }
         }
     }
@@ -238,7 +242,7 @@ impl Error {
             return Self {
                 code: err.code,
                 context: err.context.clone(),
-                inner: err.inner.clone(),
+                source: err.source.clone(),
             };
         }
         err.into().into()
@@ -535,15 +539,17 @@ mod tests {
         let err = Error {
             code: Code::SUCCESS,
             context: Some("context".to_string()),
-            inner: Inner::Raw {
+            source: Inner::Raw {
                 raw: Cow::from("raw error"),
+                #[cfg(nightly)]
+                backtrace: std::backtrace::Backtrace::capture(),
             },
         };
 
         let err = Error {
             code: Code::SUCCESS,
             context: Some("higher context".to_string()),
-            inner: Inner::any(err.into()),
+            source: Inner::any(err.into()),
         };
 
         let s1 = format!("{}", err);
@@ -559,5 +565,33 @@ mod tests {
 
         let any_err = anyhow::format_err!("{:#}", err);
         assert_eq!(any_err.to_string(), s1);
+    }
+
+    #[cfg(nightly)]
+    #[test]
+    fn test_error_provide_forwards_backtrace() {
+        use std::backtrace::Backtrace;
+        use std::error::request_ref;
+
+        let err = Error {
+            code: Code::FAILED,
+            context: Some("ctx".to_string()),
+            source: Inner::Raw {
+                raw: Cow::from("raw error"),
+                backtrace: Backtrace::capture(),
+            },
+        };
+
+        let dyn_err: &dyn std::error::Error = &err;
+        let bt_from_dyn = request_ref::<Backtrace>(dyn_err).unwrap();
+
+        if let Inner::Raw {
+            backtrace: ref bt, ..
+        } = err.source
+        {
+            assert!(std::ptr::eq(bt, bt_from_dyn));
+        } else {
+            panic!("unexpected inner variant");
+        }
     }
 }

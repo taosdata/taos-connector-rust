@@ -2590,6 +2590,7 @@ mod tests {
             let sql = c"create database if not exists test_1741339814";
             let code = taos_validate_sql(taos, sql.as_ptr());
             assert_eq!(code, 0);
+            taos_close(taos);
         }
     }
 

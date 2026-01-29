@@ -1177,9 +1177,6 @@ mod tests {
     #[test]
     fn test_tmq_committed() -> anyhow::Result<()> {
         use taos_query::prelude::sync::*;
-        // let _ = pretty_env_logger::formatted_builder()
-        //     .filter_level(tracing::tracing::LevelFilter::Info)
-        //     .try_init();
 
         let taos = crate::TaosBuilder::from_dsn("taos:///")?.build()?;
 
@@ -1711,12 +1708,8 @@ mod async_tests {
 
     #[tokio::test]
     async fn test_tmq() -> anyhow::Result<()> {
-        // pretty_env_logger::formatted_timed_builder()
-        //     .filter_level(tracing::LevelFilter::Info)
-        //     .init();
-
         use taos_query::prelude::*;
-        // let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
+
         let mut dsn = "taos://localhost:6030".to_string();
         tracing::info!("dsn: {}", dsn);
 
@@ -1921,11 +1914,8 @@ mod async_tests {
 
     #[tokio::test]
     async fn test_tmq_committed() -> anyhow::Result<()> {
-        // let _ = pretty_env_logger::formatted_builder()
-        //     .filter_level(tracing::tracing::LevelFilter::Info)
-        //     .try_init();
-
         use taos_query::prelude::*;
+
         let mut dsn = "tmq://localhost:6030?".to_string();
         tracing::info!("dsn: {}", dsn);
 

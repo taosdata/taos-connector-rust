@@ -415,7 +415,9 @@ impl taos_query::TBuilder for TaosBuilder {
             "configDir",
             "libraryPath",
             "maxRetries",
+            "totpCode",
             "totp_code",
+            "bearerToken",
             "bearer_token",
         ];
         PARAMS
@@ -491,7 +493,8 @@ impl taos_query::TBuilder for TaosBuilder {
     }
 
     fn ping(&self, conn: &mut Self::Target) -> RawResult<()> {
-        conn.raw.query("select server_version()")?;
+        let mut res = conn.raw.query("select server_version()")?;
+        res.free_result();
         Ok(())
     }
 
@@ -1565,7 +1568,6 @@ mod tests {
         use taos_query::util::totp::*;
 
         let taos = TaosBuilder::from_dsn("taos://localhost:6030")?.build()?;
-        taos.exec("drop user nts_totp_user").ok();
 
         let totp_seed = generate_totp_seed(64);
         taos.exec(format!(
@@ -1604,7 +1606,6 @@ mod tests {
         use taos_query::prelude::sync::*;
 
         let taos = TaosBuilder::from_dsn("taos://localhost:6030")?.build()?;
-        taos.exec("drop user nts_token_user").ok();
         taos.exec("create user nts_token_user pass 'token_pass_1'")?;
 
         let mut rs = taos.query("create token test_nts_bearer_token from user nts_token_user")?;
