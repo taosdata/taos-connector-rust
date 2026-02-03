@@ -236,7 +236,7 @@ unsafe fn connect_with_dsn(dsn: *const c_char) -> TaosResult<Taos> {
 }
 
 fn connect_from_dsn(dsn: &str) -> TaosResult<Taos> {
-    tracing::debug!("Connecting with dsn: {:?}", (&dsn).into_dsn());
+    tracing::debug!("Connecting with dsn: {:?}", dsn.into_dsn());
     let builder = TaosBuilder::from_dsn(dsn)?;
 
     #[cfg(all(windows, target_pointer_width = "32"))]
