@@ -14,7 +14,7 @@ use taos_error::Code;
 use taos_log::QidManager;
 use taos_query::common::{Field, Precision, Ty};
 use taos_query::util::generate_req_id;
-use taos_query::TBuilder;
+use taos_query::{IntoDsn, TBuilder};
 use taos_ws::query::{ConnOption, Error};
 use taos_ws::{Offset, Taos, TaosBuilder};
 use tmq::TmqResultSet;
@@ -201,12 +201,8 @@ unsafe fn connect(
         .totp_code(totp_code)
         .bearer_token(bearer_token)
         .build();
-    debug!("taos_connect, dsn: {dsn:?}");
 
-    let builder = TaosBuilder::from_dsn(dsn)?;
-    let mut taos = builder.build()?;
-    builder.ping(&mut taos)?;
-    Ok(taos)
+    connect_from_dsn(&dsn)
 }
 
 fn handle_connect_error(mut err: TaosError) -> *mut TAOS {
@@ -236,18 +232,16 @@ unsafe fn connect_with_dsn(dsn: *const c_char) -> TaosResult<Taos> {
     } else {
         DEFAULT_DSN
     };
-    tracing::debug!("taos_connect_with_dsn, dsn: {dsn}");
     connect_from_dsn(dsn)
 }
 
 fn connect_from_dsn(dsn: &str) -> TaosResult<Taos> {
+    tracing::debug!("Connecting with dsn: {:?}", (&dsn).into_dsn());
     let builder = TaosBuilder::from_dsn(dsn)?;
 
     #[cfg(all(windows, target_pointer_width = "32"))]
     {
-        tracing::debug!(
-            "Connecting with dsn: {dsn}, spawning thread to avoid stack overflow on 32-bit Windows"
-        );
+        tracing::debug!("Spawning thread to avoid stack overflow on 32-bit Windows");
         const STACK_SIZE: usize = 4 * 1024 * 1024;
         let handle = std::thread::Builder::new()
             .stack_size(STACK_SIZE)
@@ -512,9 +506,8 @@ pub unsafe extern "C" fn taos_set_option(
     }
 
     trace!(
-        "taos_set_option insert, index: {count}, key: {}, value: {}",
+        "taos_set_option insert, index: {count}, key: {}",
         CStr::from_ptr(key).to_string_lossy(),
-        CStr::from_ptr(value).to_string_lossy()
     );
 
     opts.keys[opts.count as usize] = key;
@@ -552,14 +545,16 @@ pub unsafe extern "C" fn taos_connect_with(options: *const OPTIONS) -> *mut TAOS
 
 unsafe fn connect_with(options: *const OPTIONS) -> TaosResult<Taos> {
     let dsn = build_dsn_from_options(options)?;
-    debug!("taos_connect_with, dsn: {dsn}");
     connect_from_dsn(&dsn)
 }
 
 unsafe fn build_dsn_from_options(options: *const OPTIONS) -> TaosResult<String> {
     if options.is_null() {
         let dsn = util::DsnBuilder::new().build();
-        debug!("build_dsn_from_options, options is null, use default dsn: {dsn}");
+        debug!(
+            "build_dsn_from_options, options is null, use default dsn: {:?}",
+            (&dsn).into_dsn()
+        );
         return Ok(dsn);
     }
 
@@ -585,12 +580,10 @@ unsafe fn build_dsn_from_options(options: *const OPTIONS) -> TaosResult<String> 
         let key = CStr::from_ptr(opts.keys[i]).to_str()?;
         let value = CStr::from_ptr(opts.values[i]).to_str()?;
         if let Some(value) = map.insert(key, value) {
-            debug!(
-                "build_dsn_from_options, duplicate key: {key}, overwrite previous value: {value}"
-            );
+            debug!("build_dsn_from_options, duplicate key: {key}, overwrite previous value");
         }
     }
-    trace!("build_dsn_from_options, raw options: {map:?}");
+    trace!("build_dsn_from_options, raw options: {:?}", SecretMap(&map));
 
     let user = map.remove(USER).unwrap_or(DEFAULT_USER);
     let pass = map.remove(PASS).unwrap_or(DEFAULT_PASS);
@@ -701,6 +694,22 @@ unsafe fn build_dsn_from_options(options: *const OPTIONS) -> TaosResult<String> 
     }
 
     Ok(format!("{protocol}://{user}:{pass}@{addr}/{db}?{params}"))
+}
+
+struct SecretMap<'a>(&'a HashMap<&'a str, &'a str>);
+
+impl<'a> std::fmt::Debug for SecretMap<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut dbg = f.debug_map();
+        for (k, v) in self.0.iter() {
+            if *k == PASS {
+                dbg.entry(k, &"[REDACTED]");
+            } else {
+                dbg.entry(k, v);
+            }
+        }
+        dbg.finish()
+    }
 }
 
 #[no_mangle]
