@@ -31,10 +31,9 @@ jobs:
 
       - name: Start TDengine
         run: |
-          sudo mkdir -p /mnt/taos/data /mnt/taos/log
-          sudo chown -R "$USER":"$(id -gn)" /mnt/taos
+          mkdir -p /tmp/taos/log /tmp/taos/data
           taosd &
-          TAOS_ADAPTER_LOG_PATH=/mnt/taos/log taosadapter &
+          TAOS_ADAPTER_LOG_PATH=/tmp/taos/log taosadapter &
 
       - name: Start Nginx
         run: |
