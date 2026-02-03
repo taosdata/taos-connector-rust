@@ -1051,7 +1051,6 @@ mod tests {
     #[test]
     fn username_with_password() {
         let s = "taos://";
-
         let dsn = Dsn::from_str(s).unwrap();
         assert_eq!(
             dsn,
@@ -1063,7 +1062,6 @@ mod tests {
         assert_eq!(dsn.to_string(), s);
 
         let s = "taos:///";
-
         let dsn = Dsn::from_str(s).unwrap();
         assert_eq!(
             dsn,
@@ -1075,7 +1073,6 @@ mod tests {
         assert_eq!(dsn.to_string(), "taos://");
 
         let s = "taos://root@";
-
         let dsn = Dsn::from_str(s).unwrap();
         assert_eq!(
             dsn,
@@ -1086,8 +1083,8 @@ mod tests {
             }
         );
         assert_eq!(dsn.to_string(), s);
-        let s = "taos://root:taosdata@";
 
+        let s = "taos://root:taosdata@";
         let dsn = Dsn::from_str(s).unwrap();
         assert_eq!(
             dsn,
@@ -1098,7 +1095,7 @@ mod tests {
                 ..Default::default()
             }
         );
-        assert_eq!(dsn.to_string(), s);
+        assert_eq!(dsn.to_string(), "taos://root:[REDACTED]@");
     }
 
     #[test]
@@ -1174,6 +1171,7 @@ mod tests {
             }
         );
     }
+
     #[test]
     fn username_with_host() {
         let s = "taos://root@localhost";
@@ -1232,7 +1230,7 @@ mod tests {
                 ..Default::default()
             }
         );
-        assert_eq!(dsn.to_string(), s);
+        assert_eq!(dsn.to_string(), "taos://root:[REDACTED]@localhost:6030");
     }
 
     #[test]
@@ -1278,7 +1276,10 @@ mod tests {
                 ..Default::default()
             }
         );
-        assert_eq!(dsn.to_string(), s);
+        assert_eq!(
+            dsn.to_string(),
+            "taos://root:[REDACTED]@host1:6030,host2:6031"
+        );
     }
 
     #[test]
@@ -1337,7 +1338,10 @@ mod tests {
                 ..Default::default()
             }
         );
-        assert_eq!(dsn.to_string(), s);
+        assert_eq!(
+            dsn.to_string(),
+            "taos://root:[REDACTED]@host1:6030,host2:6031/db1"
+        );
     }
 
     #[test]
@@ -1443,7 +1447,10 @@ mod tests {
                 ..Default::default()
             }
         );
-        assert_eq!(dsn.to_string(), s);
+        assert_eq!(
+            dsn.to_string(),
+            "sqlite://root:[REDACTED]@//full/unix/path/to/file.db?mode=0666&readonly=true"
+        );
     }
 
     #[test]
@@ -1552,7 +1559,10 @@ mod tests {
         let dsn = Dsn::from_str(&format!("taos://root:{e}@localhost:6030/")).unwrap();
         dbg!(&dsn);
         assert_eq!(dsn.password.as_deref().unwrap(), p);
-        assert_eq!(dsn.to_string(), format!("taos://root:{e}@localhost:6030"));
+        assert_eq!(
+            dsn.to_string(),
+            format!("taos://root:[REDACTED]@localhost:6030")
+        );
     }
 
     #[test]
@@ -1567,7 +1577,7 @@ mod tests {
         assert_eq!(dsn.get("code1").unwrap(), p);
         assert_eq!(
             dsn.to_string(),
-            format!("taos://root:{e}@localhost:6030?code1={e}")
+            format!("taos://root:[REDACTED]@localhost:6030?code1={e}")
         );
     }
 
@@ -1586,7 +1596,7 @@ mod tests {
         assert_eq!(dsn.get(p).unwrap(), p);
         assert_eq!(
             dsn.to_string(),
-            format!("taos://{u}:{e}@localhost:6030?{e}={e}")
+            format!("taos://{u}:[REDACTED]@localhost:6030?{e}={e}")
         );
     }
 
