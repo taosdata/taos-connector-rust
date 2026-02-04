@@ -1672,6 +1672,8 @@ impl Drop for Tmq {
 mod tests {
     use std::thread::sleep;
 
+    use taos_query::util::test_utils::{test_password, test_username};
+
     use super::*;
     use crate::ws::query::{
         taos_fetch_block, taos_fetch_fields, taos_fetch_row, taos_free_result,
@@ -1687,67 +1689,67 @@ mod tests {
 
             let key = c"td.connect.ip";
             let val = c"localhost";
-            let res = tmq_conf_set(conf, key.as_ptr() as _, val.as_ptr() as _);
+            let res = tmq_conf_set(conf, key.as_ptr(), val.as_ptr());
             assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
 
             let key = c"td.connect.user";
-            let val = c"root";
-            let res = tmq_conf_set(conf, key.as_ptr() as _, val.as_ptr() as _);
+            let val = CString::new(test_username()).unwrap();
+            let res = tmq_conf_set(conf, key.as_ptr(), val.as_ptr());
             assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
 
             let key = c"td.connect.pass";
-            let val = c"taosdata";
-            let res = tmq_conf_set(conf, key.as_ptr() as _, val.as_ptr() as _);
+            let val = CString::new(test_password()).unwrap();
+            let res = tmq_conf_set(conf, key.as_ptr(), val.as_ptr());
             assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
 
             let key = c"group.id";
             let val = c"1";
-            let res = tmq_conf_set(conf, key.as_ptr() as _, val.as_ptr() as _);
+            let res = tmq_conf_set(conf, key.as_ptr(), val.as_ptr());
             assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
 
             let key = c"client.id";
             let val = c"1";
-            let res = tmq_conf_set(conf, key.as_ptr() as _, val.as_ptr() as _);
+            let res = tmq_conf_set(conf, key.as_ptr(), val.as_ptr());
             assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
 
             let key = c"enable.auto.commit";
             let val = c"true";
-            let res = tmq_conf_set(conf, key.as_ptr() as _, val.as_ptr() as _);
+            let res = tmq_conf_set(conf, key.as_ptr(), val.as_ptr());
             assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
 
             let key = c"msg.with.table.name";
             let val = c"true";
-            let res = tmq_conf_set(conf, key.as_ptr() as _, val.as_ptr() as _);
+            let res = tmq_conf_set(conf, key.as_ptr(), val.as_ptr());
             assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
 
             let key = c"enable.replay";
             let val = c"true";
-            let res = tmq_conf_set(conf, key.as_ptr() as _, val.as_ptr() as _);
+            let res = tmq_conf_set(conf, key.as_ptr(), val.as_ptr());
             assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
 
             let key = c"td.connect.port";
             let val = c"6041";
-            let res = tmq_conf_set(conf, key.as_ptr() as _, val.as_ptr() as _);
+            let res = tmq_conf_set(conf, key.as_ptr(), val.as_ptr());
             assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
 
             let key = c"auto.commit.interval.ms";
             let val = c"5000";
-            let res = tmq_conf_set(conf, key.as_ptr() as _, val.as_ptr() as _);
+            let res = tmq_conf_set(conf, key.as_ptr(), val.as_ptr());
             assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
 
             let key = c"session.timeout.ms";
             let val = c"10000";
-            let res = tmq_conf_set(conf, key.as_ptr() as _, val.as_ptr() as _);
+            let res = tmq_conf_set(conf, key.as_ptr(), val.as_ptr());
             assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
 
             let key = c"max.poll.interval.ms";
             let val = c"10000";
-            let res = tmq_conf_set(conf, key.as_ptr() as _, val.as_ptr() as _);
+            let res = tmq_conf_set(conf, key.as_ptr(), val.as_ptr());
             assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
 
             let key = c"auto.offset.reset";
             let val = c"earliest";
-            let res = tmq_conf_set(conf, key.as_ptr() as _, val.as_ptr() as _);
+            let res = tmq_conf_set(conf, key.as_ptr(), val.as_ptr());
             assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
 
             let mut errstr = [0; 256];
@@ -1755,7 +1757,6 @@ mod tests {
             assert!(!tmq.is_null());
 
             tmq_consumer_close(tmq);
-
             tmq_conf_destroy(conf);
         }
 
@@ -1765,7 +1766,7 @@ mod tests {
 
             let key = c"group.id";
             let val = c"10";
-            let res = tmq_conf_set(conf, key.as_ptr() as _, val.as_ptr() as _);
+            let res = tmq_conf_set(conf, key.as_ptr(), val.as_ptr());
             assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
 
             let mut errstr = [0; 256];
@@ -1773,7 +1774,6 @@ mod tests {
             assert!(!tmq.is_null());
 
             tmq_consumer_close(tmq);
-
             tmq_conf_destroy(conf);
         }
     }

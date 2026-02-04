@@ -1132,7 +1132,7 @@ mod tests {
 
             let consumer = ws_tmq_consumer_new(
                 conf,
-                b"tmq+ws://root:taosdata@localhost:6041\0" as *const u8 as *const c_char,
+                b"tmq+ws://localhost:6041\0" as *const u8 as *const c_char,
                 std::ptr::null_mut(),
                 0,
             );

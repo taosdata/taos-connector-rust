@@ -2101,8 +2101,8 @@ mod tests {
 
             let taos = taos_connect(
                 c"localhost".as_ptr(),
-                c"root".as_ptr(),
-                c"taosdata".as_ptr(),
+                ptr::null(),
+                ptr::null(),
                 c"test_1737102411".as_ptr(),
                 6041,
             );
@@ -3159,8 +3159,8 @@ mod tests {
         unsafe {
             let taos = taos_connect(
                 c"[::1]".as_ptr(),
-                c"root".as_ptr(),
-                c"taosdata".as_ptr(),
+                ptr::null(),
+                ptr::null(),
                 ptr::null(),
                 6041,
             );

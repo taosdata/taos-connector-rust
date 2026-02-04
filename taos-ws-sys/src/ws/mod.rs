@@ -1014,8 +1014,8 @@ pub fn test_connect() -> *mut TAOS {
     unsafe {
         let taos = taos_connect(
             c"localhost".as_ptr(),
-            c"root".as_ptr(),
-            c"taosdata".as_ptr(),
+            ptr::null(),
+            ptr::null(),
             ptr::null(),
             6041,
         );
@@ -1056,6 +1056,7 @@ mod tests {
     use std::ptr;
 
     use faststr::FastStr;
+    use taos_query::util::test_utils::{test_password, test_username};
 
     use super::*;
     use crate::ws::error::{taos_errno, taos_errstr};
@@ -1064,10 +1065,13 @@ mod tests {
     #[test]
     fn test_taos_connect() {
         unsafe {
+            let user = CString::new(test_username()).unwrap();
+            let pass = CString::new(test_password()).unwrap();
+
             let taos = taos_connect(
                 c"localhost".as_ptr(),
-                c"root".as_ptr(),
-                c"taosdata".as_ptr(),
+                user.as_ptr(),
+                pass.as_ptr(),
                 ptr::null(),
                 6041,
             );
@@ -1098,10 +1102,13 @@ mod tests {
     #[test]
     fn test_taos_connect_unable_to_establish_connection() {
         unsafe {
+            let user = CString::new(test_username()).unwrap();
+            let pass = CString::new(test_password()).unwrap();
+
             let taos = taos_connect(
                 c"invalid_host".as_ptr(),
-                c"root".as_ptr(),
-                c"taosdata".as_ptr(),
+                user.as_ptr(),
+                pass.as_ptr(),
                 ptr::null(),
                 6041,
             );
@@ -1335,12 +1342,23 @@ mod tests {
             assert!(!taos.is_null());
             taos_close(taos);
 
-            let taos = taos_connect_with_dsn(c"ws://root:taosdata@localhost:6041".as_ptr());
+            let dsn = CString::new(format!(
+                "ws://{}:{}@localhost:6041",
+                test_username(),
+                test_password()
+            ))
+            .unwrap();
+            let taos = taos_connect_with_dsn(dsn.as_ptr());
             assert!(!taos.is_null());
             taos_close(taos);
 
-            let taos =
-                taos_connect_with_dsn(c"ws://root:taosdata@localhost:6041?read_timeout=1".as_ptr());
+            let dsn = CString::new(format!(
+                "ws://{}:{}@localhost:6041?read_timeout=1",
+                test_username(),
+                test_password()
+            ))
+            .unwrap();
+            let taos = taos_connect_with_dsn(dsn.as_ptr());
             assert!(!taos.is_null());
             taos_close(taos);
 
@@ -1417,7 +1435,11 @@ mod tests {
 
         unsafe {
             let dsn = build_dsn_from_options(&opts as *const _).unwrap();
-            assert!(dsn.starts_with("ws://root:taosdata@localhost:6041/"));
+            assert!(dsn.starts_with(&format!(
+                "ws://{}:{}@localhost:6041/",
+                test_username(),
+                test_password()
+            )));
         }
     }
 
@@ -1436,7 +1458,11 @@ mod tests {
 
         unsafe {
             let dsn = build_dsn_from_options(&opts as *const _).unwrap();
-            assert!(dsn.starts_with("ws://root:taosdata@localhost:6041/"));
+            assert!(dsn.starts_with(&format!(
+                "ws://{}:{}@localhost:6041/",
+                test_username(),
+                test_password()
+            )));
         }
     }
 
@@ -1510,11 +1536,14 @@ mod tests {
                 ],
             );
 
+            let user = test_username();
+            let pass = test_password();
+
             let opts = make_options(&[
                 (IP, "localhost"),
                 (PORT, "6041"),
-                (USER, "root"),
-                (PASS, "taosdata"),
+                (USER, &user),
+                (PASS, &pass),
                 (DB, "test_1765508846"),
             ]);
             let taos = taos_connect_with(&opts as *const _);
@@ -1767,12 +1796,15 @@ mod tests {
             ],
         );
 
+        let user = test_username();
+        let pass = test_password();
+
         unsafe {
             let opts = make_options(&[
                 (IP, "localhost"),
                 (PORT, "6445"),
-                (USER, "root"),
-                (PASS, "taosdata"),
+                (USER, &user),
+                (PASS, &pass),
                 (DB, "test_1765519301"),
                 (WS_TLS_MODE, "3"),
                 (WS_TLS_VERSION, "TLSv1.3,TLSv1.2"),
