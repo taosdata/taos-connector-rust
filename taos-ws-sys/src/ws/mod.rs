@@ -529,6 +529,7 @@ const RETRY_BACKOFF_MAX_MS: &str = "retryBackoffMaxMs";
 const WS_TLS_MODE: &str = "wsTlsMode";
 const WS_TLS_VERSION: &str = "wsTlsVersion";
 const WS_TLS_CA: &str = "wsTlsCa";
+const TOKEN: &str = "token";
 
 #[no_mangle]
 #[instrument(level = "debug", ret)]
@@ -702,7 +703,7 @@ impl<'a> std::fmt::Debug for SecretMap<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut dbg = f.debug_map();
         for (k, v) in self.0.iter() {
-            if *k == PASS {
+            if matches!(*k, PASS | TOKEN) {
                 dbg.entry(k, &"[REDACTED]");
             } else {
                 dbg.entry(k, v);
