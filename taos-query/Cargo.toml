@@ -12,7 +12,7 @@ description.workspace = true
 
 [dependencies]
 anyhow = "1"
-bytes = { version = "1.1", features = ["serde"] }
+bytes = { version = "1.11.1", features = ["serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 chrono-tz = "0.10.4"
 derive_more = { version = "1", features = [
