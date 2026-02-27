@@ -14,7 +14,7 @@ use taos_error::Code;
 use taos_log::QidManager;
 use taos_query::common::{Field, Precision, Ty};
 use taos_query::util::generate_req_id;
-use taos_query::{IntoDsn, TBuilder};
+use taos_query::{IntoDsn, RedactedDsn, TBuilder};
 use taos_ws::query::{ConnOption, Error};
 use taos_ws::{Offset, Taos, TaosBuilder};
 use tmq::TmqResultSet;
@@ -236,7 +236,7 @@ unsafe fn connect_with_dsn(dsn: *const c_char) -> TaosResult<Taos> {
 }
 
 fn connect_from_dsn(dsn: &str) -> TaosResult<Taos> {
-    tracing::debug!("Connecting with dsn: {:?}", dsn.into_dsn());
+    debug!("Connecting with dsn: {}", redact_dsn_for_log(dsn));
     let builder = TaosBuilder::from_dsn(dsn)?;
 
     #[cfg(all(windows, target_pointer_width = "32"))]
@@ -265,6 +265,14 @@ fn connect_from_dsn(dsn: &str) -> TaosResult<Taos> {
         builder.ping(&mut taos)?;
         Ok(taos)
     }
+}
+
+fn redact_dsn_for_log(dsn: &str) -> String {
+    dsn.into_dsn()
+        .ok()
+        .as_ref()
+        .map(RedactedDsn)
+        .map_or_else(|| "<invalid dsn>".to_string(), |d| format!("{d}"))
 }
 
 #[no_mangle]
@@ -553,8 +561,8 @@ unsafe fn build_dsn_from_options(options: *const OPTIONS) -> TaosResult<String> 
     if options.is_null() {
         let dsn = util::DsnBuilder::new().build();
         debug!(
-            "build_dsn_from_options, options is null, use default dsn: {:?}",
-            (&dsn).into_dsn()
+            "build_dsn_from_options, options is null, use default dsn: {}",
+            redact_dsn_for_log(&dsn)
         );
         return Ok(dsn);
     }
