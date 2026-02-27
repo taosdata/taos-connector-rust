@@ -255,7 +255,7 @@ fn addr_parse() {
 }
 
 /// A DSN(**Data Source Name**) parser.
-#[derive(Default, PartialEq, Eq, Clone)]
+#[derive(Debug, Default, PartialEq, Eq, Clone)]
 pub struct Dsn {
     pub driver: String,
     pub protocol: Option<String>,
@@ -821,40 +821,6 @@ impl IntoDsn for Dsn {
     }
 }
 
-impl std::fmt::Debug for Dsn {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        struct SecretParams<'a>(&'a BTreeMap<String, String>);
-
-        impl<'a> std::fmt::Debug for SecretParams<'a> {
-            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                let mut map = f.debug_map();
-                for (k, v) in self.0.iter() {
-                    if matches!(
-                        k.as_str(),
-                        "totp_code" | "totpCode" | "bearer_token" | "bearerToken"
-                    ) {
-                        map.entry(k, &"[REDACTED]");
-                    } else {
-                        map.entry(k, v);
-                    }
-                }
-                map.finish()
-            }
-        }
-
-        let mut ds = f.debug_struct("Dsn");
-        ds.field("driver", &self.driver);
-        ds.field("protocol", &self.protocol);
-        ds.field("username", &self.username);
-        ds.field("password", &self.password.as_ref().map(|_| "[REDACTED]"));
-        ds.field("addresses", &self.addresses);
-        ds.field("path", &self.path);
-        ds.field("subject", &self.subject);
-        ds.field("params", &SecretParams(&self.params));
-        ds.finish()
-    }
-}
-
 impl Display for Dsn {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.driver)?;
@@ -869,11 +835,11 @@ impl Display for Dsn {
         }
 
         match (&self.username, &self.password) {
-            (Some(username), Some(_)) => {
-                write!(f, "{}:[REDACTED]@", encode(username))?;
+            (Some(username), Some(password)) => {
+                write!(f, "{}:{}@", encode(username), encode(password))?;
             }
             (Some(username), None) => write!(f, "{}@", encode(username))?,
-            (None, Some(_)) => write!(f, ":[REDACTED]@")?,
+            (None, Some(password)) => write!(f, ":{}@", encode(password))?,
             (None, None) => {}
         }
 
@@ -891,26 +857,80 @@ impl Display for Dsn {
         }
 
         if !self.params.is_empty() {
-            fn percent_encode_or_not(v: &str) -> Cow<'_, str> {
-                if v.contains(['=', '&', '#', '@']) {
-                    urlencoding::encode(v)
-                } else {
-                    v.into()
-                }
-            }
             write!(
                 f,
                 "?{}",
                 self.params
                     .iter()
+                    .map(|(k, v)| format!(
+                        "{}={}",
+                        percent_encode_or_not(k),
+                        percent_encode_or_not(v)
+                    ))
+                    .join("&")
+            )?;
+        }
+        Ok(())
+    }
+}
+
+/// A wrapper around `&Dsn` that implements `Display` with sensitive fields redacted.
+///
+/// Use this type when you need to log or display a DSN without exposing passwords
+/// or sensitive params (totp_code, totpCode, bearer_token, bearerToken, token).
+pub struct RedactedDsn<'a>(pub &'a Dsn);
+
+impl<'a> Display for RedactedDsn<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let dsn = self.0;
+        write!(f, "{}", dsn.driver)?;
+        if let Some(protocol) = &dsn.protocol {
+            write!(f, "+{protocol}")?;
+        }
+
+        if dsn.is_path_like() {
+            write!(f, ":")?;
+        } else {
+            write!(f, "://")?;
+        }
+
+        match (&dsn.username, &dsn.password) {
+            (Some(username), Some(_)) => {
+                write!(f, "{}:[REDACTED]@", encode(username))?;
+            }
+            (Some(username), None) => write!(f, "{}@", encode(username))?,
+            (None, Some(_)) => write!(f, ":[REDACTED]@")?,
+            (None, None) => {}
+        }
+
+        if !dsn.addresses.is_empty() {
+            write!(
+                f,
+                "{}",
+                dsn.addresses.iter().map(ToString::to_string).join(",")
+            )?;
+        }
+
+        if let Some(database) = &dsn.subject {
+            write!(f, "/{database}")?;
+        } else if let Some(path) = &dsn.path {
+            write!(f, "{path}")?;
+        }
+
+        if !dsn.params.is_empty() {
+            write!(
+                f,
+                "?{}",
+                dsn.params
+                    .iter()
                     .map(|(k, v)| {
                         let value = if matches!(
                             k.as_str(),
-                            "totp_code" | "totpCode" | "bearer_token" | "bearerToken"
+                            "totp_code" | "totpCode" | "bearer_token" | "bearerToken" | "token"
                         ) {
                             "[REDACTED]"
                         } else {
-                            v
+                            v.as_str()
                         };
 
                         format!(
@@ -923,6 +943,14 @@ impl Display for Dsn {
             )?;
         }
         Ok(())
+    }
+}
+
+fn percent_encode_or_not(v: &str) -> Cow<'_, str> {
+    if v.contains(['=', '&', '#', '@']) {
+        urlencoding::encode(v)
+    } else {
+        v.into()
     }
 }
 
@@ -1095,7 +1123,7 @@ mod tests {
                 ..Default::default()
             }
         );
-        assert_eq!(dsn.to_string(), "taos://root:[REDACTED]@");
+        assert_eq!(dsn.to_string(), s);
     }
 
     #[test]
@@ -1230,7 +1258,7 @@ mod tests {
                 ..Default::default()
             }
         );
-        assert_eq!(dsn.to_string(), "taos://root:[REDACTED]@localhost:6030");
+        assert_eq!(dsn.to_string(), s);
     }
 
     #[test]
@@ -1276,10 +1304,7 @@ mod tests {
                 ..Default::default()
             }
         );
-        assert_eq!(
-            dsn.to_string(),
-            "taos://root:[REDACTED]@host1:6030,host2:6031"
-        );
+        assert_eq!(dsn.to_string(), s);
     }
 
     #[test]
@@ -1338,10 +1363,7 @@ mod tests {
                 ..Default::default()
             }
         );
-        assert_eq!(
-            dsn.to_string(),
-            "taos://root:[REDACTED]@host1:6030,host2:6031/db1"
-        );
+        assert_eq!(dsn.to_string(), s);
     }
 
     #[test]
@@ -1447,10 +1469,7 @@ mod tests {
                 ..Default::default()
             }
         );
-        assert_eq!(
-            dsn.to_string(),
-            "sqlite://root:[REDACTED]@//full/unix/path/to/file.db?mode=0666&readonly=true"
-        );
+        assert_eq!(dsn.to_string(), s);
     }
 
     #[test]
@@ -1559,10 +1578,7 @@ mod tests {
         let dsn = Dsn::from_str(&format!("taos://root:{e}@localhost:6030/")).unwrap();
         dbg!(&dsn);
         assert_eq!(dsn.password.as_deref().unwrap(), p);
-        assert_eq!(
-            dsn.to_string(),
-            format!("taos://root:[REDACTED]@localhost:6030")
-        );
+        assert_eq!(dsn.to_string(), format!("taos://root:{e}@localhost:6030"));
     }
 
     #[test]
@@ -1577,7 +1593,7 @@ mod tests {
         assert_eq!(dsn.get("code1").unwrap(), p);
         assert_eq!(
             dsn.to_string(),
-            format!("taos://root:[REDACTED]@localhost:6030?code1={e}")
+            format!("taos://root:{e}@localhost:6030?code1={e}")
         );
     }
 
@@ -1596,7 +1612,7 @@ mod tests {
         assert_eq!(dsn.get(p).unwrap(), p);
         assert_eq!(
             dsn.to_string(),
-            format!("taos://{u}:[REDACTED]@localhost:6030?{e}={e}")
+            format!("taos://{u}:{e}@localhost:6030?{e}={e}")
         );
     }
 
@@ -2152,49 +2168,38 @@ j/p1+4zmwB7F4u64uwBzwcZN5qCcAkfYYxjPbGARED4pA8YVpMx2DqmeYdR5pTj8
     }
 
     #[test]
-    fn test_display() {
+    fn test_redacted_display() {
         let dsn = Dsn::from_str("ws://root:taosdata@localhost:6041?param1=value1").unwrap();
-        let dsn_str = format!("{}", dsn);
+        let dsn_str = format!("{}", RedactedDsn(&dsn));
         assert_eq!(dsn_str, "ws://root:[REDACTED]@localhost:6041?param1=value1");
 
         let dsn = Dsn::from_str("ws://root@localhost:6041?totp_code=123456").unwrap();
-        let dsn_str = format!("{}", dsn);
+        let dsn_str = format!("{}", RedactedDsn(&dsn));
         assert_eq!(dsn_str, "ws://root@localhost:6041?totp_code=[REDACTED]");
 
+        let dsn = Dsn::from_str("ws://root:taosdata@localhost:6041?totpCode=123456").unwrap();
+        let dsn_str = format!("{}", RedactedDsn(&dsn));
+        assert_eq!(
+            dsn_str,
+            "ws://root:[REDACTED]@localhost:6041?totpCode=[REDACTED]"
+        );
+
         let dsn = Dsn::from_str("ws://:taosdata@localhost:6041?bearer_token=my_token").unwrap();
-        let dsn_str = format!("{}", dsn);
+        let dsn_str = format!("{}", RedactedDsn(&dsn));
         assert_eq!(
             dsn_str,
             "ws://:[REDACTED]@localhost:6041?bearer_token=[REDACTED]"
         );
-    }
 
-    #[test]
-    fn test_debug() {
-        let dsn = Dsn::from_str("ws://root:taosdata@localhost:6041?param1=value1").unwrap();
-        let dsn_str = format!("{:?}", dsn);
-        assert_eq!(dsn_str, "Dsn { driver: \"ws\", protocol: None, username: Some(\"root\"), password: Some(\"[REDACTED]\"), addresses: [Address { host: Some(\"localhost\"), port: Some(6041), path: None }], path: None, subject: None, params: {\"param1\": \"value1\"} }");
-
-        let dsn = Dsn::from_str("ws://root@localhost:6041?totp_code=123456").unwrap();
-        let dsn_str = format!("{:?}", dsn);
-        assert_eq!(dsn_str, "Dsn { driver: \"ws\", protocol: None, username: Some(\"root\"), password: None, addresses: [Address { host: Some(\"localhost\"), port: Some(6041), path: None }], path: None, subject: None, params: {\"totp_code\": \"[REDACTED]\"} }");
-
-        let dsn = Dsn::from_str("ws://root@localhost:6041?totpCode=123456").unwrap();
-        let dsn_str = format!("{:?}", dsn);
-        assert_eq!(dsn_str, "Dsn { driver: \"ws\", protocol: None, username: Some(\"root\"), password: None, addresses: [Address { host: Some(\"localhost\"), port: Some(6041), path: None }], path: None, subject: None, params: {\"totpCode\": \"[REDACTED]\"} }");
-
-        let dsn = Dsn::from_str("ws://:taosdata@localhost:6041?bearer_token=my_token").unwrap();
-        let dsn_str = format!("{:?}", dsn);
+        let dsn = Dsn::from_str("ws://root:taosdata@localhost:6041?bearerToken=my_token").unwrap();
+        let dsn_str = format!("{}", RedactedDsn(&dsn));
         assert_eq!(
             dsn_str,
-            "Dsn { driver: \"ws\", protocol: None, username: Some(\"\"), password: Some(\"[REDACTED]\"), addresses: [Address { host: Some(\"localhost\"), port: Some(6041), path: None }], path: None, subject: None, params: {\"bearer_token\": \"[REDACTED]\"} }"
+            "ws://root:[REDACTED]@localhost:6041?bearerToken=[REDACTED]"
         );
 
-        let dsn = Dsn::from_str("ws://:taosdata@localhost:6041?bearerToken=my_token").unwrap();
-        let dsn_str = format!("{:?}", dsn);
-        assert_eq!(
-            dsn_str,
-            "Dsn { driver: \"ws\", protocol: None, username: Some(\"\"), password: Some(\"[REDACTED]\"), addresses: [Address { host: Some(\"localhost\"), port: Some(6041), path: None }], path: None, subject: None, params: {\"bearerToken\": \"[REDACTED]\"} }"
-        );
+        let dsn = Dsn::from_str("ws://localhost:6041?token=my_cloud_token").unwrap();
+        let dsn_str = format!("{}", RedactedDsn(&dsn));
+        assert_eq!(dsn_str, "ws://localhost:6041?token=[REDACTED]");
     }
 }
