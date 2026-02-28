@@ -946,6 +946,17 @@ impl<'a> Display for RedactedDsn<'a> {
     }
 }
 
+/// Convenience function to redact a DSN string.
+///
+/// Parses the input and returns a redacted string representation.
+/// Returns `"<invalid dsn>"` if the input cannot be parsed.
+pub fn redact_dsn(dsn: &str) -> String {
+    match Dsn::from_str(dsn) {
+        Ok(parsed) => format!("{}", RedactedDsn(&parsed)),
+        Err(_) => "<invalid dsn>".to_string(),
+    }
+}
+
 fn percent_encode_or_not(v: &str) -> Cow<'_, str> {
     if v.contains(['=', '&', '#', '@']) {
         urlencoding::encode(v)

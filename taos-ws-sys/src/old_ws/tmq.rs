@@ -8,7 +8,7 @@ use std::time::Duration;
 use taos_error::Code;
 use taos_query::common::{Precision, RawBlock as Block, Ty};
 use taos_query::tmq::{self, AsConsumer, IsData, IsOffset};
-use taos_query::{Dsn, TBuilder};
+use taos_query::{redact_dsn, Dsn, TBuilder};
 use taos_ws::consumer::{Data, Offset};
 use taos_ws::query::Error;
 use taos_ws::{Consumer, TmqBuilder};
@@ -466,7 +466,7 @@ unsafe fn tmq_consumer_new(conf: *mut ws_tmq_conf_t, dsn: *const c_char) -> WsRe
     };
     let dsn = dsn.to_str()?;
 
-    tracing::trace!("ws_tmq_consumer_new dsn: {}", &dsn);
+    tracing::trace!("ws_tmq_consumer_new dsn: {}", redact_dsn(dsn));
     let mut dsn = Dsn::from_str(dsn)?;
 
     if !conf.is_null() {

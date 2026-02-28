@@ -13,7 +13,7 @@ use async_trait::async_trait;
 pub use common::RawBlock;
 use common::*;
 pub use iter::*;
-pub use mdsn::{value_is_true, Address, Dsn, DsnError, IntoDsn, RedactedDsn};
+pub use mdsn::{redact_dsn, value_is_true, Address, Dsn, DsnError, IntoDsn, RedactedDsn};
 pub use prelude::sync::{Fetchable, Queryable};
 pub use prelude::{AsyncFetchable, AsyncQueryable};
 pub use serde::de::value::Error as DeError;
