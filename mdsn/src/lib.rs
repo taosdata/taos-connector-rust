@@ -924,10 +924,14 @@ impl<'a> Display for RedactedDsn<'a> {
                 dsn.params
                     .iter()
                     .map(|(k, v)| {
-                        let value = if matches!(
-                            k.as_str(),
-                            "totp_code" | "totpCode" | "bearer_token" | "bearerToken" | "token"
-                        ) {
+                        const SENSITIVE_PARAMS: &[&str] = &[
+                            "totp_code",
+                            "totpCode",
+                            "bearer_token",
+                            "bearerToken",
+                            "token",
+                        ];
+                        let value = if SENSITIVE_PARAMS.contains(&k.as_str()) {
                             "[REDACTED]"
                         } else {
                             v.as_str()

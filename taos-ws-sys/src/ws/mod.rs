@@ -1436,11 +1436,7 @@ mod tests {
 
         unsafe {
             let dsn = build_dsn_from_options(&opts as *const _).unwrap();
-            assert!(dsn.starts_with(&format!(
-                "ws://{}:{}@localhost:6041/",
-                test_username(),
-                test_password()
-            )));
+            assert!(dsn.starts_with("ws://root:taosdata@localhost:6041/"));
         }
     }
 
@@ -1459,11 +1455,7 @@ mod tests {
 
         unsafe {
             let dsn = build_dsn_from_options(&opts as *const _).unwrap();
-            assert!(dsn.starts_with(&format!(
-                "ws://{}:{}@localhost:6041/",
-                test_username(),
-                test_password()
-            )));
+            assert!(dsn.starts_with("ws://root:taosdata@localhost:6041/"));
         }
     }
 
