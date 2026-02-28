@@ -2184,7 +2184,7 @@ j/p1+4zmwB7F4u64uwBzwcZN5qCcAkfYYxjPbGARED4pA8YVpMx2DqmeYdR5pTj8
 
     #[test]
     fn test_redacted_display() {
-        let dsn = Dsn::from_str("ws://root:taosdata@localhost:6041?param1=value1").unwrap();
+        let dsn = Dsn::from_str("ws://root:secret@localhost:6041?param1=value1").unwrap();
         let dsn_str = format!("{}", RedactedDsn(&dsn));
         assert_eq!(dsn_str, "ws://root:[REDACTED]@localhost:6041?param1=value1");
 
@@ -2192,21 +2192,21 @@ j/p1+4zmwB7F4u64uwBzwcZN5qCcAkfYYxjPbGARED4pA8YVpMx2DqmeYdR5pTj8
         let dsn_str = format!("{}", RedactedDsn(&dsn));
         assert_eq!(dsn_str, "ws://root@localhost:6041?totp_code=[REDACTED]");
 
-        let dsn = Dsn::from_str("ws://root:taosdata@localhost:6041?totpCode=123456").unwrap();
+        let dsn = Dsn::from_str("ws://root:secret@localhost:6041?totpCode=123456").unwrap();
         let dsn_str = format!("{}", RedactedDsn(&dsn));
         assert_eq!(
             dsn_str,
             "ws://root:[REDACTED]@localhost:6041?totpCode=[REDACTED]"
         );
 
-        let dsn = Dsn::from_str("ws://:taosdata@localhost:6041?bearer_token=my_token").unwrap();
+        let dsn = Dsn::from_str("ws://:secret@localhost:6041?bearer_token=my_token").unwrap();
         let dsn_str = format!("{}", RedactedDsn(&dsn));
         assert_eq!(
             dsn_str,
             "ws://:[REDACTED]@localhost:6041?bearer_token=[REDACTED]"
         );
 
-        let dsn = Dsn::from_str("ws://root:taosdata@localhost:6041?bearerToken=my_token").unwrap();
+        let dsn = Dsn::from_str("ws://root:secret@localhost:6041?bearerToken=my_token").unwrap();
         let dsn_str = format!("{}", RedactedDsn(&dsn));
         assert_eq!(
             dsn_str,
@@ -2216,5 +2216,41 @@ j/p1+4zmwB7F4u64uwBzwcZN5qCcAkfYYxjPbGARED4pA8YVpMx2DqmeYdR5pTj8
         let dsn = Dsn::from_str("ws://localhost:6041?token=my_cloud_token").unwrap();
         let dsn_str = format!("{}", RedactedDsn(&dsn));
         assert_eq!(dsn_str, "ws://localhost:6041?token=[REDACTED]");
+    }
+
+    #[test]
+    fn test_redacted_dsn() {
+        let dsn = Dsn::from_str("taos+ws://root:secret@localhost:6041/db").unwrap();
+        let dsn_str = format!("{}", RedactedDsn(&dsn));
+        assert_eq!(dsn_str, "taos+ws://root:[REDACTED]@localhost:6041/db");
+
+        let dsn = Dsn::from_str("file:/path/to/file?param=value").unwrap();
+        let dsn_str = format!("{}", RedactedDsn(&dsn));
+        assert_eq!(dsn_str, "file:/path/to/file?param=value");
+
+        let dsn = Dsn::from_str("ws://:secret@localhost:6041").unwrap();
+        let dsn_str = format!("{}", RedactedDsn(&dsn));
+        assert_eq!(dsn_str, "ws://:[REDACTED]@localhost:6041");
+
+        let dsn = Dsn::from_str("taos://root:secret@localhost:6030/test_db").unwrap();
+        let dsn_str = format!("{}", RedactedDsn(&dsn));
+        assert_eq!(dsn_str, "taos://root:[REDACTED]@localhost:6030/test_db");
+
+        let dsn = Dsn::from_str("taos:/path/to/file").unwrap();
+        let dsn_str = format!("{}", RedactedDsn(&dsn));
+        assert_eq!(dsn_str, "taos:/path/to/file");
+
+        let dsn = Dsn::from_str("file:/path/to/file?token=secret").unwrap();
+        let dsn_str = format!("{}", RedactedDsn(&dsn));
+        assert_eq!(dsn_str, "file:/path/to/file?token=[REDACTED]");
+    }
+
+    #[test]
+    fn test_redact_dsn() {
+        assert_eq!(
+            redact_dsn("ws://root:secret@localhost:6041/db"),
+            "ws://root:[REDACTED]@localhost:6041/db",
+        );
+        assert_eq!(redact_dsn("invalid_dsn"), "<invalid dsn>");
     }
 }

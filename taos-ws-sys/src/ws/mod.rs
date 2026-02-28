@@ -1962,6 +1962,33 @@ mod tests {
             taos_close(taos);
         }
     }
+
+    #[test]
+    fn test_secret_map_debug_redacts_sensitive_values() {
+        let mut map = HashMap::new();
+        map.insert(IP, "localhost");
+        map.insert(PASS, "secret-pass");
+        map.insert(TOKEN, "secret-token");
+
+        let output = format!("{:?}", SecretMap(&map));
+        assert!(output.contains("\"ip\": \"localhost\""));
+        assert!(output.contains("\"pass\": \"[REDACTED]\""));
+        assert!(output.contains("\"token\": \"[REDACTED]\""));
+        assert!(!output.contains("secret-pass"));
+        assert!(!output.contains("secret-token"));
+    }
+
+    #[test]
+    fn test_secret_map_debug_keeps_non_sensitive_values() {
+        let mut map = HashMap::new();
+        map.insert(USER, "root");
+        map.insert(DB, "test_db");
+
+        let output = format!("{:?}", SecretMap(&map));
+        assert!(output.contains("\"user\": \"root\""));
+        assert!(output.contains("\"db\": \"test_db\""));
+        assert!(!output.contains("[REDACTED]"));
+    }
 }
 
 #[cfg(test)]
