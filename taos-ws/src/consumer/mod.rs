@@ -968,6 +968,13 @@ static AVAILABLE_PARAMS: Lazy<HashSet<&str>> = Lazy::new(|| {
 impl TmqBuilder {
     pub fn new<D: IntoDsn>(dsn: D) -> RawResult<Self> {
         let mut dsn = dsn.into_dsn()?;
+
+        if let Some(token) = dsn.remove("bearer_token") {
+            if dsn.get("td.connect.token").is_none() {
+                dsn.set("td.connect.token".to_string(), token);
+            }
+        }
+
         let info = TaosBuilder::from_dsn(&dsn)?;
 
         let group_id = dsn
@@ -1087,12 +1094,6 @@ impl TmqBuilder {
                 s.to_string()
             }
         });
-
-        if dsn.get("td.connect.token").is_some() {
-            dsn.remove("bearer_token");
-        } else if let Some(token) = dsn.remove("bearer_token") {
-            dsn.set("td.connect.token".to_string(), token);
-        }
 
         let config = {
             let filtered: std::collections::HashMap<_, _> = dsn
@@ -3224,9 +3225,9 @@ mod tests {
         });
 
         let poll_handle: tokio::task::JoinHandle<anyhow::Result<()>> = tokio::spawn(async move {
-            let tmq = TmqBuilder::from_dsn(
-                format!("ws://invalid_user:invalid_pass@localhost:6041?group.id=3749&auto.offset.reset=earliest&td.connect.token={token}&bearer_token=invalid_token",) 
-            )?;
+            let tmq = TmqBuilder::from_dsn(format!(
+                "ws://invalid_user:invalid_pass@localhost:6041?group.id=3749&auto.offset.reset=earliest&td.connect.token={token}&bearer_token=invalid_token"
+            ))?;
             let mut consumer = tmq.build().await?;
             consumer.subscribe(["topic_1772264645"]).await?;
 
@@ -3327,9 +3328,9 @@ mod tests {
         });
 
         let poll_handle: tokio::task::JoinHandle<anyhow::Result<()>> = tokio::spawn(async move {
-            let tmq = TmqBuilder::from_dsn(
-                format!("ws://invalid_user:invalid_pass@localhost:6041?group.id=8463&auto.offset.reset=earliest&bearer_token={token}",) 
-            )?;
+            let tmq = TmqBuilder::from_dsn(format!(
+                "ws://invalid_user:invalid_pass@localhost:6041?group.id=8463&auto.offset.reset=earliest&bearer_token={token}"
+            ))?;
             let mut consumer = tmq.build().await?;
             consumer.subscribe(["topic_1772505637"]).await?;
 
