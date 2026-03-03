@@ -969,10 +969,11 @@ impl TmqBuilder {
     pub fn new<D: IntoDsn>(dsn: D) -> RawResult<Self> {
         let mut dsn = dsn.into_dsn()?;
 
-        if let Some(token) = dsn.remove("bearer_token") {
-            if dsn.get("td.connect.token").is_none() {
-                dsn.set("td.connect.token".to_string(), token);
-            }
+        let bearer_token = dsn.remove("bearer_token");
+        let td_connect_token = dsn.remove("td.connect.token");
+        if let Some(token) = td_connect_token.or(bearer_token) {
+            dsn.set("bearer_token".to_string(), token.clone());
+            dsn.set("td.connect.token".to_string(), token);
         }
 
         let info = TaosBuilder::from_dsn(&dsn)?;
