@@ -9,7 +9,7 @@ use once_cell::sync::Lazy;
 use taos_error::Code;
 use taos_query::common::{Precision, RawBlock as Block, Ty};
 use taos_query::tmq::{self, AsConsumer, IsData, IsOffset};
-use taos_query::{global_tokio_runtime, Dsn, RedactedDsn, TBuilder};
+use taos_query::{global_tokio_runtime, Dsn, TBuilder};
 use taos_ws::consumer::Data;
 use taos_ws::query::Error;
 use taos_ws::{Consumer, Offset, TmqBuilder};
@@ -455,7 +455,7 @@ unsafe fn consumer_new(conf: *mut tmq_conf_t) -> TaosResult<Tmq> {
                 }
             }
 
-            debug!("consumer_new, dsn: {}", RedactedDsn(&dsn));
+            debug!("consumer_new, dsn: {}", dsn.redacted());
 
             let consumer = TmqBuilder::from_dsn(&dsn)?.build()?;
 
