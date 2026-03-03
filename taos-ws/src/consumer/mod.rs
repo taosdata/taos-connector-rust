@@ -3411,7 +3411,7 @@ mod tests {
         )?;
         let mut consumer = tmq.build().await?;
         let err = consumer.subscribe(["topic_1772507246"]).await.unwrap_err();
-        assert!(err.to_string().contains("Invalid token"));
+        assert!(err.to_string().contains("init tscObj with token failed"));
 
         let tmq = TmqBuilder::from_dsn(format!(
             "ws://invalid_user:invalid_pass@localhost:6041?group.id=8367&bearer_token={token}"
@@ -3425,7 +3425,7 @@ mod tests {
         )?;
         let mut consumer = tmq.build().await?;
         let err = consumer.subscribe(["topic_1772507246"]).await.unwrap_err();
-        assert!(err.to_string().contains("Invalid token"));
+        assert!(err.to_string().contains("init tscObj with token failed"));
 
         let tmq = TmqBuilder::from_dsn(format!(
             "ws://invalid_user:invalid_pass@localhost:6041?group.id=8367&td.connect.token={token}"
@@ -3439,7 +3439,7 @@ mod tests {
         ))?;
         let mut consumer = tmq.build().await?;
         let err = consumer.subscribe(["topic_1772507246"]).await.unwrap_err();
-        assert!(err.to_string().contains("Invalid token"));
+        assert!(err.to_string().contains("init tscObj with token failed"));
 
         let tmq = TmqBuilder::from_dsn(format!(
             "ws://invalid_user:invalid_pass@localhost:6041?group.id=8367&td.connect.token={token}&bearer_token=invalid_token"
