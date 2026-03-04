@@ -1655,6 +1655,22 @@ mod tests {
 
         Ok(())
     }
+
+    #[test]
+    fn test_available_params() {
+        use taos_query::TBuilder;
+
+        let expected = [
+            "group.id",
+            "client.id",
+            "timeout",
+            "enable.auto.commit",
+            "bearerToken",
+            "bearer_token",
+            "td.connect.token",
+        ];
+        assert_eq!(TmqBuilder::available_params(), expected);
+    }
 }
 
 #[cfg(test)]

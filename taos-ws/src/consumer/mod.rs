@@ -3494,6 +3494,29 @@ mod tests {
 
         Ok(())
     }
+
+    #[test]
+    fn test_tmq_builder_available_params() {
+        use taos_query::TBuilder;
+
+        let expected = [
+            "token",
+            "timeout",
+            "group.id",
+            "client.id",
+            "auto.offset.reset",
+            "enable.auto.commit",
+            "auto.commit.interval.ms",
+            "experimental.snapshot.enable",
+            "msg.with.table.name",
+            "msg.enable.batchmeta",
+            "msg.consume.excluded",
+            "msg.consume.rawdata",
+            "bearer_token",
+            "td.connect.token",
+        ];
+        assert_eq!(TmqBuilder::available_params(), expected);
+    }
 }
 
 #[cfg(feature = "rustls-ring-crypto-provider")]
