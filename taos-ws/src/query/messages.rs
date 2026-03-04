@@ -482,6 +482,8 @@ impl WsMessage {
 
 #[cfg(test)]
 mod tests {
+    use taos_query::util::test_utils::{test_password, test_username};
+
     use crate::query::messages::{WsRecv, WsSend};
     use crate::query::WsConnReq;
     use crate::TaosBuilder;
@@ -492,15 +494,15 @@ mod tests {
     fn test_serde_send() {
         let conn = WsSend::Conn {
             req_id: 1,
-            req: WsConnReq::new("root", "taosdata"),
+            req: WsConnReq::new(test_username(), test_password()),
         };
         let actual = serde_json::to_value(conn).unwrap();
         let expected = serde_json::json!({
             "action": "conn",
             "args": {
                 "req_id": 1,
-                "user": "root",
-                "password": "taosdata",
+                "user": test_username(),
+                "password": test_password(),
                 "db": "",
                 "connector": crate::CONNECTOR_INFO,
             }
