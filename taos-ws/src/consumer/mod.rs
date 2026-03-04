@@ -3026,6 +3026,7 @@ mod tests {
         Ok(())
     }
 
+    #[cfg(feature = "test-new-feat")]
     #[tokio::test]
     async fn test_report_user_ip_and_app() -> anyhow::Result<()> {
         use taos_query::prelude::*;
@@ -3407,6 +3408,13 @@ mod tests {
 
         let tmq = TmqBuilder::from_dsn(
             "ws://invalid_user:invalid_pass@localhost:6041?group.id=8367&bearer_token=invalid_token"
+        )?;
+        let mut consumer = tmq.build().await?;
+        let err = consumer.subscribe(["topic_1772507246"]).await.unwrap_err();
+        assert!(err.to_string().contains("init tscObj with token failed"));
+
+        let tmq = TmqBuilder::from_dsn(
+            "ws://invalid_user:invalid_pass@localhost:6041?group.id=8367&bearer_token=",
         )?;
         let mut consumer = tmq.build().await?;
         let err = consumer.subscribe(["topic_1772507246"]).await.unwrap_err();

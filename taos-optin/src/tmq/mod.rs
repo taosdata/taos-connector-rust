@@ -1571,6 +1571,12 @@ mod tests {
         let err = tmq.build().unwrap_err();
         assert!(err.to_string().contains("init tscObj with token failed"));
 
+        let tmq = TmqBuilder::from_dsn(
+            "taos://invalid_user:invalid_pass@localhost:6030?group.id=7363&bearerToken=",
+        )?;
+        let err = tmq.build().unwrap_err();
+        assert!(err.to_string().contains("init tscObj with token failed"));
+
         std::thread::sleep(std::time::Duration::from_secs(3));
 
         taos.exec_many([
