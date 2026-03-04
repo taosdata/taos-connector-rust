@@ -1446,6 +1446,7 @@ mod tests {
         use std::sync::mpsc;
         use std::thread;
         use taos_query::prelude::sync::*;
+        use taos_query::util::test_utils::test_username;
 
         let taos = crate::TaosBuilder::from_dsn("taos://localhost:6030")?.build()?;
         taos.exec_many([
@@ -1458,7 +1459,10 @@ mod tests {
             "create table t0 (ts timestamp, c1 int)",
         ])?;
 
-        let mut rs = taos.query("create token token_1772592400 from user root")?;
+        let mut rs = taos.query(format!(
+            "create token token_1772592400 from user {}",
+            test_username()
+        ))?;
         let mut rows: Vec<String> = rs.deserialize().try_collect()?;
         assert_eq!(rows.len(), 1);
         let token = rows.remove(0);
@@ -1581,6 +1585,7 @@ mod tests {
     #[test]
     fn test_token_priority() -> anyhow::Result<()> {
         use taos_query::prelude::sync::*;
+        use taos_query::util::test_utils::test_username;
 
         let taos = crate::TaosBuilder::from_dsn("taos://localhost:6030")?.build()?;
         taos.exec_many([
@@ -1591,7 +1596,10 @@ mod tests {
             "create topic topic_1772593616 as database test_1772593616",
         ])?;
 
-        let mut rs = taos.query("create token token_1772593616 from user root")?;
+        let mut rs = taos.query(format!(
+            "create token token_1772593616 from user {}",
+            test_username()
+        ))?;
         let mut rows: Vec<String> = rs.deserialize().try_collect()?;
         assert_eq!(rows.len(), 1);
         let token = rows.remove(0);
@@ -3123,6 +3131,7 @@ mod async_tests {
         use crate::{TaosBuilder, TmqBuilder};
         use taos_query::prelude::*;
         use taos_query::tmq::IsAsyncData;
+        use taos_query::util::test_utils::test_username;
         use tokio::sync::{mpsc, oneshot};
 
         let taos = TaosBuilder::from_dsn("taos://localhost:6030")?
@@ -3141,7 +3150,10 @@ mod async_tests {
         .await?;
 
         let mut rs = taos
-            .query("create token token_1772587050 from user root")
+            .query(format!(
+                "create token token_1772587050 from user {}",
+                test_username()
+            ))
             .await?;
         let mut rows: Vec<String> = rs.deserialize().try_collect().await?;
         assert_eq!(rows.len(), 1);
@@ -3274,6 +3286,7 @@ mod async_tests {
     async fn test_token_priority() -> anyhow::Result<()> {
         use crate::{TaosBuilder, TmqBuilder};
         use taos_query::prelude::*;
+        use taos_query::util::test_utils::test_username;
 
         let taos = TaosBuilder::from_dsn("taos://localhost:6030")?
             .build()
@@ -3289,7 +3302,10 @@ mod async_tests {
         .await?;
 
         let mut rs = taos
-            .query("create token token_1772590919 from user root")
+            .query(format!(
+                "create token token_1772590919 from user {}",
+                test_username()
+            ))
             .await?;
         let mut rows: Vec<String> = rs.deserialize().try_collect().await?;
         assert_eq!(rows.len(), 1);

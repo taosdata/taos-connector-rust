@@ -3179,6 +3179,7 @@ mod tests {
     #[tokio::test]
     async fn test_connect_with_td_connect_token() -> anyhow::Result<()> {
         use taos_query::prelude::*;
+        use taos_query::util::test_utils::test_username;
 
         let taos = TaosBuilder::from_dsn("ws://localhost:6041")?
             .build()
@@ -3196,7 +3197,10 @@ mod tests {
         .await?;
 
         let mut rs = taos
-            .query("create token token_1772264645 from user root")
+            .query(format!(
+                "create token token_1772264645 from user {}",
+                test_username()
+            ))
             .await?;
         let mut rows: Vec<String> = rs.deserialize().try_collect().await?;
         assert_eq!(rows.len(), 1);
@@ -3281,6 +3285,7 @@ mod tests {
     #[tokio::test]
     async fn test_connect_with_bearer_token() -> anyhow::Result<()> {
         use taos_query::prelude::*;
+        use taos_query::util::test_utils::test_username;
 
         let taos = TaosBuilder::from_dsn("ws://localhost:6041")?
             .build()
@@ -3298,7 +3303,10 @@ mod tests {
         .await?;
 
         let mut rs = taos
-            .query("create token token_1772505637 from user root")
+            .query(format!(
+                "create token token_1772505637 from user {}",
+                test_username()
+            ))
             .await?;
         let mut rows: Vec<String> = rs.deserialize().try_collect().await?;
         assert_eq!(rows.len(), 1);
@@ -3427,6 +3435,7 @@ mod tests {
     #[tokio::test]
     async fn test_token_priority() -> anyhow::Result<()> {
         use taos_query::prelude::*;
+        use taos_query::util::test_utils::test_username;
 
         let taos = TaosBuilder::from_dsn("ws://localhost:6041")?
             .build()
@@ -3444,7 +3453,10 @@ mod tests {
         .await?;
 
         let mut rs = taos
-            .query("create token token_1772595214 from user root")
+            .query(format!(
+                "create token token_1772595214 from user {}",
+                test_username()
+            ))
             .await?;
         let mut rows: Vec<String> = rs.deserialize().try_collect().await?;
         assert_eq!(rows.len(), 1);
