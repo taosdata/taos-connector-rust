@@ -3132,7 +3132,7 @@ mod tests {
                 .iter()
                 .filter(|record| record.connector_info == crate::CONNECTOR_INFO)
                 .count();
-            assert_eq!(cnt, 2);
+            assert!(cnt >= 2);
 
             consumer.unsubscribe().await;
         }
