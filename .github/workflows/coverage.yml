@@ -208,6 +208,8 @@ jobs:
         env:
           TDENGINE_CLOUD_URL: ${{ secrets.TDENGINE_CLOUD_URL }}
           TDENGINE_CLOUD_TOKEN: ${{ secrets.TDENGINE_CLOUD_TOKEN }}
+          TEST_USERNAME: ${{ secrets.TEST_USERNAME }}
+          TEST_PASSWORD: ${{ secrets.TEST_PASSWORD }}
         run: |
           sed -i 's/crate-type = \["cdylib", "staticlib"\]/crate-type = ["rlib"]/' taos-ws-sys/Cargo.toml
           RUST_BACKTRACE=1 cargo llvm-cov nextest -j 4 --workspace \

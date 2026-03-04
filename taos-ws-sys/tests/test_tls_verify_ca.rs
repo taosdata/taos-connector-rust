@@ -24,8 +24,8 @@ mod tests {
 
             let taos = taos_connect(
                 c"localhost".as_ptr(),
-                c"root".as_ptr(),
-                c"taosdata".as_ptr(),
+                ptr::null(),
+                ptr::null(),
                 ptr::null(),
                 6446,
             );
@@ -45,8 +45,8 @@ mod tests {
 
             let taos = taos_connect(
                 c"localhost".as_ptr(),
-                c"root".as_ptr(),
-                c"taosdata".as_ptr(),
+                ptr::null(),
+                ptr::null(),
                 ptr::null(),
                 6041,
             );

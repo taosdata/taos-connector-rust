@@ -14,7 +14,7 @@ use taos_error::Code;
 use taos_log::QidManager;
 use taos_query::common::{Field, Precision, Ty};
 use taos_query::util::generate_req_id;
-use taos_query::TBuilder;
+use taos_query::{redact_dsn, TBuilder};
 use taos_ws::query::{ConnOption, Error};
 use taos_ws::{Offset, Taos, TaosBuilder};
 use tmq::TmqResultSet;
@@ -201,12 +201,8 @@ unsafe fn connect(
         .totp_code(totp_code)
         .bearer_token(bearer_token)
         .build();
-    debug!("taos_connect, dsn: {dsn:?}");
 
-    let builder = TaosBuilder::from_dsn(dsn)?;
-    let mut taos = builder.build()?;
-    builder.ping(&mut taos)?;
-    Ok(taos)
+    connect_from_dsn(&dsn)
 }
 
 fn handle_connect_error(mut err: TaosError) -> *mut TAOS {
@@ -236,18 +232,16 @@ unsafe fn connect_with_dsn(dsn: *const c_char) -> TaosResult<Taos> {
     } else {
         DEFAULT_DSN
     };
-    tracing::debug!("taos_connect_with_dsn, dsn: {dsn}");
     connect_from_dsn(dsn)
 }
 
 fn connect_from_dsn(dsn: &str) -> TaosResult<Taos> {
+    debug!("Connecting with dsn: {}", redact_dsn(dsn));
     let builder = TaosBuilder::from_dsn(dsn)?;
 
     #[cfg(all(windows, target_pointer_width = "32"))]
     {
-        tracing::debug!(
-            "Connecting with dsn: {dsn}, spawning thread to avoid stack overflow on 32-bit Windows"
-        );
+        tracing::debug!("Spawning thread to avoid stack overflow on 32-bit Windows");
         const STACK_SIZE: usize = 4 * 1024 * 1024;
         let handle = std::thread::Builder::new()
             .stack_size(STACK_SIZE)
@@ -512,9 +506,8 @@ pub unsafe extern "C" fn taos_set_option(
     }
 
     trace!(
-        "taos_set_option insert, index: {count}, key: {}, value: {}",
+        "taos_set_option insert, index: {count}, key: {}",
         CStr::from_ptr(key).to_string_lossy(),
-        CStr::from_ptr(value).to_string_lossy()
     );
 
     opts.keys[opts.count as usize] = key;
@@ -536,6 +529,7 @@ const RETRY_BACKOFF_MAX_MS: &str = "retryBackoffMaxMs";
 const WS_TLS_MODE: &str = "wsTlsMode";
 const WS_TLS_VERSION: &str = "wsTlsVersion";
 const WS_TLS_CA: &str = "wsTlsCa";
+const TOKEN: &str = "token";
 
 #[no_mangle]
 #[instrument(level = "debug", ret)]
@@ -552,14 +546,16 @@ pub unsafe extern "C" fn taos_connect_with(options: *const OPTIONS) -> *mut TAOS
 
 unsafe fn connect_with(options: *const OPTIONS) -> TaosResult<Taos> {
     let dsn = build_dsn_from_options(options)?;
-    debug!("taos_connect_with, dsn: {dsn}");
     connect_from_dsn(&dsn)
 }
 
 unsafe fn build_dsn_from_options(options: *const OPTIONS) -> TaosResult<String> {
     if options.is_null() {
         let dsn = util::DsnBuilder::new().build();
-        debug!("build_dsn_from_options, options is null, use default dsn: {dsn}");
+        debug!(
+            "build_dsn_from_options, options is null, use default dsn: {}",
+            redact_dsn(&dsn)
+        );
         return Ok(dsn);
     }
 
@@ -585,12 +581,10 @@ unsafe fn build_dsn_from_options(options: *const OPTIONS) -> TaosResult<String> 
         let key = CStr::from_ptr(opts.keys[i]).to_str()?;
         let value = CStr::from_ptr(opts.values[i]).to_str()?;
         if let Some(value) = map.insert(key, value) {
-            debug!(
-                "build_dsn_from_options, duplicate key: {key}, overwrite previous value: {value}"
-            );
+            debug!("build_dsn_from_options, duplicate key: {key}, overwrite previous value");
         }
     }
-    trace!("build_dsn_from_options, raw options: {map:?}");
+    trace!("build_dsn_from_options, raw options: {:?}", SecretMap(&map));
 
     let user = map.remove(USER).unwrap_or(DEFAULT_USER);
     let pass = map.remove(PASS).unwrap_or(DEFAULT_PASS);
@@ -701,6 +695,22 @@ unsafe fn build_dsn_from_options(options: *const OPTIONS) -> TaosResult<String> 
     }
 
     Ok(format!("{protocol}://{user}:{pass}@{addr}/{db}?{params}"))
+}
+
+struct SecretMap<'a>(&'a HashMap<&'a str, &'a str>);
+
+impl<'a> std::fmt::Debug for SecretMap<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut dbg = f.debug_map();
+        for (k, v) in self.0.iter() {
+            if matches!(*k, PASS | TOKEN) {
+                dbg.entry(k, &"[REDACTED]");
+            } else {
+                dbg.entry(k, v);
+            }
+        }
+        dbg.finish()
+    }
 }
 
 #[no_mangle]
@@ -1005,8 +1015,8 @@ pub fn test_connect() -> *mut TAOS {
     unsafe {
         let taos = taos_connect(
             c"localhost".as_ptr(),
-            c"root".as_ptr(),
-            c"taosdata".as_ptr(),
+            ptr::null(),
+            ptr::null(),
             ptr::null(),
             6041,
         );
@@ -1047,6 +1057,7 @@ mod tests {
     use std::ptr;
 
     use faststr::FastStr;
+    use taos_query::util::test_utils::{test_password, test_username};
 
     use super::*;
     use crate::ws::error::{taos_errno, taos_errstr};
@@ -1055,10 +1066,13 @@ mod tests {
     #[test]
     fn test_taos_connect() {
         unsafe {
+            let user = CString::new(test_username()).unwrap();
+            let pass = CString::new(test_password()).unwrap();
+
             let taos = taos_connect(
                 c"localhost".as_ptr(),
-                c"root".as_ptr(),
-                c"taosdata".as_ptr(),
+                user.as_ptr(),
+                pass.as_ptr(),
                 ptr::null(),
                 6041,
             );
@@ -1089,10 +1103,13 @@ mod tests {
     #[test]
     fn test_taos_connect_unable_to_establish_connection() {
         unsafe {
+            let user = CString::new(test_username()).unwrap();
+            let pass = CString::new(test_password()).unwrap();
+
             let taos = taos_connect(
                 c"invalid_host".as_ptr(),
-                c"root".as_ptr(),
-                c"taosdata".as_ptr(),
+                user.as_ptr(),
+                pass.as_ptr(),
                 ptr::null(),
                 6041,
             );
@@ -1326,12 +1343,23 @@ mod tests {
             assert!(!taos.is_null());
             taos_close(taos);
 
-            let taos = taos_connect_with_dsn(c"ws://root:taosdata@localhost:6041".as_ptr());
+            let dsn = CString::new(format!(
+                "ws://{}:{}@localhost:6041",
+                test_username(),
+                test_password()
+            ))
+            .unwrap();
+            let taos = taos_connect_with_dsn(dsn.as_ptr());
             assert!(!taos.is_null());
             taos_close(taos);
 
-            let taos =
-                taos_connect_with_dsn(c"ws://root:taosdata@localhost:6041?read_timeout=1".as_ptr());
+            let dsn = CString::new(format!(
+                "ws://{}:{}@localhost:6041?read_timeout=1",
+                test_username(),
+                test_password()
+            ))
+            .unwrap();
+            let taos = taos_connect_with_dsn(dsn.as_ptr());
             assert!(!taos.is_null());
             taos_close(taos);
 
@@ -1501,11 +1529,14 @@ mod tests {
                 ],
             );
 
+            let user = test_username();
+            let pass = test_password();
+
             let opts = make_options(&[
                 (IP, "localhost"),
                 (PORT, "6041"),
-                (USER, "root"),
-                (PASS, "taosdata"),
+                (USER, &user),
+                (PASS, &pass),
                 (DB, "test_1765508846"),
             ]);
             let taos = taos_connect_with(&opts as *const _);
@@ -1758,12 +1789,15 @@ mod tests {
             ],
         );
 
+        let user = test_username();
+        let pass = test_password();
+
         unsafe {
             let opts = make_options(&[
                 (IP, "localhost"),
                 (PORT, "6445"),
-                (USER, "root"),
-                (PASS, "taosdata"),
+                (USER, &user),
+                (PASS, &pass),
                 (DB, "test_1765519301"),
                 (WS_TLS_MODE, "3"),
                 (WS_TLS_VERSION, "TLSv1.3,TLSv1.2"),
@@ -1927,6 +1961,33 @@ mod tests {
             test_exec(taos, "drop user c_token_user");
             taos_close(taos);
         }
+    }
+
+    #[test]
+    fn test_secret_map_debug_redacts_sensitive_values() {
+        let mut map = HashMap::new();
+        map.insert(IP, "localhost");
+        map.insert(PASS, "secret-pass");
+        map.insert(TOKEN, "secret-token");
+
+        let output = format!("{:?}", SecretMap(&map));
+        assert!(output.contains("\"ip\": \"localhost\""));
+        assert!(output.contains("\"pass\": \"[REDACTED]\""));
+        assert!(output.contains("\"token\": \"[REDACTED]\""));
+        assert!(!output.contains("secret-pass"));
+        assert!(!output.contains("secret-token"));
+    }
+
+    #[test]
+    fn test_secret_map_debug_keeps_non_sensitive_values() {
+        let mut map = HashMap::new();
+        map.insert(USER, "root");
+        map.insert(DB, "test_db");
+
+        let output = format!("{:?}", SecretMap(&map));
+        assert!(output.contains("\"user\": \"root\""));
+        assert!(output.contains("\"db\": \"test_db\""));
+        assert!(!output.contains("[REDACTED]"));
     }
 }
 
