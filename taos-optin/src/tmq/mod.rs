@@ -53,13 +53,14 @@ impl TmqBuilder {
             ApiEntry::open_default().map_err(taos_query::RawError::any)?
         };
 
-        let bearer_token = dsn
-            .remove("bearerToken")
+        let token = dsn
+            .remove("td.connect.token")
+            .or_else(|| dsn.remove("bearerToken"))
             .or_else(|| dsn.remove("bearer_token"));
-        let td_connect_token = dsn.remove("td.connect.token");
-        if let Some(token) = td_connect_token.or(bearer_token) {
-            dsn.params.insert("bearer_token".to_string(), token.clone());
-            dsn.params.insert("td.connect.token".to_string(), token);
+        if let Some(token) = token {
+            dsn.set("td.connect.token".to_string(), token.clone());
+            dsn.set("bearerToken".to_string(), token.clone());
+            dsn.set("bearer_token".to_string(), token);
         }
 
         let conf = Conf::from_dsn(&dsn, lib.tmq.unwrap().conf_api)?;
@@ -1433,6 +1434,209 @@ mod tests {
         taos.exec_many([
             "drop topic if exists topic_1765852570",
             "drop database if exists test_1765852570",
+        ])?;
+
+        Ok(())
+    }
+
+    #[cfg(feature = "test-enterprise")]
+    #[test]
+    fn test_connect_with_token() -> anyhow::Result<()> {
+        use crate::tmq::{Data, Meta};
+        use std::sync::mpsc;
+        use std::thread;
+        use taos_query::prelude::sync::*;
+
+        let taos = crate::TaosBuilder::from_dsn("taos://localhost:6030")?.build()?;
+        taos.exec_many([
+            "drop token if exists token_1772592400",
+            "drop topic if exists topic_1772592400",
+            "drop database if exists test_1772592400",
+            "create database test_1772592400",
+            "create topic topic_1772592400 as database test_1772592400",
+            "use test_1772592400",
+            "create table t0 (ts timestamp, c1 int)",
+        ])?;
+
+        let mut rs = taos.query("create token token_1772592400 from user root")?;
+        let mut rows: Vec<String> = rs.deserialize().try_collect()?;
+        assert_eq!(rows.len(), 1);
+        let token = rows.remove(0);
+
+        let num = 100;
+        let (msg_tx, msg_rx) = mpsc::channel::<(MessageSet<Meta, Data>, mpsc::Sender<bool>)>();
+
+        let cnt_handle = thread::spawn(move || -> anyhow::Result<()> {
+            let mut cnt = 0;
+            while let Ok((mut msg, done_tx)) = msg_rx.recv() {
+                if let Some(data) = msg.data() {
+                    while let Some(block) = data.fetch_raw_block()? {
+                        cnt += block.nrows();
+                    }
+                }
+                if cnt >= num {
+                    let _ = done_tx.send(true);
+                    break;
+                } else {
+                    let _ = done_tx.send(false);
+                }
+            }
+            assert_eq!(cnt, num);
+            Ok(())
+        });
+
+        let poll_handle = thread::spawn(move || -> anyhow::Result<()> {
+            let tmq = TmqBuilder::from_dsn(format!(
+                "taos://invalid_user:invalid_pass@localhost:6030?group.id=3836&auto.offset.reset=earliest&bearer_token={token}"
+            ))?;
+            let mut consumer = tmq.build()?;
+            consumer.subscribe(["topic_1772592400"])?;
+
+            let timeout = Timeout::from_secs(5);
+
+            loop {
+                if let Some((offset, message)) = consumer.recv_timeout(timeout)? {
+                    let (done_tx, done_rx) = mpsc::channel();
+                    msg_tx.send((message, done_tx))?;
+                    if done_rx.recv()? {
+                        break;
+                    }
+                    consumer.commit(offset)?;
+                }
+            }
+
+            consumer.unsubscribe();
+
+            Ok(())
+        });
+
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+
+        let mut sql = "insert into t0 values ".to_string();
+        for i in 0..num {
+            sql.push_str(&format!("({}, {}), ", ts + i as i64, i));
+        }
+
+        taos.exec(sql)?;
+
+        poll_handle.join().unwrap()?;
+        cnt_handle.join().unwrap()?;
+
+        std::thread::sleep(std::time::Duration::from_secs(3));
+
+        taos.exec_many([
+            "drop token if exists token_1772592400",
+            "drop topic if exists topic_1772592400",
+            "drop database if exists test_1772592400",
+        ])?;
+
+        Ok(())
+    }
+
+    #[cfg(feature = "test-enterprise")]
+    #[test]
+    fn test_connect_with_invalid_token() -> anyhow::Result<()> {
+        use taos_query::prelude::sync::*;
+
+        let taos = crate::TaosBuilder::from_dsn("taos://localhost:6030")?.build()?;
+        taos.exec_many([
+            "drop topic if exists topic_1772593323",
+            "drop database if exists test_1772593323",
+            "create database test_1772593323",
+            "create topic topic_1772593323 as database test_1772593323",
+        ])?;
+
+        let tmq = TmqBuilder::from_dsn(
+            "taos://invalid_user:invalid_pass@localhost:6030?group.id=1512&td.connect.token=invalid_token"
+        )?;
+        let err = tmq.build().unwrap_err();
+        assert!(err.to_string().contains("init tscObj with token failed"));
+
+        let tmq = TmqBuilder::from_dsn(
+            "taos://invalid_user:invalid_pass@localhost:6030?group.id=7265&bearer_token=invalid_token"
+        )?;
+        let err = tmq.build().unwrap_err();
+        assert!(err.to_string().contains("init tscObj with token failed"));
+
+        let tmq = TmqBuilder::from_dsn(
+            "taos://invalid_user:invalid_pass@localhost:6030?group.id=7363&bearerToken=invalid_token"
+        )?;
+        let err = tmq.build().unwrap_err();
+        assert!(err.to_string().contains("init tscObj with token failed"));
+
+        std::thread::sleep(std::time::Duration::from_secs(3));
+
+        taos.exec_many([
+            "drop topic if exists topic_1772593323",
+            "drop database if exists test_1772593323",
+        ])?;
+
+        Ok(())
+    }
+
+    #[cfg(feature = "test-enterprise")]
+    #[test]
+    fn test_token_priority() -> anyhow::Result<()> {
+        use taos_query::prelude::sync::*;
+
+        let taos = crate::TaosBuilder::from_dsn("taos://localhost:6030")?.build()?;
+        taos.exec_many([
+            "drop token if exists token_1772593616",
+            "drop topic if exists topic_1772593616",
+            "drop database if exists test_1772593616",
+            "create database test_1772593616",
+            "create topic topic_1772593616 as database test_1772593616",
+        ])?;
+
+        let mut rs = taos.query("create token token_1772593616 from user root")?;
+        let mut rows: Vec<String> = rs.deserialize().try_collect()?;
+        assert_eq!(rows.len(), 1);
+        let token = rows.remove(0);
+
+        let tmq = TmqBuilder::from_dsn(format!(
+            "taos://invalid_user:invalid_pass@localhost:6030?group.id=3731&td.connect.token={token}&bearer_token=invalid_token"
+        ))?;
+        let mut consumer = tmq.build()?;
+        consumer.subscribe(["topic_1772593616"])?;
+        consumer.unsubscribe();
+
+        let tmq = TmqBuilder::from_dsn(format!(
+            "taos://invalid_user:invalid_pass@localhost:6030?group.id=9823&td.connect.token={token}&bearerToken=invalid_token"
+        ))?;
+        let mut consumer = tmq.build()?;
+        consumer.subscribe(["topic_1772593616"])?;
+        consumer.unsubscribe();
+
+        let tmq = TmqBuilder::from_dsn(format!(
+            "taos://invalid_user:invalid_pass@localhost:6030?group.id=8222&bearerToken={token}&bearer_token=invalid_token"
+        ))?;
+        let mut consumer = tmq.build()?;
+        consumer.subscribe(["topic_1772593616"])?;
+        consumer.unsubscribe();
+
+        let tmq = TmqBuilder::from_dsn(format!(
+            "taos://invalid_user:invalid_pass@localhost:6030?group.id=9827&bearerToken={token}"
+        ))?;
+        let mut consumer = tmq.build()?;
+        consumer.subscribe(["topic_1772593616"])?;
+        consumer.unsubscribe();
+
+        let tmq = TmqBuilder::from_dsn(format!(
+            "taos://invalid_user:invalid_pass@localhost:6030?group.id=8371&bearer_token={token}"
+        ))?;
+        let mut consumer = tmq.build()?;
+        consumer.subscribe(["topic_1772593616"])?;
+        consumer.unsubscribe();
+
+        std::thread::sleep(std::time::Duration::from_secs(3));
+
+        taos.exec_many([
+            "drop token if exists token_1772593616",
+            "drop topic if exists topic_1772593616",
+            "drop database if exists test_1772593616",
         ])?;
 
         Ok(())
@@ -2915,10 +3119,11 @@ mod async_tests {
     #[cfg(feature = "test-enterprise")]
     #[tokio::test]
     async fn test_connect_with_token() -> anyhow::Result<()> {
+        use crate::tmq::{Data, Meta};
+        use crate::{TaosBuilder, TmqBuilder};
         use taos_query::prelude::*;
         use taos_query::tmq::IsAsyncData;
-
-        use crate::{TaosBuilder, TmqBuilder};
+        use tokio::sync::{mpsc, oneshot};
 
         let taos = TaosBuilder::from_dsn("taos://localhost:6030")?
             .build()
@@ -2943,7 +3148,6 @@ mod async_tests {
         let token = rows.remove(0);
 
         let num = 100;
-
         let (msg_tx, mut msg_rx) =
             mpsc::channel::<(MessageSet<Meta, Data>, oneshot::Sender<bool>)>(32);
 
@@ -2968,7 +3172,7 @@ mod async_tests {
 
         let poll_handle: tokio::task::JoinHandle<anyhow::Result<()>> = tokio::spawn(async move {
             let tmq = TmqBuilder::from_dsn(format!(
-                "taos://invalid_user:invalid_pass@localhost:6030?group.id=8939&auto.offset.reset=earliest&td.connect.token={token}"
+                "taos://invalid_user:invalid_pass@localhost:6030?group.id=8939&auto.offset.reset=earliest&bearer_token={token}"
             ))?;
             let mut consumer = tmq.build().await?;
             consumer.subscribe(["topic_1772587050"]).await?;
@@ -3021,9 +3225,8 @@ mod async_tests {
     #[cfg(feature = "test-enterprise")]
     #[tokio::test]
     async fn test_connect_with_invalid_token() -> anyhow::Result<()> {
-        use taos_query::prelude::*;
-
         use crate::{TaosBuilder, TmqBuilder};
+        use taos_query::prelude::*;
 
         let taos = TaosBuilder::from_dsn("taos://localhost:6030")?
             .build()
@@ -3069,11 +3272,8 @@ mod async_tests {
     #[cfg(feature = "test-enterprise")]
     #[tokio::test]
     async fn test_token_priority() -> anyhow::Result<()> {
-        use taos_query::prelude::*;
-
         use crate::{TaosBuilder, TmqBuilder};
-
-        pretty_env_logger::try_init().ok();
+        use taos_query::prelude::*;
 
         let taos = TaosBuilder::from_dsn("taos://localhost:6030")?
             .build()
