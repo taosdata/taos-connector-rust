@@ -3185,13 +3185,13 @@ mod tests {
             .await?;
 
         taos.exec_many([
+            "drop token if exists token_1772264645",
             "drop topic if exists topic_1772264645",
             "drop database if exists test_1772264645",
             "create database test_1772264645",
             "create topic topic_1772264645 as database test_1772264645",
             "use test_1772264645",
             "create table t0 (ts timestamp, c1 int)",
-            "drop token if exists token_1772264645",
         ])
         .await?;
 
@@ -3203,7 +3203,6 @@ mod tests {
         let token = rows.remove(0);
 
         let num = 100;
-
         let (msg_tx, mut msg_rx) =
             mpsc::channel::<(MessageSet<Meta, Data>, oneshot::Sender<bool>)>(32);
 
@@ -3228,7 +3227,7 @@ mod tests {
 
         let poll_handle: tokio::task::JoinHandle<anyhow::Result<()>> = tokio::spawn(async move {
             let tmq = TmqBuilder::from_dsn(format!(
-                "ws://invalid_user:invalid_pass@localhost:6041?group.id=3749&auto.offset.reset=earliest&td.connect.token={token}&bearer_token=invalid_token"
+                "ws://invalid_user:invalid_pass@localhost:6041?group.id=3749&auto.offset.reset=earliest&td.connect.token={token}"
             ))?;
             let mut consumer = tmq.build().await?;
             consumer.subscribe(["topic_1772264645"]).await?;
@@ -3288,13 +3287,13 @@ mod tests {
             .await?;
 
         taos.exec_many([
+            "drop token if exists token_1772505637",
             "drop topic if exists topic_1772505637",
             "drop database if exists test_1772505637",
             "create database test_1772505637",
             "create topic topic_1772505637 as database test_1772505637",
             "use test_1772505637",
             "create table t0 (ts timestamp, c1 int)",
-            "drop token if exists token_1772505637",
         ])
         .await?;
 
@@ -3306,7 +3305,6 @@ mod tests {
         let token = rows.remove(0);
 
         let num = 100;
-
         let (msg_tx, mut msg_rx) =
             mpsc::channel::<(MessageSet<Meta, Data>, oneshot::Sender<bool>)>(32);
 
@@ -3397,30 +3395,8 @@ mod tests {
             "create topic topic_1772507246 as database test_1772507246",
             "use test_1772507246",
             "create table t0 (ts timestamp, c1 int)",
-            "drop token if exists token_1772507246",
         ])
         .await?;
-
-        let mut rs = taos
-            .query("create token token_1772507246 from user root")
-            .await?;
-        let mut rows: Vec<String> = rs.deserialize().try_collect().await?;
-        assert_eq!(rows.len(), 1);
-        let token = rows.remove(0);
-
-        let tmq = TmqBuilder::from_dsn(
-            "ws://invalid_user:invalid_pass@localhost:6041?group.id=8367&bearer_token=invalid_token"
-        )?;
-        let mut consumer = tmq.build().await?;
-        let err = consumer.subscribe(["topic_1772507246"]).await.unwrap_err();
-        assert!(err.to_string().contains("init tscObj with token failed"));
-
-        let tmq = TmqBuilder::from_dsn(format!(
-            "ws://invalid_user:invalid_pass@localhost:6041?group.id=8367&bearer_token={token}"
-        ))?;
-        let mut consumer = tmq.build().await?;
-        consumer.subscribe(["topic_1772507246"]).await?;
-        consumer.unsubscribe().await;
 
         let tmq = TmqBuilder::from_dsn(
             "ws://invalid_user:invalid_pass@localhost:6041?group.id=8367&td.connect.token=invalid_token"
@@ -3429,33 +3405,78 @@ mod tests {
         let err = consumer.subscribe(["topic_1772507246"]).await.unwrap_err();
         assert!(err.to_string().contains("init tscObj with token failed"));
 
-        let tmq = TmqBuilder::from_dsn(format!(
-            "ws://invalid_user:invalid_pass@localhost:6041?group.id=8367&td.connect.token={token}"
-        ))?;
-        let mut consumer = tmq.build().await?;
-        consumer.subscribe(["topic_1772507246"]).await?;
-        consumer.unsubscribe().await;
-
-        let tmq = TmqBuilder::from_dsn(format!(
-            "ws://invalid_user:invalid_pass@localhost:6041?group.id=8367&td.connect.token=invalid_token&bearer_token={token}"
-        ))?;
+        let tmq = TmqBuilder::from_dsn(
+            "ws://invalid_user:invalid_pass@localhost:6041?group.id=8367&bearer_token=invalid_token"
+        )?;
         let mut consumer = tmq.build().await?;
         let err = consumer.subscribe(["topic_1772507246"]).await.unwrap_err();
         assert!(err.to_string().contains("init tscObj with token failed"));
+
+        tokio::time::sleep(Duration::from_secs(3)).await;
+
+        taos.exec_many([
+            "drop topic if exists topic_1772507246",
+            "drop database if exists test_1772507246",
+        ])
+        .await?;
+
+        Ok(())
+    }
+
+    #[cfg(feature = "test-enterprise")]
+    #[tokio::test]
+    async fn test_token_priority() -> anyhow::Result<()> {
+        use taos_query::prelude::*;
+
+        let taos = TaosBuilder::from_dsn("ws://localhost:6041")?
+            .build()
+            .await?;
+
+        taos.exec_many([
+            "drop token if exists token_1772595214",
+            "drop topic if exists topic_1772595214",
+            "drop database if exists test_1772595214",
+            "create database test_1772595214",
+            "create topic topic_1772595214 as database test_1772595214",
+            "use test_1772595214",
+            "create table t0 (ts timestamp, c1 int)",
+        ])
+        .await?;
+
+        let mut rs = taos
+            .query("create token token_1772595214 from user root")
+            .await?;
+        let mut rows: Vec<String> = rs.deserialize().try_collect().await?;
+        assert_eq!(rows.len(), 1);
+        let token = rows.remove(0);
 
         let tmq = TmqBuilder::from_dsn(format!(
             "ws://invalid_user:invalid_pass@localhost:6041?group.id=8367&td.connect.token={token}&bearer_token=invalid_token"
         ))?;
         let mut consumer = tmq.build().await?;
-        consumer.subscribe(["topic_1772507246"]).await?;
+        consumer.subscribe(["topic_1772595214"]).await?;
+        consumer.unsubscribe().await;
+
+        let tmq = TmqBuilder::from_dsn(format!(
+            "ws://invalid_user:invalid_pass@localhost:6041?group.id=8367&td.connect.token={token}"
+        ))?;
+        let mut consumer = tmq.build().await?;
+        consumer.subscribe(["topic_1772595214"]).await?;
+        consumer.unsubscribe().await;
+
+        let tmq = TmqBuilder::from_dsn(format!(
+            "ws://invalid_user:invalid_pass@localhost:6041?group.id=8367&bearer_token={token}"
+        ))?;
+        let mut consumer = tmq.build().await?;
+        consumer.subscribe(["topic_1772595214"]).await?;
         consumer.unsubscribe().await;
 
         tokio::time::sleep(Duration::from_secs(3)).await;
 
         taos.exec_many([
-            "drop token if exists token_1772507246",
-            "drop topic if exists topic_1772507246",
-            "drop database if exists test_1772507246",
+            "drop token if exists token_1772595214",
+            "drop topic if exists topic_1772595214",
+            "drop database if exists test_1772595214",
         ])
         .await?;
 
