@@ -3630,8 +3630,6 @@ mod tests {
 
             taos_free_result(res);
 
-            let token = CString::new(token).unwrap();
-
             let conf = tmq_conf_new();
             assert!(!conf.is_null());
 
@@ -3709,8 +3707,10 @@ mod tests {
 
             assert_eq!(cnt, 4);
 
-            tmq_unsubscribe(consumer);
-            tmq_consumer_close(consumer);
+            let code = tmq_unsubscribe(consumer);
+            assert_eq!(code, 0);
+            let code = tmq_consumer_close(consumer);
+            assert_eq!(code, 0);
 
             std::thread::sleep(std::time::Duration::from_secs(3));
 
@@ -3719,7 +3719,7 @@ mod tests {
                 &[
                     "drop token if exists token_1772709156",
                     "drop topic if exists topic_1772709156",
-                    "drop database if exists topic_1772709156",
+                    "drop database if exists test_1772709156",
                 ],
             );
             taos_close(taos);
@@ -3784,6 +3784,9 @@ mod tests {
 
             tmq_conf_destroy(conf);
             tmq_list_destroy(list);
+
+            let code = tmq_consumer_close(consumer);
+            assert_eq!(code, 0);
 
             test_exec_many(
                 taos,
