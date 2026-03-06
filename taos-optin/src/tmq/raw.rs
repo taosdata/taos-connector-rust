@@ -575,7 +575,14 @@ pub(super) mod conf {
         }
 
         fn set<K: AsRef<str>, V: AsRef<str>>(&self, key: K, value: V) -> RawResult<&Self> {
-            tracing::info!("set {}={}", key.as_ref(), value.as_ref());
+            tracing::info!(
+                "set {}={}",
+                key.as_ref(),
+                match key.as_ref() {
+                    "td.connect.pass" | "td.connect.token" => "[REDACTED]",
+                    _ => value.as_ref(),
+                }
+            );
             unsafe {
                 self.api
                     .set_conf(self.as_ptr(), key.as_ref(), value.as_ref())
