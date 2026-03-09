@@ -144,7 +144,7 @@ impl BorrowedValue<'_> {
             Json(v) => format!("\"{}\"", unsafe { std::str::from_utf8_unchecked(v) }),
             Decimal(v) => v.to_string(),
             Decimal64(v) => v.to_string(),
-            VarBinary(cow) | Blob(cow) => hex::bytes_to_sql_hex_string(cow),
+            VarBinary(v) | Blob(v) => hex::bytes_to_sql_hex_string(v),
             v => unreachable!("unsupported type: {}", v.ty()),
         }
     }
@@ -170,7 +170,7 @@ impl BorrowedValue<'_> {
             Json(v) => format!("\"{}\"", unsafe { std::str::from_utf8_unchecked(v) }),
             Decimal(v) => v.to_string(),
             Decimal64(v) => v.to_string(),
-            VarBinary(cow) | Blob(cow) => hex::bytes_to_sql_hex_string(cow),
+            VarBinary(v) | Blob(v) => hex::bytes_to_sql_hex_string(v),
             v => unreachable!("unsupported type: {}", v.ty()),
         }
     }
@@ -213,9 +213,7 @@ impl BorrowedValue<'_> {
             Timestamp(v) => Ok(v.to_datetime_with_tz().to_rfc3339()),
             Decimal(v) => Ok(v.to_string()),
             Decimal64(v) => Ok(v.to_string()),
-            VarBinary(cow) | Blob(cow) | Geometry(cow) => {
-                std::str::from_utf8(cow).map(|s| s.to_string())
-            }
+            VarBinary(v) | Blob(v) | Geometry(v) => std::str::from_utf8(v).map(|s| s.to_string()),
             v @ MediumBlob(_) => unreachable!("unsupported type: {}", v.ty()),
         }
     }
@@ -605,7 +603,7 @@ impl Value {
             UBigInt(v) => format!("{v}"),
             Json(v) => format!("\"{v}\""),
             Decimal(v) | Decimal64(v) => format!("{v}"),
-            VarBinary(bytes) | Blob(bytes) => hex::bytes_to_sql_hex_string(bytes),
+            VarBinary(v) | Blob(v) => hex::bytes_to_sql_hex_string(v),
             v => unreachable!("unsupported type: {}", v.ty()),
         }
     }
@@ -629,7 +627,7 @@ impl Value {
             UBigInt(v) => format!("{v}"),
             Json(v) => format!("\"{v}\""),
             Decimal(v) | Decimal64(v) => format!("{v}"),
-            VarBinary(bytes) | Blob(bytes) => hex::bytes_to_sql_hex_string(bytes),
+            VarBinary(v) | Blob(v) => hex::bytes_to_sql_hex_string(v),
             v => unreachable!("unsupported type: {}", v.ty()),
         }
     }
@@ -653,9 +651,7 @@ impl Value {
             Double(v) => Ok(format!("{v}")),
             Decimal(v) | Decimal64(v) => Ok(v.to_string()),
             Timestamp(v) => Ok(v.to_datetime_with_tz().to_rfc3339()),
-            VarBinary(bytes) | Blob(bytes) | Geometry(bytes) => {
-                std::str::from_utf8(bytes).map(std::string::ToString::to_string)
-            }
+            VarBinary(v) | Blob(v) | Geometry(v) => std::str::from_utf8(v).map(|s| s.to_string()),
             v @ MediumBlob(_) => unreachable!("unsupported type: {}", v.ty()),
         }
     }
