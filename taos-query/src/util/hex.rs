@@ -118,7 +118,7 @@ mod tests {
         let bytes = [
             0x00, 0x01, 0x10, 0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xFF,
         ];
-        let sql = bytes_to_sql_hex_string(&bytes);
-        assert_eq!(sql, "\"\\x000110123456789ABCDEFF\"");
+        let hex = bytes_to_sql_hex_string(&bytes);
+        assert_eq!(hex, "\"\\x000110123456789ABCDEFF\"");
     }
 }

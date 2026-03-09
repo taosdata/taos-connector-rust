@@ -1459,18 +1459,18 @@ mod tests {
         let varbinary_value = Value::VarBinary(Bytes::from(vec![0x00, 0x01, 0xAB, 0xFF]));
         assert!(varbinary_value.to_string().is_err());
 
-        let blob_value = Value::VarBinary(Bytes::from(vec![0x68, 0x65, 0x6C, 0x6C, 0x6F]));
+        let blob_value = Value::Blob(Bytes::from(vec![0x68, 0x65, 0x6C, 0x6C, 0x6F]));
         assert_eq!(blob_value.to_string(), Ok("hello".to_string()));
 
-        let blob_value = Value::VarBinary(Bytes::from(vec![0x00, 0x01, 0xAB, 0xFF]));
+        let blob_value = Value::Blob(Bytes::from(vec![0x00, 0x01, 0xAB, 0xFF]));
         assert!(blob_value.to_string().is_err());
 
-        let geo_value = Value::VarBinary(Bytes::from(vec![
+        let geo_value = Value::Geometry(Bytes::from(vec![
             0x70, 0x6F, 0x69, 0x6E, 0x74, 0x28, 0x31, 0x20, 0x31, 0x29,
         ]));
         assert_eq!(geo_value.to_string(), Ok("point(1 1)".to_string()));
 
-        let geo_value = Value::VarBinary(Bytes::from(vec![0x00, 0x01, 0xAB, 0xFF]));
+        let geo_value = Value::Geometry(Bytes::from(vec![0x00, 0x01, 0xAB, 0xFF]));
         assert!(geo_value.to_string().is_err());
     }
 
