@@ -6,6 +6,8 @@ use bigdecimal::{BigDecimal, Zero};
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 
+use crate::util::hex;
+
 use super::decimal::Decimal;
 use super::{Timestamp, Ty};
 
@@ -142,7 +144,8 @@ impl BorrowedValue<'_> {
             Json(v) => format!("\"{}\"", unsafe { std::str::from_utf8_unchecked(v) }),
             Decimal(v) => v.to_string(),
             Decimal64(v) => v.to_string(),
-            _ => todo!(),
+            VarBinary(cow) | Blob(cow) => hex::bytes_to_sql_hex_string(cow),
+            v => unreachable!("unsupported type: {}", v.ty()),
         }
     }
 
@@ -167,7 +170,8 @@ impl BorrowedValue<'_> {
             Json(v) => format!("\"{}\"", unsafe { std::str::from_utf8_unchecked(v) }),
             Decimal(v) => v.to_string(),
             Decimal64(v) => v.to_string(),
-            _ => todo!(),
+            VarBinary(cow) | Blob(cow) => hex::bytes_to_sql_hex_string(cow),
+            v => unreachable!("unsupported type: {}", v.ty()),
         }
     }
 
@@ -209,7 +213,10 @@ impl BorrowedValue<'_> {
             Timestamp(v) => Ok(v.to_datetime_with_tz().to_rfc3339()),
             Decimal(v) => Ok(v.to_string()),
             Decimal64(v) => Ok(v.to_string()),
-            _ => unreachable!("un supported type to string"),
+            VarBinary(cow) | Blob(cow) | Geometry(cow) => {
+                std::str::from_utf8(cow).map(|s| s.to_string())
+            }
+            v => unreachable!("unsupported type: {}", v.ty()),
         }
     }
 
@@ -598,7 +605,8 @@ impl Value {
             UBigInt(v) => format!("{v}"),
             Json(v) => format!("\"{v}\""),
             Decimal(v) | Decimal64(v) => format!("{v}"),
-            _ => todo!(),
+            VarBinary(bytes) | Blob(bytes) => hex::bytes_to_sql_hex_string(bytes),
+            v => unreachable!("unsupported type: {}", v.ty()),
         }
     }
 
@@ -621,7 +629,8 @@ impl Value {
             UBigInt(v) => format!("{v}"),
             Json(v) => format!("\"{v}\""),
             Decimal(v) | Decimal64(v) => format!("{v}"),
-            _ => todo!(),
+            VarBinary(bytes) | Blob(bytes) => hex::bytes_to_sql_hex_string(bytes),
+            v => unreachable!("unsupported type: {}", v.ty()),
         }
     }
 
@@ -644,7 +653,10 @@ impl Value {
             Double(v) => Ok(format!("{v}")),
             Decimal(v) | Decimal64(v) => Ok(v.to_string()),
             Timestamp(v) => Ok(v.to_datetime_with_tz().to_rfc3339()),
-            _ => unreachable!("unsupported type to string"),
+            VarBinary(bytes) | Blob(bytes) | Geometry(bytes) => {
+                std::str::from_utf8(bytes).map(std::string::ToString::to_string)
+            }
+            v => unreachable!("unsupported type: {}", v.ty()),
         }
     }
 
@@ -1346,6 +1358,15 @@ mod tests {
     }
 
     #[test]
+    fn test_value_to_sql_value() {
+        let varbinary_value = Value::VarBinary(Bytes::from(vec![0x00, 0x01, 0xAB, 0xFF]));
+        assert_eq!(varbinary_value.to_sql_value(), "\"\\x0001ABFF\"");
+
+        let blob_value = Value::Blob(Bytes::from(vec![0x00, 0x01, 0xAB, 0xFF]));
+        assert_eq!(blob_value.to_sql_value(), "\"\\x0001ABFF\"");
+    }
+
+    #[test]
     fn test_value_to_sql_value_with_rfc3339() {
         let null_value = Value::Null(Ty::Int);
         assert_eq!(null_value.to_sql_value_with_rfc3339(), "NULL".to_string());
@@ -1423,6 +1444,38 @@ mod tests {
             json_value.to_sql_value_with_rfc3339(),
             "\"{\"hello\":\"world\"}\"".to_string()
         );
+
+        let varbinary_value = Value::VarBinary(Bytes::from(vec![0x00, 0x01, 0xAB, 0xFF]));
+        assert_eq!(
+            varbinary_value.to_sql_value_with_rfc3339(),
+            "\"\\x0001ABFF\""
+        );
+
+        let blob_value = Value::Blob(Bytes::from(vec![0x00, 0x01, 0xAB, 0xFF]));
+        assert_eq!(blob_value.to_sql_value_with_rfc3339(), "\"\\x0001ABFF\"");
+    }
+
+    #[test]
+    fn test_value_to_string() {
+        let varbinary_value = Value::VarBinary(Bytes::from(vec![0x68, 0x65, 0x6C, 0x6C, 0x6F]));
+        assert_eq!(varbinary_value.to_string(), Ok("hello".to_string()));
+
+        let varbinary_value = Value::VarBinary(Bytes::from(vec![0x00, 0x01, 0xAB, 0xFF]));
+        assert!(varbinary_value.to_string().is_err());
+
+        let blob_value = Value::VarBinary(Bytes::from(vec![0x68, 0x65, 0x6C, 0x6C, 0x6F]));
+        assert_eq!(blob_value.to_string(), Ok("hello".to_string()));
+
+        let blob_value = Value::VarBinary(Bytes::from(vec![0x00, 0x01, 0xAB, 0xFF]));
+        assert!(blob_value.to_string().is_err());
+
+        let geo_value = Value::VarBinary(Bytes::from(vec![
+            0x70, 0x6F, 0x69, 0x6E, 0x74, 0x28, 0x31, 0x20, 0x31, 0x29,
+        ]));
+        assert_eq!(geo_value.to_string(), Ok("point(1 1)".to_string()));
+
+        let geo_value = Value::VarBinary(Bytes::from(vec![0x00, 0x01, 0xAB, 0xFF]));
+        assert!(geo_value.to_string().is_err());
     }
 
     #[test]
@@ -1495,6 +1548,15 @@ mod tests {
         let nchar_value = Value::NChar("hello".to_string());
         let b_nchar_value = nchar_value.to_borrowed_value();
         assert_eq!(b_nchar_value.to_sql_value(), "\"hello\"".to_string());
+
+        let varbinary_value = BorrowedValue::VarBinary(Cow::from(vec![0x00, 0x01, 0xAB, 0xFF]));
+        assert_eq!(
+            varbinary_value.to_sql_value_with_rfc3339(),
+            "\"\\x0001ABFF\""
+        );
+
+        let blob_value = BorrowedValue::Blob(Cow::from(vec![0x00, 0x01, 0xAB, 0xFF]));
+        assert_eq!(blob_value.to_sql_value_with_rfc3339(), "\"\\x0001ABFF\"");
     }
 
     #[test]
@@ -1544,6 +1606,36 @@ mod tests {
         let nchar_value = Value::NChar("hello".to_string());
         let b_nchar_value = nchar_value.to_borrowed_value();
         assert_eq!(b_nchar_value.to_sql_value(), "\"hello\"".to_string());
+
+        let varbinary_value = BorrowedValue::VarBinary(Cow::from(vec![0x00, 0x01, 0xAB, 0xFF]));
+        assert_eq!(varbinary_value.to_sql_value(), "\"\\x0001ABFF\"");
+
+        let blob_value = BorrowedValue::Blob(Cow::from(vec![0x00, 0x01, 0xAB, 0xFF]));
+        assert_eq!(blob_value.to_sql_value(), "\"\\x0001ABFF\"");
+    }
+
+    #[test]
+    fn test_to_string() {
+        let varbinary_value =
+            BorrowedValue::VarBinary(Cow::from(vec![0x68, 0x65, 0x6C, 0x6C, 0x6F]));
+        assert_eq!(varbinary_value.to_string(), Ok("hello".to_string()));
+
+        let varbinary_value = BorrowedValue::VarBinary(Cow::from(vec![0x00, 0x01, 0xAB, 0xFF]));
+        assert!(varbinary_value.to_string().is_err());
+
+        let blob_value = BorrowedValue::Blob(Cow::from(vec![0x68, 0x65, 0x6C, 0x6C, 0x6F]));
+        assert_eq!(blob_value.to_string(), Ok("hello".to_string()));
+
+        let blob_value = BorrowedValue::Blob(Cow::from(vec![0x00, 0x01, 0xAB, 0xFF]));
+        assert!(blob_value.to_string().is_err());
+
+        let geo_value = BorrowedValue::Geometry(Cow::from(vec![
+            0x70, 0x6F, 0x69, 0x6E, 0x74, 0x28, 0x31, 0x20, 0x31, 0x29,
+        ]));
+        assert_eq!(geo_value.to_string(), Ok("point(1 1)".to_string()));
+
+        let geo_value = BorrowedValue::Geometry(Cow::from(vec![0x00, 0x01, 0xAB, 0xFF]));
+        assert!(geo_value.to_string().is_err());
     }
 
     #[test]

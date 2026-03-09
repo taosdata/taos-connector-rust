@@ -146,11 +146,6 @@ impl GeometryView {
             wtr.write_all(&bytes)?;
             Ok(offsets_bytes.len() + bytes.len())
         }
-        // let offsets = self.offsets.as_bytes();
-        // dbg!(self, offsets);
-        // wtr.write_all(offsets)?;
-        // wtr.write_all(&self.data)?;
-        // Ok(offsets.len() + self.data.len())
     }
 
     pub fn from_iter<
@@ -187,10 +182,6 @@ impl GeometryView {
             data: data.into(),
         }
     }
-
-    // pub fn concat(&self, rhs: &Self) -> Self {
-    //     Self::from_iter::<&InlineJson, _, _, _>(self.iter().chain(rhs.iter()).collect_vec())
-    // }
 }
 
 pub struct GeometryIter<'a> {

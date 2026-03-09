@@ -43,6 +43,27 @@ pub fn slice_to_hex_upper_with_prefix(slice: &[u8]) -> Vec<u8> {
     hex_buf
 }
 
+pub fn bytes_to_sql_hex_string(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+
+    let mut out = vec![0_u8; bytes.len() * 2 + 4];
+    out[0] = b'"';
+    out[1] = b'\\';
+    out[2] = b'x';
+
+    let mut index = 3;
+    for &byte in bytes {
+        out[index] = HEX[(byte >> 4) as usize];
+        out[index + 1] = HEX[(byte & 0x0f) as usize];
+        index += 2;
+    }
+
+    out[index] = b'"';
+
+    // SAFETY: out only contains ASCII bytes ('"', '\\', 'x', '0'..'9', 'A'..'F'), always valid UTF-8.
+    unsafe { String::from_utf8_unchecked(out) }
+}
+
 #[cfg(test)]
 mod tests {
     use bytes::Bytes;
@@ -90,5 +111,14 @@ mod tests {
         ];
         let hex = slice_to_hex_upper_with_prefix(slice);
         assert_eq!(hex, b"\\x000110123456789ABCDEFF");
+    }
+
+    #[test]
+    fn test_bytes_to_sql_hex_string() {
+        let bytes = [
+            0x00, 0x01, 0x10, 0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xFF,
+        ];
+        let sql = bytes_to_sql_hex_string(&bytes);
+        assert_eq!(sql, "\"\\x000110123456789ABCDEFF\"");
     }
 }
