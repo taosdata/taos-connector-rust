@@ -46,7 +46,7 @@ pub fn slice_to_hex_upper_with_prefix(slice: &[u8]) -> Vec<u8> {
 pub fn bytes_to_sql_hex_string(bytes: &[u8]) -> String {
     const HEX: &[u8; 16] = b"0123456789ABCDEF";
 
-    let mut out = vec![0_u8; bytes.len() * 2 + 4];
+    let mut out = vec![0u8; bytes.len() * 2 + 4];
     out[0] = b'"';
     out[1] = b'\\';
     out[2] = b'x';

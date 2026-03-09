@@ -216,7 +216,7 @@ impl BorrowedValue<'_> {
             VarBinary(cow) | Blob(cow) | Geometry(cow) => {
                 std::str::from_utf8(cow).map(|s| s.to_string())
             }
-            v => unreachable!("unsupported type: {}", v.ty()),
+            v @ MediumBlob(_) => unreachable!("unsupported type: {}", v.ty()),
         }
     }
 
@@ -656,7 +656,7 @@ impl Value {
             VarBinary(bytes) | Blob(bytes) | Geometry(bytes) => {
                 std::str::from_utf8(bytes).map(std::string::ToString::to_string)
             }
-            v => unreachable!("unsupported type: {}", v.ty()),
+            v @ MediumBlob(_) => unreachable!("unsupported type: {}", v.ty()),
         }
     }
 
