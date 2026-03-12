@@ -935,6 +935,7 @@ impl<'a> Display for RedactedDsn<'a> {
                             "bearer_token",
                             "bearerToken",
                             "token",
+                            "td.connect.token",
                         ];
                         let value = if SENSITIVE_PARAMS.contains(&k.as_str()) {
                             "[REDACTED]"
@@ -2221,6 +2222,10 @@ j/p1+4zmwB7F4u64uwBzwcZN5qCcAkfYYxjPbGARED4pA8YVpMx2DqmeYdR5pTj8
         let dsn = Dsn::from_str("ws://localhost:6041?token=my_cloud_token").unwrap();
         let dsn_str = format!("{}", dsn.redacted());
         assert_eq!(dsn_str, "ws://localhost:6041?token=[REDACTED]");
+
+        let dsn = Dsn::from_str("ws://localhost:6041?td.connect.token=my_token").unwrap();
+        let dsn_str = format!("{}", dsn.redacted());
+        assert_eq!(dsn_str, "ws://localhost:6041?td.connect.token=[REDACTED]");
     }
 
     #[test]
