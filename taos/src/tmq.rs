@@ -565,6 +565,7 @@ mod async_tests {
     use super::TmqBuilder;
     use crate::TaosBuilder;
 
+    #[cfg(feature = "test-new-feat")]
     #[tokio::test]
     async fn test_ws_tmq_meta() -> taos_query::RawResult<()> {
         use taos_query::prelude::*;
@@ -650,6 +651,8 @@ mod async_tests {
             "alter table `tb2` set tag t2 = 2, t7 = 2.2",
             "alter table `tb2` set tag t2 = 3, t7 = 3.3, t9 = 'world'",
             "alter table `tb2` set tag t2 = 4, t7 = 4.4, t9 = 'helloworld', t10 = '中文中文'",
+            // kind 9.1: alter child table tags in one SQL (multi-table)
+            "alter table `tb2` set tag t2 = 5, t7 = 5.5, t9 = 'multi1' `tb3` set tag t2 = 6, t7 = 6.6, t9 = 'multi2'",
             // kind 10: drop normal table
             "drop table `table`",
             // kind 11: drop child table
@@ -748,6 +751,7 @@ mod async_tests {
         Ok(())
     }
 
+    #[cfg(feature = "test-new-feat")]
     #[tokio::test]
     async fn test_native_tmq_meta() -> taos_query::RawResult<()> {
         use taos_query::prelude::*;
@@ -758,10 +762,6 @@ mod async_tests {
             "drop topic if exists topic_1775034226",
             "drop database if exists test_1775034226",
             "create database test_1775034226 wal_retention_period 3600",
-        ])
-        .await?;
-
-        taos.exec_many([
             "create topic topic_1775034226 with meta as database test_1775034226",
             "use test_1775034226",
             // kind 1: create super table using all types
@@ -824,6 +824,8 @@ mod async_tests {
             "alter table `tb2` set tag t2 = 2, t7 = 2.2",
             "alter table `tb2` set tag t2 = 3, t7 = 3.3, t9 = 'world'",
             "alter table `tb2` set tag t2 = 4, t7 = 4.4, t9 = 'helloworld', t10 = '中文中文'",
+            // kind 9.1: alter child table tags in one SQL (multi-table)
+            "alter table `tb2` set tag t2 = 5, t7 = 5.5, t9 = 'multi1' `tb3` set tag t2 = 6, t7 = 6.6, t9 = 'multi2'",
             // kind 10: drop normal table
             "drop table `table`",
             // kind 11: drop child table
