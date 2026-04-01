@@ -303,6 +303,7 @@ pub enum AlterType {
     // TODO: TDengine 3.3.0 encode/compress/level support.
     // ModifyColumnCompression = 13,
     SetMultiTagValue = 15,
+    SetMultiTableTagValue = 19,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -317,6 +318,7 @@ pub struct MetaAlter {
     pub col_value: Option<String>,
     pub col_value_null: Option<bool>,
     pub tags: Option<Vec<Tag>>,
+    pub tables: Option<Vec<Table>>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -326,6 +328,13 @@ pub struct Tag {
     #[serde(default)]
     pub col_value: String,
     pub col_value_null: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Table {
+    pub table_name: String,
+    pub tags: Vec<Tag>,
 }
 
 impl Display for MetaAlter {
@@ -402,6 +411,35 @@ impl Display for MetaAlter {
                         }
                         if i < tags.len() - 1 {
                             f.write_str(", ")?;
+                        }
+                    }
+                }
+                Ok(())
+            }
+            AlterType::SetMultiTableTagValue => {
+                if let Some(tables) = self.tables.as_deref() {
+                    for (table_index, table) in tables.iter().enumerate() {
+                        if table_index == 0 {
+                            f.write_fmt(format_args!(
+                                "ALTER TABLE `{}` SET TAG ",
+                                table.table_name
+                            ))?;
+                        } else {
+                            f.write_fmt(format_args!(" `{}` SET TAG ", table.table_name))?;
+                        }
+
+                        for (tag_index, tag) in table.tags.iter().enumerate() {
+                            if tag.col_value_null {
+                                f.write_fmt(format_args!("`{}` = NULL", tag.col_name))?;
+                            } else {
+                                f.write_fmt(format_args!(
+                                    "`{}` = {}",
+                                    tag.col_name, tag.col_value
+                                ))?;
+                            }
+                            if tag_index < table.tags.len() - 1 {
+                                f.write_str(", ")?;
+                            }
                         }
                     }
                 }
@@ -757,6 +795,43 @@ mod tests {
         assert_eq!(
             meta.to_string(),
             "ALTER TABLE `ctb` SET TAG `t1` = 5000, `t2` = 1000, `t3` = 'hello', `t4` = NULL"
+        );
+    }
+
+    #[test]
+    fn test_meta_alter_set_multi_table_tag_val() {
+        let value = serde_json::json!({
+            "type": "alter",
+            "tableType": "child",
+            "tableName": "",
+            "alterType": 19,
+            "tables": [{
+                "tableName": "tb1",
+                "tags": [{
+                    "colName": "t1",
+                    "colValue": "5000",
+                    "colValueNull": false
+                }, {
+                    "colName": "t2",
+                    "colValueNull": true
+                }]
+            }, {
+                "tableName": "tb2",
+                "tags": [{
+                    "colName": "t3",
+                    "colValue": "1000",
+                    "colValueNull": false
+                }, {
+                    "colName": "t4",
+                    "colValue": "'hello'",
+                    "colValueNull": false
+                }]
+            }]
+        });
+        let meta = serde_json::from_str::<MetaUnit>(&value.to_json()).unwrap();
+        assert_eq!(
+            meta.to_string(),
+            "ALTER TABLE `tb1` SET TAG `t1` = 5000, `t2` = NULL `tb2` SET TAG `t3` = 1000, `t4` = 'hello'"
         );
     }
 }
