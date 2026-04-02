@@ -401,11 +401,6 @@ impl Display for MetaAlter {
                 self.field.name(),
                 self.col_new_name.as_ref().unwrap()
             )),
-            // ModifyColumnCompression => f.write_fmt(format_args!(
-            //     "ALTER TABLE `{}` MODIFY COLUMN {}",
-            //     self.table_name,
-            //     self.field.sql_repr(),
-            // )),
             AlterType::SetMultiTagValue => {
                 f.write_fmt(format_args!("ALTER TABLE `{}` SET TAG ", self.table_name))?;
                 if let Some(tags) = self.tags.as_deref() {

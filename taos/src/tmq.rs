@@ -1132,7 +1132,7 @@ mod async_tests {
             "create table tb2 using stb tags (200, 'beijing', 'low')",
             "alter table using stb set tag region = 'shanghai' where groupid = 100",
             "alter table using stb set tag region = REGEXP_REPLACE(region, 'tianji\"[a-z]', 'zhengzhou') where region = 'tianjin'",
-            "alter table using stb set tag region = 'guangzhou', level = 'high' where groupid = 200",
+            "alter table using stb set tag region = 'guangzhou', level = NULL where groupid = 200",
             "alter table using stb set tag region = REGEXP_REPLACE(region, 'bei[a-z]', 'shenzhen'), level = REGEXP_REPLACE(level, 'lo[a-z]', 'mid') where groupid = 200",
             format!("create database {dst_db} wal_retention_period 3600").as_str(),
             format!("use {dst_db}").as_str(),
@@ -1151,7 +1151,7 @@ mod async_tests {
         let expected_simple =
             "ALTER TABLE USING `stb` SET TAG `region` = \"shanghai\" WHERE `groupid` = 100";
         let expected_regexp = "ALTER TABLE USING `stb` SET TAG `region` = REGEXP_REPLACE(region, \"tianji\\\"[a-z]\", \"zhengzhou\") WHERE `region` = 'tianjin'";
-        let expected_multi = "ALTER TABLE USING `stb` SET TAG `region` = \"guangzhou\", `level` = \"high\" WHERE `groupid` = 200";
+        let expected_multi = "ALTER TABLE USING `stb` SET TAG `region` = \"guangzhou\", `level` = NULL WHERE `groupid` = 200";
         let expected_regexp_multi = "ALTER TABLE USING `stb` SET TAG `region` = REGEXP_REPLACE(region, \"bei[a-z]\", \"shenzhen\"), `level` = REGEXP_REPLACE(level, \"lo[a-z]\", \"mid\") WHERE `groupid` = 200";
         let mut seen_simple = false;
         let mut seen_regexp = false;
@@ -1258,7 +1258,7 @@ mod async_tests {
             "create table tb2 using stb tags (200, 'beijing', 'low')",
             "alter table using stb set tag region = 'shanghai' where groupid = 100",
             "alter table using stb set tag region = REGEXP_REPLACE(region, 'tianji\"[a-z]', 'zhengzhou') where region = 'tianjin'",
-            "alter table using stb set tag region = 'guangzhou', level = 'high' where groupid = 200",
+            "alter table using stb set tag region = 'guangzhou', level = NULL where groupid = 200",
             "alter table using stb set tag region = REGEXP_REPLACE(region, 'bei[a-z]', 'shenzhen'), level = REGEXP_REPLACE(level, 'lo[a-z]', 'mid') where groupid = 200",
             format!("create database {dst_db} wal_retention_period 3600").as_str(),
             format!("use {dst_db}").as_str(),
@@ -1277,7 +1277,7 @@ mod async_tests {
         let expected_simple =
             "ALTER TABLE USING `stb` SET TAG `region` = \"shanghai\" WHERE `groupid` = 100";
         let expected_regexp = "ALTER TABLE USING `stb` SET TAG `region` = REGEXP_REPLACE(region, \"tianji\\\"[a-z]\", \"zhengzhou\") WHERE `region` = 'tianjin'";
-        let expected_multi = "ALTER TABLE USING `stb` SET TAG `region` = \"guangzhou\", `level` = \"high\" WHERE `groupid` = 200";
+        let expected_multi = "ALTER TABLE USING `stb` SET TAG `region` = \"guangzhou\", `level` = NULL WHERE `groupid` = 200";
         let expected_regexp_multi = "ALTER TABLE USING `stb` SET TAG `region` = REGEXP_REPLACE(region, \"bei[a-z]\", \"shenzhen\"), `level` = REGEXP_REPLACE(level, \"lo[a-z]\", \"mid\") WHERE `groupid` = 200";
         let mut seen_simple = false;
         let mut seen_regexp = false;
