@@ -565,7 +565,6 @@ mod async_tests {
     use super::TmqBuilder;
     use crate::TaosBuilder;
 
-    #[cfg(feature = "test-new-feat")]
     #[tokio::test]
     async fn test_ws_tmq_meta() -> taos_query::RawResult<()> {
         use taos_query::prelude::*;
@@ -651,8 +650,6 @@ mod async_tests {
             "alter table `tb2` set tag t2 = 2, t7 = 2.2",
             "alter table `tb2` set tag t2 = 3, t7 = 3.3, t9 = 'world'",
             "alter table `tb2` set tag t2 = 4, t7 = 4.4, t9 = 'helloworld', t10 = '中文中文'",
-            // kind 9.1: alter child table tags in one SQL (multi-table)
-            "alter table `tb2` set tag t2 = 5, t7 = 5.5, t9 = 'multi1' `tb3` set tag t2 = 6, t7 = 6.6, t9 = 'multi2'",
             // kind 10: drop normal table
             "drop table `table`",
             // kind 11: drop child table
@@ -751,7 +748,6 @@ mod async_tests {
         Ok(())
     }
 
-    #[cfg(feature = "test-new-feat")]
     #[tokio::test]
     async fn test_native_tmq_meta() -> taos_query::RawResult<()> {
         use taos_query::prelude::*;
@@ -923,15 +919,202 @@ mod async_tests {
         Ok(())
     }
 
+    #[cfg(feature = "test-new-feat")]
+    #[tokio::test]
+    async fn test_ws_tmq_meta_multi_table_alter_tags() -> taos_query::RawResult<()> {
+        use taos_query::prelude::*;
+
+        let mut dsn = Dsn::from_str("ws://localhost:6041")?;
+        let taos = TaosBuilder::from_dsn(&dsn)?.build().await?;
+
+        let topic = "topic_1775101060";
+        let src_db = "test_1775101060";
+        let dst_db = "test_1775101095";
+
+        taos.exec_many([
+            format!("drop topic if exists {topic}").as_str(),
+            format!("drop database if exists {dst_db}").as_str(),
+            format!("drop database if exists {src_db}").as_str(),
+            format!("create database {src_db} wal_retention_period 3600 vgroups 1").as_str(),
+            format!("create topic {topic} with meta as database {src_db}").as_str(),
+            format!("use {src_db}").as_str(),
+            "create table stb (ts timestamp, c1 int) tags (t1 tinyint)",
+            "create table tb1 using stb tags (1)",
+            "create table tb2 using stb tags (2)",
+            "alter table `tb1` set tag t1 = 2 `tb2` set tag t1 = 3",
+            format!("create database {dst_db} wal_retention_period 3600").as_str(),
+            format!("use {dst_db}").as_str(),
+        ])
+        .await?;
+
+        dsn.params
+            .insert("group.id".to_string(), "1001".to_string());
+        dsn.params
+            .insert("auto.offset.reset".to_string(), "earliest".to_string());
+
+        let builder = TmqBuilder::from_dsn(&dsn)?;
+        let mut consumer = builder.build().await?;
+        consumer.subscribe([topic]).await?;
+
+        let expected_sql = "ALTER TABLE `tb1` SET TAG `t1` = 2 `tb2` SET TAG `t1` = 3";
+        let mut seen = false;
+
+        {
+            let mut stream = consumer.stream_with_timeout(Timeout::from_secs(1));
+            while let Some((offset, message)) = stream.try_next().await? {
+                match message {
+                    MessageSet::Meta(meta) => {
+                        let raw = meta.as_raw_meta().await?;
+                        taos.write_raw_meta(&raw).await?;
+
+                        let meta = meta.as_json_meta().await?;
+                        for unit in meta.iter() {
+                            let sql = unit.to_string();
+                            if sql == expected_sql {
+                                seen = true;
+                            }
+                            taos.exec(sql).await?;
+                        }
+                    }
+                    MessageSet::Data(data) => {
+                        while let Some(_data) = data.fetch_raw_block().await? {}
+                    }
+                    MessageSet::MetaData(meta, data) => {
+                        let raw = meta.as_raw_meta().await?;
+                        taos.write_raw_meta(&raw).await?;
+
+                        let meta = meta.as_json_meta().await?;
+                        for unit in meta.iter() {
+                            let sql = unit.to_string();
+                            if sql == expected_sql {
+                                seen = true;
+                            }
+                            taos.exec(sql).await?;
+                        }
+
+                        while let Some(_data) = data.fetch_raw_block().await? {}
+                    }
+                }
+                consumer.commit(offset).await?;
+            }
+        }
+
+        consumer.unsubscribe().await;
+        tokio::time::sleep(Duration::from_secs(3)).await;
+
+        taos.exec_many([
+            format!("drop database if exists {dst_db}").as_str(),
+            format!("drop topic if exists {topic}").as_str(),
+            format!("drop database if exists {src_db}").as_str(),
+        ])
+        .await?;
+
+        assert!(seen,);
+
+        Ok(())
+    }
+
+    #[cfg(feature = "test-new-feat")]
+    #[tokio::test]
+    async fn test_native_tmq_meta_multi_table_alter_tags() -> taos_query::RawResult<()> {
+        use taos_query::prelude::*;
+
+        let mut dsn = Dsn::from_str("taos://localhost:6030")?;
+        let taos = TaosBuilder::from_dsn(&dsn)?.build().await?;
+
+        let topic = "topic_1775094850";
+        let src_db = "test_1775094850";
+        let dst_db = "test_1775094878";
+
+        taos.exec_many([
+            format!("drop topic if exists {topic}").as_str(),
+            format!("drop database if exists {dst_db}").as_str(),
+            format!("drop database if exists {src_db}").as_str(),
+            format!("create database {src_db} wal_retention_period 3600 vgroups 1").as_str(),
+            format!("create topic {topic} with meta as database {src_db}").as_str(),
+            format!("use {src_db}").as_str(),
+            "create table stb (ts timestamp, c1 int) tags (t1 tinyint)",
+            "create table tb1 using stb tags (1)",
+            "create table tb2 using stb tags (2)",
+            "alter table `tb1` set tag t1 = 2 `tb2` set tag t1 = 3",
+            format!("create database {dst_db} wal_retention_period 3600").as_str(),
+            format!("use {dst_db}").as_str(),
+        ])
+        .await?;
+
+        dsn.params
+            .insert("group.id".to_string(), "1001".to_string());
+        dsn.params
+            .insert("auto.offset.reset".to_string(), "earliest".to_string());
+
+        let builder = TmqBuilder::from_dsn(&dsn)?;
+        let mut consumer = builder.build().await?;
+        consumer.subscribe([topic]).await?;
+
+        let expected_multi_table_alter =
+            "ALTER TABLE `tb1` SET TAG `t1` = 2 `tb2` SET TAG `t1` = 3";
+        let mut seen_expected_multi_table_alter = false;
+
+        {
+            let mut stream = consumer.stream_with_timeout(Timeout::from_secs(1));
+            while let Some((offset, message)) = stream.try_next().await? {
+                match message {
+                    MessageSet::Meta(meta) => {
+                        let raw = meta.as_raw_meta().await?;
+                        taos.write_raw_meta(&raw).await?;
+
+                        let meta = meta.as_json_meta().await?;
+                        for unit in meta.iter() {
+                            let sql = unit.to_string();
+                            if sql == expected_multi_table_alter {
+                                seen_expected_multi_table_alter = true;
+                            }
+                            taos.exec(sql).await?;
+                        }
+                    }
+                    MessageSet::Data(data) => {
+                        while let Some(_data) = data.fetch_raw_block().await? {}
+                    }
+                    MessageSet::MetaData(meta, data) => {
+                        let raw = meta.as_raw_meta().await?;
+                        taos.write_raw_meta(&raw).await?;
+
+                        let meta = meta.as_json_meta().await?;
+                        for unit in meta.iter() {
+                            let sql = unit.to_string();
+                            if sql == expected_multi_table_alter {
+                                seen_expected_multi_table_alter = true;
+                            }
+                            taos.exec(sql).await?;
+                        }
+
+                        while let Some(_data) = data.fetch_raw_block().await? {}
+                    }
+                }
+                consumer.commit(offset).await?;
+            }
+        }
+
+        consumer.unsubscribe().await;
+        tokio::time::sleep(Duration::from_secs(3)).await;
+
+        taos.exec_many([
+            format!("drop database if exists {dst_db}").as_str(),
+            format!("drop topic if exists {topic}").as_str(),
+            format!("drop database if exists {src_db}").as_str(),
+        ])
+        .await?;
+
+        assert!(seen_expected_multi_table_alter,);
+
+        Ok(())
+    }
+
     #[tokio::test]
     #[ignore]
     async fn test_tmq() -> taos_query::RawResult<()> {
-        // pretty_env_logger::formatted_timed_builder()
-        //     .filter_level(tracing::LevelFilter::Info)
-        //     .init();
-
         use taos_query::prelude::*;
-        // let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
+
         let dsn = "taos://localhost:6030".to_string();
         tracing::info!("dsn: {}", dsn);
         let mut dsn = Dsn::from_str(&dsn)?;

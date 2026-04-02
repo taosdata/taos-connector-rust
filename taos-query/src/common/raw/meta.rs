@@ -825,13 +825,17 @@ mod tests {
                     "colName": "t4",
                     "colValue": "'hello'",
                     "colValueNull": false
+                }, {
+                    "colName": "t5",
+                    "colValue": "\"world\"",
+                    "colValueNull": false
                 }]
             }]
         });
         let meta = serde_json::from_str::<MetaUnit>(&value.to_json()).unwrap();
         assert_eq!(
             meta.to_string(),
-            "ALTER TABLE `tb1` SET TAG `t1` = 5000, `t2` = NULL `tb2` SET TAG `t3` = 1000, `t4` = 'hello'"
+            "ALTER TABLE `tb1` SET TAG `t1` = 5000, `t2` = NULL `tb2` SET TAG `t3` = 1000, `t4` = 'hello', `t5` = \"world\""
         );
     }
 }
