@@ -820,8 +820,6 @@ mod async_tests {
             "alter table `tb2` set tag t2 = 2, t7 = 2.2",
             "alter table `tb2` set tag t2 = 3, t7 = 3.3, t9 = 'world'",
             "alter table `tb2` set tag t2 = 4, t7 = 4.4, t9 = 'helloworld', t10 = '中文中文'",
-            // kind 9.1: alter child table tags in one SQL (multi-table)
-            "alter table `tb2` set tag t2 = 5, t7 = 5.5, t9 = 'multi1' `tb3` set tag t2 = 6, t7 = 6.6, t9 = 'multi2'",
             // kind 10: drop normal table
             "drop table `table`",
             // kind 11: drop child table
@@ -1106,6 +1104,258 @@ mod async_tests {
         .await?;
 
         assert!(seen_expected_multi_table_alter,);
+
+        Ok(())
+    }
+
+    #[cfg(feature = "test-new-feat")]
+    #[tokio::test]
+    async fn test_ws_tmq_meta_batch_set_tag_by_cond() -> taos_query::RawResult<()> {
+        use taos_query::prelude::*;
+
+        let mut dsn = Dsn::from_str("ws://localhost:6041")?;
+        let taos = TaosBuilder::from_dsn(&dsn)?.build().await?;
+
+        let topic = "topic_1775113875";
+        let src_db = "test_1775113875";
+        let dst_db = "test_1775113884";
+
+        taos.exec_many([
+            format!("drop topic if exists {topic}").as_str(),
+            format!("drop database if exists {dst_db}").as_str(),
+            format!("drop database if exists {src_db}").as_str(),
+            format!("create database {src_db} wal_retention_period 3600 vgroups 1").as_str(),
+            format!("create topic {topic} with meta as database {src_db}").as_str(),
+            format!("use {src_db}").as_str(),
+            "create table stb (ts timestamp, c1 int) tags (groupid int, region varchar(64), level varchar(32))",
+            "create table tb1 using stb tags (100, 'tianjin', 'low')",
+            "create table tb2 using stb tags (200, 'beijing', 'low')",
+            "alter table using stb set tag region = 'shanghai' where groupid = 100",
+            "alter table using stb set tag region = REGEXP_REPLACE(region, 'tianji\"[a-z]', 'zhengzhou') where region = 'tianjin'",
+            "alter table using stb set tag region = 'guangzhou', level = 'high' where groupid = 200",
+            "alter table using stb set tag region = REGEXP_REPLACE(region, 'bei[a-z]', 'shenzhen'), level = REGEXP_REPLACE(level, 'lo[a-z]', 'mid') where groupid = 200",
+            format!("create database {dst_db} wal_retention_period 3600").as_str(),
+            format!("use {dst_db}").as_str(),
+        ])
+        .await?;
+
+        dsn.params
+            .insert("group.id".to_string(), "1001".to_string());
+        dsn.params
+            .insert("auto.offset.reset".to_string(), "earliest".to_string());
+
+        let builder = TmqBuilder::from_dsn(&dsn)?;
+        let mut consumer = builder.build().await?;
+        consumer.subscribe([topic]).await?;
+
+        let expected_simple =
+            "ALTER TABLE USING `stb` SET TAG `region` = \"shanghai\" WHERE `groupid` = 100";
+        let expected_regexp = "ALTER TABLE USING `stb` SET TAG `region` = REGEXP_REPLACE(region, \"tianji\\\"[a-z]\", \"zhengzhou\") WHERE `region` = 'tianjin'";
+        let expected_multi = "ALTER TABLE USING `stb` SET TAG `region` = \"guangzhou\", `level` = \"high\" WHERE `groupid` = 200";
+        let expected_regexp_multi = "ALTER TABLE USING `stb` SET TAG `region` = REGEXP_REPLACE(region, \"bei[a-z]\", \"shenzhen\"), `level` = REGEXP_REPLACE(level, \"lo[a-z]\", \"mid\") WHERE `groupid` = 200";
+        let mut seen_simple = false;
+        let mut seen_regexp = false;
+        let mut seen_multi = false;
+        let mut seen_regexp_multi = false;
+
+        {
+            let mut stream = consumer.stream_with_timeout(Timeout::from_secs(1));
+            while let Some((offset, message)) = stream.try_next().await? {
+                match message {
+                    MessageSet::Meta(meta) => {
+                        let raw = meta.as_raw_meta().await?;
+                        taos.write_raw_meta(&raw).await?;
+
+                        let meta = meta.as_json_meta().await?;
+                        for unit in meta.iter() {
+                            let sql = unit.to_string();
+                            if sql == expected_simple {
+                                seen_simple = true;
+                            }
+                            if sql == expected_regexp {
+                                seen_regexp = true;
+                            }
+                            if sql == expected_multi {
+                                seen_multi = true;
+                            }
+                            if sql == expected_regexp_multi {
+                                seen_regexp_multi = true;
+                            }
+                            taos.exec(sql).await?;
+                        }
+                    }
+                    MessageSet::Data(data) => {
+                        while let Some(_data) = data.fetch_raw_block().await? {}
+                    }
+                    MessageSet::MetaData(meta, data) => {
+                        let raw = meta.as_raw_meta().await?;
+                        taos.write_raw_meta(&raw).await?;
+
+                        let meta = meta.as_json_meta().await?;
+                        for unit in meta.iter() {
+                            let sql = unit.to_string();
+                            if sql == expected_simple {
+                                seen_simple = true;
+                            }
+                            if sql == expected_regexp {
+                                seen_regexp = true;
+                            }
+                            if sql == expected_multi {
+                                seen_multi = true;
+                            }
+                            if sql == expected_regexp_multi {
+                                seen_regexp_multi = true;
+                            }
+                            taos.exec(sql).await?;
+                        }
+
+                        while let Some(_data) = data.fetch_raw_block().await? {}
+                    }
+                }
+                consumer.commit(offset).await?;
+            }
+        }
+
+        consumer.unsubscribe().await;
+        tokio::time::sleep(Duration::from_secs(3)).await;
+
+        taos.exec_many([
+            format!("drop database if exists {dst_db}").as_str(),
+            format!("drop topic if exists {topic}").as_str(),
+            format!("drop database if exists {src_db}").as_str(),
+        ])
+        .await?;
+
+        assert!(seen_simple);
+        assert!(seen_regexp);
+        assert!(seen_multi);
+        assert!(seen_regexp_multi);
+
+        Ok(())
+    }
+
+    #[cfg(feature = "test-new-feat")]
+    #[tokio::test]
+    async fn test_native_tmq_meta_batch_set_tag_by_cond() -> taos_query::RawResult<()> {
+        use taos_query::prelude::*;
+
+        let mut dsn = Dsn::from_str("taos://localhost:6030")?;
+        let taos = TaosBuilder::from_dsn(&dsn)?.build().await?;
+
+        let topic = "topic_1775114236";
+        let src_db = "test_1775114236";
+        let dst_db = "test_1775114248";
+
+        taos.exec_many([
+            format!("drop topic if exists {topic}").as_str(),
+            format!("drop database if exists {dst_db}").as_str(),
+            format!("drop database if exists {src_db}").as_str(),
+            format!("create database {src_db} wal_retention_period 3600 vgroups 1").as_str(),
+            format!("create topic {topic} with meta as database {src_db}").as_str(),
+            format!("use {src_db}").as_str(),
+            "create table stb (ts timestamp, c1 int) tags (groupid int, region varchar(64), level varchar(32))",
+            "create table tb1 using stb tags (100, 'tianjin', 'low')",
+            "create table tb2 using stb tags (200, 'beijing', 'low')",
+            "alter table using stb set tag region = 'shanghai' where groupid = 100",
+            "alter table using stb set tag region = REGEXP_REPLACE(region, 'tianji\"[a-z]', 'zhengzhou') where region = 'tianjin'",
+            "alter table using stb set tag region = 'guangzhou', level = 'high' where groupid = 200",
+            "alter table using stb set tag region = REGEXP_REPLACE(region, 'bei[a-z]', 'shenzhen'), level = REGEXP_REPLACE(level, 'lo[a-z]', 'mid') where groupid = 200",
+            format!("create database {dst_db} wal_retention_period 3600").as_str(),
+            format!("use {dst_db}").as_str(),
+        ])
+        .await?;
+
+        dsn.params
+            .insert("group.id".to_string(), "1001".to_string());
+        dsn.params
+            .insert("auto.offset.reset".to_string(), "earliest".to_string());
+
+        let builder = TmqBuilder::from_dsn(&dsn)?;
+        let mut consumer = builder.build().await?;
+        consumer.subscribe([topic]).await?;
+
+        let expected_simple =
+            "ALTER TABLE USING `stb` SET TAG `region` = \"shanghai\" WHERE `groupid` = 100";
+        let expected_regexp = "ALTER TABLE USING `stb` SET TAG `region` = REGEXP_REPLACE(region, \"tianji\\\"[a-z]\", \"zhengzhou\") WHERE `region` = 'tianjin'";
+        let expected_multi = "ALTER TABLE USING `stb` SET TAG `region` = \"guangzhou\", `level` = \"high\" WHERE `groupid` = 200";
+        let expected_regexp_multi = "ALTER TABLE USING `stb` SET TAG `region` = REGEXP_REPLACE(region, \"bei[a-z]\", \"shenzhen\"), `level` = REGEXP_REPLACE(level, \"lo[a-z]\", \"mid\") WHERE `groupid` = 200";
+        let mut seen_simple = false;
+        let mut seen_regexp = false;
+        let mut seen_multi = false;
+        let mut seen_regexp_multi = false;
+
+        {
+            let mut stream = consumer.stream_with_timeout(Timeout::from_secs(1));
+            while let Some((offset, message)) = stream.try_next().await? {
+                match message {
+                    MessageSet::Meta(meta) => {
+                        let raw = meta.as_raw_meta().await?;
+                        taos.write_raw_meta(&raw).await?;
+
+                        let meta = meta.as_json_meta().await?;
+                        for unit in meta.iter() {
+                            let sql = unit.to_string();
+                            if sql == expected_simple {
+                                seen_simple = true;
+                            }
+                            if sql == expected_regexp {
+                                seen_regexp = true;
+                            }
+                            if sql == expected_multi {
+                                seen_multi = true;
+                            }
+                            if sql == expected_regexp_multi {
+                                seen_regexp_multi = true;
+                            }
+                            taos.exec(sql).await?;
+                        }
+                    }
+                    MessageSet::Data(data) => {
+                        while let Some(_data) = data.fetch_raw_block().await? {}
+                    }
+                    MessageSet::MetaData(meta, data) => {
+                        let raw = meta.as_raw_meta().await?;
+                        taos.write_raw_meta(&raw).await?;
+
+                        let meta = meta.as_json_meta().await?;
+                        for unit in meta.iter() {
+                            let sql = unit.to_string();
+                            if sql == expected_simple {
+                                seen_simple = true;
+                            }
+                            if sql == expected_regexp {
+                                seen_regexp = true;
+                            }
+                            if sql == expected_multi {
+                                seen_multi = true;
+                            }
+                            if sql == expected_regexp_multi {
+                                seen_regexp_multi = true;
+                            }
+                            taos.exec(sql).await?;
+                        }
+
+                        while let Some(_data) = data.fetch_raw_block().await? {}
+                    }
+                }
+                consumer.commit(offset).await?;
+            }
+        }
+
+        consumer.unsubscribe().await;
+        tokio::time::sleep(Duration::from_secs(3)).await;
+
+        taos.exec_many([
+            format!("drop database if exists {dst_db}").as_str(),
+            format!("drop topic if exists {topic}").as_str(),
+            format!("drop database if exists {src_db}").as_str(),
+        ])
+        .await?;
+
+        assert!(seen_simple);
+        assert!(seen_regexp);
+        assert!(seen_multi);
+        assert!(seen_regexp_multi);
 
         Ok(())
     }

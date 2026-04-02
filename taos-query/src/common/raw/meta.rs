@@ -304,6 +304,7 @@ pub enum AlterType {
     // ModifyColumnCompression = 13,
     SetMultiTagValue = 15,
     SetMultiTableTagValue = 19,
+    BatchSetTagByCond = 20,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -319,6 +320,8 @@ pub struct MetaAlter {
     pub col_value_null: Option<bool>,
     pub tags: Option<Vec<Tag>>,
     pub tables: Option<Vec<Table>>,
+    #[serde(rename = "where")]
+    pub condition: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -327,7 +330,10 @@ pub struct Tag {
     pub col_name: String,
     #[serde(default)]
     pub col_value: String,
+    #[serde(default)]
     pub col_value_null: bool,
+    pub regexp: Option<String>,
+    pub replacement: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -442,6 +448,38 @@ impl Display for MetaAlter {
                             }
                         }
                     }
+                }
+                Ok(())
+            }
+            AlterType::BatchSetTagByCond => {
+                f.write_fmt(format_args!(
+                    "ALTER TABLE USING `{}` SET TAG ",
+                    self.table_name
+                ))?;
+                if let Some(tags) = self.tags.as_deref() {
+                    for (i, tag) in tags.iter().enumerate() {
+                        if tag.col_value_null {
+                            f.write_fmt(format_args!("`{}` = NULL", tag.col_name))?;
+                        } else if let Some(regexp) = tag.regexp.as_deref() {
+                            let replacement = tag.replacement.as_deref().unwrap_or_default();
+                            let regexp =
+                                serde_json::to_string(regexp).map_err(|_| std::fmt::Error)?;
+                            let replacement =
+                                serde_json::to_string(replacement).map_err(|_| std::fmt::Error)?;
+                            f.write_fmt(format_args!(
+                                "`{}` = REGEXP_REPLACE({}, {}, {})",
+                                tag.col_name, tag.col_name, regexp, replacement
+                            ))?;
+                        } else {
+                            f.write_fmt(format_args!("`{}` = {}", tag.col_name, tag.col_value))?;
+                        }
+                        if i < tags.len() - 1 {
+                            f.write_str(", ")?;
+                        }
+                    }
+                }
+                if let Some(condition) = self.condition.as_deref() {
+                    f.write_fmt(format_args!(" WHERE {condition}"))?;
                 }
                 Ok(())
             }
@@ -836,6 +874,73 @@ mod tests {
         assert_eq!(
             meta.to_string(),
             "ALTER TABLE `tb1` SET TAG `t1` = 5000, `t2` = NULL `tb2` SET TAG `t3` = 1000, `t4` = 'hello', `t5` = \"world\""
+        );
+    }
+
+    #[test]
+    fn test_meta_alter_batch_set_tag_by_cond_simple() {
+        let value = serde_json::json!({
+            "type": "alter",
+            "tableType": "super",
+            "tableName": "stb",
+            "alterType": 20,
+            "tags": [{
+                "colName": "region",
+                "colValue": "\"shanghai\"",
+                "colValueNull": false
+            }],
+            "where": "`groupid` = 100"
+        });
+        let meta = serde_json::from_str::<MetaUnit>(&value.to_json()).unwrap();
+        assert_eq!(
+            meta.to_string(),
+            "ALTER TABLE USING `stb` SET TAG `region` = \"shanghai\" WHERE `groupid` = 100"
+        );
+    }
+
+    #[test]
+    fn test_meta_alter_batch_set_tag_by_cond_regexp() {
+        let value = serde_json::json!({
+            "type": "alter",
+            "tableType": "super",
+            "tableName": "stb",
+            "alterType": 20,
+            "tags": [{
+                "colName": "region",
+                "regexp": "tianji[a-z]",
+                "replacement": "zhengzhou"
+            }],
+            "where": "`region` = 'tianjin'"
+        });
+        let meta = serde_json::from_str::<MetaUnit>(&value.to_json()).unwrap();
+        assert_eq!(
+            meta.to_string(),
+            "ALTER TABLE USING `stb` SET TAG `region` = REGEXP_REPLACE(region, \"tianji[a-z]\", \"zhengzhou\") WHERE `region` = 'tianjin'"
+        );
+    }
+
+    #[test]
+    fn test_meta_alter_batch_set_tag_by_cond_multi() {
+        let value = serde_json::json!({
+            "type": "alter",
+            "tableType": "super",
+            "tableName": "stb",
+            "alterType": 20,
+            "tags": [{
+                "colName": "region",
+                "regexp": "tianji[a-z]",
+                "replacement": "zhengzhou"
+            }, {
+                "colName": "level",
+                "colValue": "\"high\"",
+                "colValueNull": false
+            }],
+            "where": "`region` = 'tianjin'"
+        });
+        let meta = serde_json::from_str::<MetaUnit>(&value.to_json()).unwrap();
+        assert_eq!(
+            meta.to_string(),
+            "ALTER TABLE USING `stb` SET TAG `region` = REGEXP_REPLACE(region, \"tianji[a-z]\", \"zhengzhou\"), `level` = \"high\" WHERE `region` = 'tianjin'"
         );
     }
 }
