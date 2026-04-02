@@ -1570,17 +1570,11 @@ mod async_tests {
     #[tokio::test]
     #[ignore]
     async fn test_tmq_offset() -> taos_query::RawResult<()> {
-        // pretty_env_logger::formatted_timed_builder()
-        //     .filter_level(tracing::LevelFilter::Info)
-        //     .init();
-
         use taos_query::prelude::*;
-        // let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
+
         let dsn = "tmq://localhost:6030?offset=10:20,11:40".to_string();
         tracing::info!("dsn: {}", dsn);
         let mut dsn = Dsn::from_str(&dsn)?;
-        // dbg!(&dsn);
-
         let taos = TaosBuilder::from_dsn(&dsn)?.build().await?;
         taos.exec_many([
             "drop topic if exists ws_abc1",
@@ -1663,7 +1657,6 @@ mod async_tests {
             .insert("auto.offset.reset".to_string(), "earliest".to_string());
 
         let builder = TmqBuilder::from_dsn(&dsn)?;
-        // dbg!(&builder);
         let mut consumer = builder.build().await?;
 
         consumer.subscribe(["ws_abc1"]).await?;
@@ -1882,7 +1875,6 @@ mod async_tests {
                         // meta data can be write to an database seamlessly by raw or json (to sql).
                         let json = meta.as_json_meta().await?;
                         let sql = json.iter().next().unwrap().to_string();
-                        // dbg!(&sql);
                         if let Err(err) = taos.exec(sql).await {
                             tracing::error!("meta error: {}", err);
                         }
@@ -1918,7 +1910,6 @@ mod async_tests {
         }
 
         let assignments = consumer.assignments().await.unwrap();
-        // dbg!(&assignments);
         tracing::info!("assignments: {:?}", assignments);
 
         // seek offset
@@ -2058,7 +2049,6 @@ mod async_tests {
 
                         let json = meta.as_json_meta().await?;
                         let sql = json.iter().next().unwrap().to_string();
-                        // dbg!(&sql);
                         if let Err(err) = taos.exec(sql).await {
                             tracing::error!("meta error: {}", err);
                         }
@@ -2252,7 +2242,6 @@ mod async_tests {
                         // meta data can be write to an database seamlessly by raw or json (to sql).
                         let json = meta.as_json_meta().await?;
                         let sql = json.iter().next().unwrap().to_string();
-                        // dbg!(&sql);
                         if let Err(err) = taos.exec(sql).await {
                             tracing::error!("maybe error: {}", err);
                         }
@@ -2288,7 +2277,6 @@ mod async_tests {
         }
 
         let assignments = consumer.assignments().await.unwrap();
-        // dbg!(&assignments);
         tracing::info!("assignments: {:?}", assignments);
 
         // seek offset
@@ -2472,7 +2460,6 @@ mod async_tests {
                         // meta data can be write to an database seamlessly by raw or json (to sql).
                         let json = meta.as_json_meta().await?;
                         let sql = json.iter().next().unwrap().to_string();
-                        // dbg!(&sql);
                         if let Err(err) = taos.exec(sql).await {
                             tracing::debug!("maybe error: {}", err);
                         }
@@ -2664,7 +2651,6 @@ mod async_tests {
             .insert("auto.offset.reset".to_string(), "earliest".to_string());
 
         let builder = TmqBuilder::from_dsn(&dsn)?;
-        // dbg!(&builder);
         let mut consumer = builder.build().await?;
         consumer.subscribe([db]).await?;
 
@@ -2883,7 +2869,6 @@ mod async_tests {
         dsn.params
             .insert("auto.offset.reset".to_string(), "earliest".to_string());
         let builder = TmqBuilder::from_dsn(&dsn)?;
-        // dbg!(&builder);
         let mut consumer = builder.build().await?;
 
         let topics = consumer.list_topics().await?;
