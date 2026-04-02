@@ -264,11 +264,13 @@ impl IsOffset for Offset {
             .tmq_db_name()
             .expect("a message should belong to a database")
     }
+
     fn topic(&self) -> &str {
         self.0
             .tmq_topic_name()
             .expect("a message should belong to a topic")
     }
+
     fn vgroup_id(&self) -> VGroupId {
         self.0
             .tmq_vgroup_id()
@@ -323,7 +325,6 @@ impl Iterator for Messages {
 #[derive(Debug)]
 pub struct Meta {
     res: RawRes,
-    // raw: RawData,
 }
 
 impl AsyncOnSync for Meta {}
@@ -337,9 +338,9 @@ impl IsMeta for Meta {
         self.res.tmq_get_json_meta()
     }
 }
+
 impl Meta {
     fn new(res: RawRes) -> Self {
-        // let raw = res.tmq_get_raw().expect("get raw message error");
         Self { res }
     }
 
@@ -352,6 +353,7 @@ impl Meta {
             .unwrap_or_else(|| serde_json::Value::Null)
     }
 }
+
 #[derive(Debug)]
 pub struct Data {
     raw: RawRes,

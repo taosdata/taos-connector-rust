@@ -366,6 +366,7 @@ impl WsMessageBase {
         });
         let data = self.sender.send_recv(msg).await?;
         if let TmqRecvData::FetchJsonMeta { data } = data {
+            tracing::trace!(json = %data, "Received TMQ json meta");
             let json: JsonMeta = serde_json::from_value(data).map_err(WsTmqError::from)?;
             return Ok(json);
         }
