@@ -1311,6 +1311,80 @@ mod tests {
 
         Ok(())
     }
+
+    #[cfg(feature = "test-new-feat")]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_stmt2_decimal() -> anyhow::Result<()> {
+        use taos_query::common::decimal::Decimal;
+
+        let taos = TaosBuilder::from_dsn("ws://localhost:6041")?
+            .build()
+            .await?;
+
+        taos.exec_many(&[
+            "drop database if exists test_1775204657",
+            "create database test_1775204657",
+            "use test_1775204657",
+            "create table t0 (ts timestamp, c1 decimal(10, 2), c2 decimal(20, 5))",
+        ])
+        .await?;
+
+        let stmt2 = Stmt2::new(taos.client_cloned());
+        stmt2.init().await?;
+        stmt2.prepare("insert into t0 values(?, ?, ?)").await?;
+
+        let tss = vec![1726803356466, 1726803357466, 1726803358466];
+        let c1s = vec![Some(12345_i64), None, Some(-12345_i64)];
+        let c2s = vec![
+            Some(123456789012345_i128),
+            None,
+            Some(-123456789012345_i128),
+        ];
+
+        let cols = vec![
+            ColumnView::from_millis_timestamp(tss.clone()),
+            ColumnView::from_decimal64(c1s.clone(), 10, 2),
+            ColumnView::from_decimal(c2s.clone(), 20, 5),
+        ];
+        let param = Stmt2BindParam::new(None, None, Some(cols));
+        stmt2.bind(&[param]).await?;
+
+        let affected = stmt2.exec().await?;
+        assert_eq!(affected, 3);
+
+        stmt2.prepare("select * from t0 where ts >= ?").await?;
+        let cols = vec![ColumnView::from_millis_timestamp(vec![1726803356466])];
+        let param = Stmt2BindParam::new(None, None, Some(cols));
+        stmt2.bind(&[param]).await?;
+
+        let affected = stmt2.exec().await?;
+        assert_eq!(affected, 0);
+
+        #[derive(Debug, Deserialize)]
+        struct Row {
+            ts: i64,
+            c1: Option<String>,
+            c2: Option<String>,
+        }
+
+        let rows: Vec<Row> = stmt2
+            .result_set()
+            .await?
+            .deserialize()
+            .try_collect()
+            .await?;
+
+        assert_eq!(rows.len(), 3);
+        for (i, row) in rows.iter().enumerate() {
+            assert_eq!(row.ts, tss[i]);
+            assert_eq!(row.c1, c1s[i].map(|v| Decimal::new(v, 10, 2).to_string()));
+            assert_eq!(row.c2, c2s[i].map(|v| Decimal::new(v, 20, 5).to_string()));
+        }
+
+        taos.exec("drop database if exists test_1775204657").await?;
+
+        Ok(())
+    }
 }
 
 #[cfg(feature = "rustls-ring-crypto-provider")]
