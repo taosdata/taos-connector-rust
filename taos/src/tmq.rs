@@ -855,6 +855,7 @@ mod async_tests {
                 "create table stb (ts timestamp, c1 int) tags (groupid int, region varchar(64), level varchar(32))",
                 "create table tb1 using stb tags (100, 'tianjin', 'low')",
                 "create table tb2 using stb tags (200, 'beijing', 'low')",
+                "alter table using stb set tag groupid = 300",
                 "alter table using stb set tag region = 'shanghai' where groupid = 100",
                 "alter table using stb set tag region = REGEXP_REPLACE(region, 'tianji\"[a-z]', 'zhengzhou') where region = 'tianjin'",
                 "alter table using stb set tag region = 'guangzhou', level = NULL where groupid = 200",
@@ -875,9 +876,11 @@ mod async_tests {
 
             let expected_simple =
                 "ALTER TABLE USING `stb` SET TAG `region` = \"shanghai\" WHERE `groupid` = 100";
+            let expected_no_where = "ALTER TABLE USING `stb` SET TAG `groupid` = 300";
             let expected_regexp = "ALTER TABLE USING `stb` SET TAG `region` = REGEXP_REPLACE(region, \"tianji\\\"[a-z]\", \"zhengzhou\") WHERE `region` = 'tianjin'";
             let expected_multi = "ALTER TABLE USING `stb` SET TAG `region` = \"guangzhou\", `level` = NULL WHERE `groupid` = 200";
             let expected_regexp_multi = "ALTER TABLE USING `stb` SET TAG `region` = REGEXP_REPLACE(region, \"bei[a-z]\", \"shenzhen\"), `level` = REGEXP_REPLACE(level, \"lo[a-z]\", \"mid\") WHERE `groupid` = 200";
+            let mut seen_no_where = false;
             let mut seen_simple = false;
             let mut seen_regexp = false;
             let mut seen_multi = false;
@@ -894,6 +897,9 @@ mod async_tests {
                             let meta = meta.as_json_meta().await?;
                             for unit in meta.iter() {
                                 let sql = unit.to_string();
+                                if sql == expected_no_where {
+                                    seen_no_where = true;
+                                }
                                 if sql == expected_simple {
                                     seen_simple = true;
                                 }
@@ -919,6 +925,9 @@ mod async_tests {
                             let meta = meta.as_json_meta().await?;
                             for unit in meta.iter() {
                                 let sql = unit.to_string();
+                                if sql == expected_no_where {
+                                    seen_no_where = true;
+                                }
                                 if sql == expected_simple {
                                     seen_simple = true;
                                 }
@@ -951,6 +960,7 @@ mod async_tests {
             ])
             .await?;
 
+            assert!(seen_no_where);
             assert!(seen_simple);
             assert!(seen_regexp);
             assert!(seen_multi);
