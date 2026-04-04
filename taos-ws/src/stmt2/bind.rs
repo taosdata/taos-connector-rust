@@ -236,13 +236,10 @@ fn get_col_lens(
 
         let mut len = 0;
         for (col_idx, col) in cols.iter().enumerate() {
-            let decimal_values = decimal_cache
-                .get(&(param_idx, col_idx))
-                .expect("missing cached decimal column");
             let have_len = col.as_ty().fixed_length() == 0
                 || matches!(col, ColumnView::Decimal(_) | ColumnView::Decimal64(_));
             len += get_tc_header_len(col.len(), have_len);
-            len += get_col_data_len(col, decimal_values);
+            len += get_col_data_len(col, param_idx, col_idx, decimal_cache);
         }
         col_lens[param_idx] = len as _;
     }
@@ -270,7 +267,12 @@ fn get_tag_data_len(tag: &Value) -> usize {
     }
 }
 
-fn get_col_data_len(col: &ColumnView, decimal_values: &Vec<Option<Vec<u8>>>) -> usize {
+fn get_col_data_len(
+    col: &ColumnView,
+    param_idx: usize,
+    col_idx: usize,
+    decimal_cache: &DecimalCache,
+) -> usize {
     if check_col_is_null(col) {
         return 0;
     }
@@ -295,6 +297,9 @@ fn get_col_data_len(col: &ColumnView, decimal_values: &Vec<Option<Vec<u8>>>) -> 
         Geometry(view) => view_iter!(view),
         Blob(view) => view_iter!(view),
         Decimal(_) | Decimal64(_) => {
+            let decimal_values = decimal_cache
+                .get(&(param_idx, col_idx))
+                .expect("missing cached decimal column");
             for bytes in decimal_values.iter().flatten() {
                 len += bytes.len();
             }
@@ -440,15 +445,18 @@ fn write_cols(
     for (param_idx, param) in params.iter().enumerate() {
         let cols = param.columns().unwrap();
         for (col_idx, col) in cols.iter().enumerate() {
-            let decimal_values = decimal_cache
-                .get(&(param_idx, col_idx))
-                .expect("missing cached decimal column");
-            offset += write_col(&mut bytes[offset..], col, decimal_values);
+            offset += write_col(&mut bytes[offset..], col, param_idx, col_idx, decimal_cache);
         }
     }
 }
 
-fn write_col(bytes: &mut [u8], col: &ColumnView, decimal_values: &Vec<Option<Vec<u8>>>) -> usize {
+fn write_col(
+    bytes: &mut [u8],
+    col: &ColumnView,
+    param_idx: usize,
+    col_idx: usize,
+    decimal_cache: &DecimalCache,
+) -> usize {
     let num = col.len();
     let ty = col.as_ty();
     let is_null = check_col_is_null(col);
@@ -545,6 +553,9 @@ fn write_col(bytes: &mut [u8], col: &ColumnView, decimal_values: &Vec<Option<Vec
             Geometry(view) => variable_view_iter!(view),
             Blob(view) => variable_view_iter!(view),
             Decimal(_) | Decimal64(_) => {
+                let decimal_values = decimal_cache
+                    .get(&(param_idx, col_idx))
+                    .expect("missing cached decimal column");
                 for val in decimal_values {
                     let mut len = 0;
                     match val {
