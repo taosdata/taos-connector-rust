@@ -267,26 +267,6 @@ impl Display for MetaCreate {
     }
 }
 
-#[test]
-fn test_meta_create_to_sql() {
-    // let sql = MetaCreate {
-    //     table_name: "abc".to_string(),
-    //     table_type: TableType::Super,
-    //     using: None,
-    //     columns: vec![
-    //         Field::new("ts", Ty::Timestamp, 0),
-    //         Field::new("location", Ty::VarChar, 16),
-    //     ],
-    //     tags: vec![],
-    // }
-    // .to_string();
-
-    // assert_eq!(
-    //     sql,
-    //     "CREATE TABLE IF NOT EXISTS `abc`(`ts` TIMESTAMP, `location` BINARY(16))"
-    // );
-}
-
 #[derive(Debug, Deserialize_repr, Serialize_repr, Clone, Copy)]
 #[repr(u8)]
 pub enum AlterType {

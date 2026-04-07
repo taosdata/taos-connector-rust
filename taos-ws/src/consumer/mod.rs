@@ -3405,21 +3405,21 @@ mod tests {
         )?;
         let mut consumer = tmq.build().await?;
         let err = consumer.subscribe(["topic_1772507246"]).await.unwrap_err();
-        assert!(err.to_string().contains("init tscObj with token failed"));
+        assert!(err.to_string().contains("Invalid token"));
 
         let tmq = TmqBuilder::from_dsn(
             "ws://invalid_user:invalid_pass@localhost:6041?group.id=8367&bearer_token=invalid_token"
         )?;
         let mut consumer = tmq.build().await?;
         let err = consumer.subscribe(["topic_1772507246"]).await.unwrap_err();
-        assert!(err.to_string().contains("init tscObj with token failed"));
+        assert!(err.to_string().contains("Invalid token"));
 
         let tmq = TmqBuilder::from_dsn(
             "ws://invalid_user:invalid_pass@localhost:6041?group.id=8367&bearer_token=",
         )?;
         let mut consumer = tmq.build().await?;
         let err = consumer.subscribe(["topic_1772507246"]).await.unwrap_err();
-        assert!(err.to_string().contains("init tscObj with token failed"));
+        assert!(err.to_string().contains("Invalid token"));
 
         tokio::time::sleep(Duration::from_secs(3)).await;
 
