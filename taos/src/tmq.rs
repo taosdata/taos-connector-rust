@@ -723,9 +723,9 @@ mod async_tests {
             tokio::time::sleep(Duration::from_secs(3)).await;
 
             taos.exec_many([
-                format!("drop database if exists {dst_db}").as_str(),
-                format!("drop topic if exists {topic}").as_str(),
-                format!("drop database if exists {src_db}").as_str(),
+                format!("drop database if exists {dst_db}"),
+                format!("drop topic if exists {topic}"),
+                format!("drop database if exists {src_db}"),
             ])
             .await?;
         }
