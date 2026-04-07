@@ -21,7 +21,7 @@ jobs:
         run: |
           tar -zxf tsdb-nightly-main.tar.gz
           rm -rf tsdb-nightly-main.tar.gz
-          cd tsdb-nightly-3.0
+          cd tsdb-nightly-main
           sudo ./install.sh
 
       - name: Copy taos.cfg
@@ -112,7 +112,7 @@ jobs:
         run: |
           tar -zxf tsdb-nightly-main.tar.gz
           rm -rf tsdb-nightly-main.tar.gz
-          cd tsdb-nightly-3.0
+          cd tsdb-nightly-main
           sudo ./install.sh
 
       - name: Copy taos.cfg
