@@ -143,7 +143,7 @@ pub(super) fn bind_params_to_bytes(
     if need_cols {
         let cols_offset = DATA_POS + tbname_total_len + tag_total_len;
         LittleEndian::write_u32(&mut bytes[COLS_OFFSET_POS..], cols_offset as _);
-        write_cols(&mut bytes[cols_offset..], params, &col_lens, &decimal_cache);
+        write_cols(&mut bytes[cols_offset..], params, &col_lens, &decimal_cache)?;
     }
 
     Ok(data)
@@ -239,7 +239,7 @@ fn get_col_lens(
             let have_len = col.as_ty().fixed_length() == 0
                 || matches!(col, ColumnView::Decimal(_) | ColumnView::Decimal64(_));
             len += get_tc_header_len(col.len(), have_len);
-            len += get_col_data_len(col, param_idx, col_idx, decimal_cache);
+            len += get_col_data_len(col, param_idx, col_idx, decimal_cache)?;
         }
         col_lens[param_idx] = len as _;
     }
@@ -272,9 +272,9 @@ fn get_col_data_len(
     param_idx: usize,
     col_idx: usize,
     decimal_cache: &DecimalCache,
-) -> usize {
+) -> RawResult<usize> {
     if check_col_is_null(col) {
-        return 0;
+        return Ok(0);
     }
 
     let mut len = 0;
@@ -297,9 +297,11 @@ fn get_col_data_len(
         Geometry(view) => view_iter!(view),
         Blob(view) => view_iter!(view),
         Decimal(_) | Decimal64(_) => {
-            let decimal_values = decimal_cache
-                .get(&(param_idx, col_idx))
-                .expect("missing cached decimal column");
+            let Some(decimal_values) = decimal_cache.get(&(param_idx, col_idx)) else {
+                return Err(taos_query::RawError::from_string(format!(
+                    "missing cached decimal column, param_idx: {param_idx}, col_idx: {col_idx}"
+                )));
+            };
             for bytes in decimal_values.iter().flatten() {
                 len += bytes.len();
             }
@@ -308,7 +310,7 @@ fn get_col_data_len(
         _ => len = col.as_ty().fixed_length() * col.len(),
     }
 
-    len
+    Ok(len)
 }
 
 fn check_col_is_null(col: &ColumnView) -> bool {
@@ -433,7 +435,7 @@ fn write_cols(
     params: &[Stmt2BindParam],
     col_lens: &[u32],
     decimal_cache: &DecimalCache,
-) {
+) -> RawResult<()> {
     // Write ColDataLength
     let mut offset = 0;
     for len in col_lens {
@@ -445,9 +447,11 @@ fn write_cols(
     for (param_idx, param) in params.iter().enumerate() {
         let cols = param.columns().unwrap();
         for (col_idx, col) in cols.iter().enumerate() {
-            offset += write_col(&mut bytes[offset..], col, param_idx, col_idx, decimal_cache);
+            offset += write_col(&mut bytes[offset..], col, param_idx, col_idx, decimal_cache)?;
         }
     }
+
+    Ok(())
 }
 
 fn write_col(
@@ -456,7 +460,7 @@ fn write_col(
     param_idx: usize,
     col_idx: usize,
     decimal_cache: &DecimalCache,
-) -> usize {
+) -> RawResult<usize> {
     let num = col.len();
     let ty = col.as_ty();
     let is_null = check_col_is_null(col);
@@ -553,9 +557,11 @@ fn write_col(
             Geometry(view) => variable_view_iter!(view),
             Blob(view) => variable_view_iter!(view),
             Decimal(_) | Decimal64(_) => {
-                let decimal_values = decimal_cache
-                    .get(&(param_idx, col_idx))
-                    .expect("missing cached decimal column");
+                let Some(decimal_values) = decimal_cache.get(&(param_idx, col_idx)) else {
+                    return Err(taos_query::RawError::from_string(format!(
+                        "missing cached decimal column, param_idx: {param_idx}, col_idx: {col_idx}"
+                    )));
+                };
                 for val in decimal_values {
                     let mut len = 0;
                     match val {
@@ -591,7 +597,7 @@ fn write_col(
         LittleEndian::write_u32(&mut bytes[header_len - 4..], buf_len as _);
     }
 
-    total_len
+    Ok(total_len)
 }
 
 #[cfg(test)]
