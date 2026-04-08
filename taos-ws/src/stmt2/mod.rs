@@ -1352,8 +1352,15 @@ mod tests {
         let affected = stmt2.exec().await?;
         assert_eq!(affected, 3);
 
-        stmt2.prepare("select * from t0 where ts >= ?").await?;
-        let cols = vec![ColumnView::from_millis_timestamp(vec![1726803356466])];
+        stmt2
+            .prepare("select * from t0 where ts >= ? and c1 >= ? and c2 >= ?")
+            .await?;
+
+        let cols = vec![
+            ColumnView::from_millis_timestamp(vec![1726803356466]),
+            ColumnView::from_decimal64(vec![Some(12345_i64)], 10, 2),
+            ColumnView::from_decimal(vec![Some(123456789012345_i128)], 20, 5),
+        ];
         let param = Stmt2BindParam::new(None, None, Some(cols));
         stmt2.bind(&[param]).await?;
 
@@ -1374,12 +1381,13 @@ mod tests {
             .try_collect()
             .await?;
 
-        assert_eq!(rows.len(), 3);
-        for (i, row) in rows.iter().enumerate() {
-            assert_eq!(row.ts, tss[i]);
-            assert_eq!(row.c1, c1s[i].map(|v| Decimal::new(v, 10, 2).to_string()));
-            assert_eq!(row.c2, c2s[i].map(|v| Decimal::new(v, 20, 5).to_string()));
-        }
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].ts, 1726803356466);
+        assert_eq!(rows[0].c1, Some(Decimal::new(12345_i64, 10, 2).to_string()));
+        assert_eq!(
+            rows[0].c2,
+            Some(Decimal::new(123456789012345_i128, 20, 5).to_string())
+        );
 
         taos.exec("drop database if exists test_1775204657").await?;
 
