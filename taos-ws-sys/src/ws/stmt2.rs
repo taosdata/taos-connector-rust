@@ -815,7 +815,7 @@ impl TAOS_STMT2_BINDV {
                 }
                 offset += 1;
 
-                if have_len {
+                if have_len && !self.check_tag_or_col_is_null(bind.is_null, bind.num as _) {
                     let cnt = bind.num as usize * 4;
                     unsafe {
                         ptr::copy_nonoverlapping(
@@ -2001,14 +2001,14 @@ mod tests {
                     "drop database if exists test_1776764597",
                     "create database test_1776764597",
                     "use test_1776764597",
-                    "create table t0 (ts timestamp, c1 decimal(10, 2), c2 decimal(20, 10))",
+                    "create table t0 (ts timestamp, c1 decimal(10, 2), c2 decimal(20, 10), c3 decimal(10, 2))",
                 ],
             );
 
             let stmt2 = taos_stmt2_init(taos, ptr::null_mut());
             assert!(!stmt2.is_null());
 
-            let sql = c"insert into t0 values(?, ?, ?)";
+            let sql = c"insert into t0 values(?, ?, ?, ?)";
             let code = taos_stmt2_prepare(stmt2, sql.as_ptr(), 0);
             assert_eq!(code, 0);
 
@@ -2027,7 +2027,16 @@ mod tests {
             let mut c2_is_null = vec![0, 0, 1];
             let c2 = new_bind!(Ty::Decimal, c2_buffer, c2_length, c2_is_null);
 
-            let mut col = vec![ts, c1, c2];
+            let mut c3_is_null = vec![1, 1, 1];
+            let c3 = TAOS_STMT2_BIND {
+                buffer_type: Ty::Decimal64 as _,
+                buffer: ptr::null_mut(),
+                length: ptr::null_mut(),
+                is_null: c3_is_null.as_mut_ptr(),
+                num: c3_is_null.len() as _,
+            };
+
+            let mut col = vec![ts, c1, c2, c3];
             let mut cols = vec![col.as_mut_ptr()];
             let mut bindv = TAOS_STMT2_BINDV {
                 count: 1,
@@ -2077,7 +2086,7 @@ mod tests {
             assert!(!fields.is_null());
 
             let num_fields = taos_num_fields(res);
-            assert_eq!(num_fields, 3);
+            assert_eq!(num_fields, 4);
 
             let row = taos_fetch_row(res);
             assert!(!row.is_null());
@@ -2086,7 +2095,7 @@ mod tests {
             let _ = taos_print_row(str.as_mut_ptr(), row, fields, num_fields);
             assert_eq!(
                 CStr::from_ptr(str.as_ptr()).to_str().unwrap(),
-                "1726803356466 99.99 1234567890.1234567890",
+                "1726803356466 99.99 1234567890.1234567890 NULL",
             );
 
             let row = taos_fetch_row(res);
@@ -2096,7 +2105,7 @@ mod tests {
             let _ = taos_print_row(str.as_mut_ptr(), row, fields, num_fields);
             assert_eq!(
                 CStr::from_ptr(str.as_ptr()).to_str().unwrap(),
-                "1726803356467 1.02 123000.0000000000",
+                "1726803356467 1.02 123000.0000000000 NULL",
             );
 
             let row = taos_fetch_row(res);
@@ -2106,7 +2115,7 @@ mod tests {
             let _ = taos_print_row(str.as_mut_ptr(), row, fields, num_fields);
             assert_eq!(
                 CStr::from_ptr(str.as_ptr()).to_str().unwrap(),
-                "1726803356468 NULL NULL",
+                "1726803356468 NULL NULL NULL",
             );
 
             taos_free_result(res);
