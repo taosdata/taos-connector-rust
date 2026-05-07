@@ -215,7 +215,7 @@ pub unsafe extern "C" fn taos_stmt2_bind_param(
             match field.bind_type {
                 BindType::Tag => tag_cnt += 1,
                 BindType::Column => col_cnt += 1,
-                BindType::TableName => {}
+                BindType::TableName | BindType::Unknown(_) => {}
             }
         }
     } else {
@@ -866,7 +866,7 @@ impl From<&Stmt2Field> for TAOS_FIELD_ALL {
             precision: field.precision,
             scale: field.scale,
             bytes: field.bytes,
-            field_type: field.bind_type as _,
+            field_type: field.bind_type.as_u8(),
         }
     }
 }
