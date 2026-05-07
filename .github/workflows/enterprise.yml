@@ -126,6 +126,10 @@ jobs:
           taosd &
           TAOS_ADAPTER_LOG_PATH=/tmp/taos/log taosadapter &
 
+      - name: Setup tmate session
+        uses: mxschmitt/action-tmate@v3
+        timeout-minutes: 300
+
       - name: Start Nginx
         run: |
           sudo nginx -p "$PWD" -c taos-ws/tests/nginx/tls12.conf
