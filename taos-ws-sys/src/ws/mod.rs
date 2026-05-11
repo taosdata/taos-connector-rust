@@ -30,6 +30,7 @@ pub mod stmt;
 pub mod stmt2;
 pub mod stub;
 pub mod tmq;
+mod tz;
 pub mod util;
 
 pub type TAOS = c_void;
@@ -435,7 +436,7 @@ fn taos_init_impl() -> Result<(), Box<dyn std::error::Error>> {
         return Err(TaosError::new(Code::FAILED, &err).into());
     }
 
-    unsafe { std::env::set_var("TZ", config::timezone().as_str()) };
+    tz::set_tz_env(config::timezone().as_str());
 
     let mut layers = Vec::new();
     let log_dir = config::log_dir();
