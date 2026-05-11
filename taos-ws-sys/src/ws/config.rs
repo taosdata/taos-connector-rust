@@ -212,7 +212,6 @@ const DEFAULT_LOG_DIR: &str = if cfg!(windows) {
 const DEFAULT_COMPRESSION: bool = false;
 const DEFAULT_LOG_LEVEL: LevelFilter = LevelFilter::WARN;
 const DEFAULT_LOG_OUTPUT_TO_SCREEN: bool = false;
-const DEFAULT_TIMEZONE: &str = "Asia/Shanghai";
 const DEFAULT_SERVER_PORT: u16 = 0;
 const DEFAULT_CONN_RETRIES: u32 = 5;
 const DEFAULT_RETRY_BACKOFF_MS: u64 = 200;
@@ -221,6 +220,22 @@ const DEFAULT_LOG_KEEP_DAYS: u16 = 30;
 const DEFAULT_ROTATION_SIZE: &str = "1GB";
 const DEFAULT_DEBUG_FLAG: u16 = 0;
 const DEFAULT_WS_TLS_MODE: WsTlsMode = WsTlsMode::Disabled;
+
+fn default_timezone() -> FastStr {
+    default_timezone_from(iana_time_zone::get_timezone)
+}
+
+fn default_timezone_from<F, E>(get_timezone: F) -> FastStr
+where
+    F: FnOnce() -> Result<String, E>,
+{
+    let timezone = get_timezone().unwrap_or_else(|_| "UTC".to_string());
+    if timezone.trim().is_empty() {
+        FastStr::from("UTC")
+    } else {
+        FastStr::new(timezone)
+    }
+}
 
 #[repr(i32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -321,8 +336,10 @@ impl Config {
     }
 
     fn timezone(&self) -> &FastStr {
-        static TIMEZONE: FastStr = FastStr::from_static_str(DEFAULT_TIMEZONE);
-        self.timezone.as_ref().unwrap_or(&TIMEZONE)
+        static DEFAULT_TIMEZONE: OnceLock<FastStr> = OnceLock::new();
+        self.timezone
+            .as_ref()
+            .unwrap_or_else(|| DEFAULT_TIMEZONE.get_or_init(default_timezone))
     }
 
     fn fqdn(&self) -> Option<&FastStr> {
@@ -523,6 +540,7 @@ impl Config {
     fn print(&self) {
         tracing::info!("{}global config{}", " ".repeat(31), " ".repeat(32));
         tracing::info!("{}", "=".repeat(76));
+        let default_timezone = default_timezone();
 
         macro_rules! show {
             ($opt:expr, $key:expr, $default:expr) => {
@@ -540,7 +558,7 @@ impl Config {
             "compression",
             DEFAULT_COMPRESSION as u8
         );
-        show!(self.timezone, "timezone", DEFAULT_TIMEZONE);
+        show!(self.timezone, "timezone", default_timezone.as_str());
         show!(self.log_dir, "logDir", DEFAULT_LOG_DIR);
         show!(self.debug_flag(), "debugFlag", DEFAULT_DEBUG_FLAG);
         show!(self.log_keep_days, "logKeepDays", DEFAULT_LOG_KEEP_DAYS);
@@ -790,5 +808,17 @@ mod tests {
 
         let err = WsTlsMode::from_str("9").unwrap_err();
         assert_eq!(err.code(), Code::INVALID_PARA);
+    }
+
+    #[test]
+    fn test_default_timezone_non_empty() {
+        let timezone = default_timezone();
+        assert!(!timezone.as_str().trim().is_empty());
+    }
+
+    #[test]
+    fn test_default_timezone_fallback_to_utc() {
+        let timezone = default_timezone_from(|| Err::<String, _>("failed to get timezone"));
+        assert_eq!(timezone, FastStr::from("UTC"));
     }
 }
