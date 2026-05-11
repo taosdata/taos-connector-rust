@@ -32,7 +32,7 @@ pub fn get_system_locale() -> String {
 
 #[cfg(windows)]
 unsafe extern "C" {
-    fn _putenv(envstring: *const std::ffi::c_char) -> std::ffi::c_int;
+    fn _putenv_s(name: *const std::ffi::c_char, value: *const std::ffi::c_char) -> std::ffi::c_int;
     fn _tzset();
 }
 
@@ -44,11 +44,14 @@ pub fn set_tz_env(tz: &str) {
 #[cfg(windows)]
 pub fn set_tz_env(tz: &str) {
     let posix = iana_to_posix_tz(tz);
+    let key = c"TZ";
 
-    match std::ffi::CString::new(format!("TZ={posix}")) {
-        Ok(env_str) => {
-            if unsafe { _putenv(env_str.as_ptr()) } != 0 {
-                warn!("Failed to set timezone via _putenv, fallback to process env only: {posix}");
+    match std::ffi::CString::new(posix.as_str()) {
+        Ok(value) => {
+            if unsafe { _putenv_s(key.as_ptr(), value.as_ptr()) } != 0 {
+                warn!(
+                    "Failed to set timezone via _putenv_s, fallback to process env only: {posix}"
+                );
             }
         }
         Err(err) => {
