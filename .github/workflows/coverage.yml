@@ -25,7 +25,7 @@ jobs:
         with:
           repository: "taosdata/TDengine"
           path: "TDengine"
-          ref: "3.3.6"
+          ref: "main"
 
       - name: Checkout TDengine manually
         if: github.event_name == 'workflow_dispatch'
