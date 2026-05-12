@@ -1760,7 +1760,6 @@ impl RawRes {
     pub(crate) fn tmq_message_type(&self) -> tmq_res_t {
         unsafe { (self.c.tmq.as_ref().unwrap().tmq_get_res_type)(self.as_ptr()) }
     }
-
     #[inline]
     pub fn tmq_table_name(&self) -> Option<&str> {
         unsafe {
@@ -1772,7 +1771,6 @@ impl RawRes {
             }
         }
     }
-
     #[inline]
     pub(crate) fn tmq_db_name(&self) -> Option<&str> {
         unsafe {
@@ -1784,7 +1782,6 @@ impl RawRes {
             }
         }
     }
-
     #[inline]
     pub fn tmq_topic_name(&self) -> Option<&str> {
         unsafe {
@@ -1796,7 +1793,6 @@ impl RawRes {
             }
         }
     }
-
     #[inline]
     pub fn tmq_vgroup_id(&self) -> Option<i32> {
         unsafe {
@@ -1808,7 +1804,6 @@ impl RawRes {
             }
         }
     }
-
     #[inline]
     pub(crate) fn tmq_get_json_meta(&self) -> Result<JsonMeta, RawError> {
         unsafe {
@@ -1818,9 +1813,9 @@ impl RawRes {
             }
 
             let meta_cstr = CStr::from_ptr(meta);
-            tracing::trace!(json = %meta_cstr.to_string_lossy(), "Received TMQ json meta");
             match serde_json::from_slice(meta_cstr.to_bytes()) {
                 Ok(json_meta) => {
+                    tracing::trace!(json = %meta_cstr.to_string_lossy(), "Received TMQ json meta");
                     (self.c.tmq.as_ref().unwrap().tmq_free_json_meta)(meta);
                     Ok(json_meta)
                 }
