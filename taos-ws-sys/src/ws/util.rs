@@ -69,8 +69,8 @@ fn iana_to_posix_tz(tz: &str) -> String {
     let parsed_tz = match tz.parse::<chrono_tz::Tz>() {
         Ok(parsed_tz) => parsed_tz,
         Err(_) => {
-            warn!("Unknown IANA timezone: {tz}, preserving original TZ value for Windows CRT");
-            return tz.to_string();
+            warn!("Unknown timezone: {tz}, falling back to UTC");
+            return "UTC+0:00".to_string();
         }
     };
 
@@ -160,6 +160,6 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn test_unknown_fallback() {
-        assert_eq!(super::iana_to_posix_tz("invalid_tz"), "invalid_tz");
+        assert_eq!(super::iana_to_posix_tz("invalid_tz"), "UTC+0:00");
     }
 }
