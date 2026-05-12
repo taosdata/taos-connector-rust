@@ -69,7 +69,6 @@ pub(super) fn bind_params_to_bytes(
                     need_cols = true;
                     col_cnt += 1;
                 }
-                BindType::Unknown(_) => {}
             }
         }
     } else {
