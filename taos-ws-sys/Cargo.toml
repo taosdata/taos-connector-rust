@@ -19,6 +19,7 @@ dashmap = "6.1.0"
 dlopen2 = "0.7"
 faststr = "0.2.31"
 futures = { version = "0.3", features = ["executor"] }
+iana-time-zone = "0.1"
 itoa = "1.0.15"
 lazy_static = "1.4.0"
 libc = { version = "0.2", default-features = false }
@@ -40,13 +41,17 @@ tracing-subscriber = { version = "0.3.20", default-features = false, features = 
     "env-filter",
 ] }
 
+[target.'cfg(windows)'.dependencies]
+chrono = "0.4"
+chrono-tz = "0.10.4"
+
 [build-dependencies]
 cbindgen = "0.27.0"
 syn = { version = "2.0.91", features = ["full", "visit"] }
 
 [dev-dependencies]
 flume = "0.11"
-rand = "0.9.1"
+rand = "0.9.3"
 taos-query = { version = "0.12.4", path = "../taos-query", default-features = false, features = [
     "async",
     "test",
