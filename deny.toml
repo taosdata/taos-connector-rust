@@ -12,7 +12,6 @@ allow = [
     "Unicode-3.0",
     "Zlib",
 ]
-exceptions = [{ allow = ["OpenSSL"], name = "aws-lc-sys" }]
 
 [bans]
 multiple-versions = "allow"
