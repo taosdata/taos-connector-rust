@@ -25,7 +25,7 @@ jobs:
         with:
           repository: "taosdata/TDengine"
           path: "TDengine"
-          ref: "main"
+          ref: "3.3.8"
 
       - name: Checkout TDengine manually
         if: github.event_name == 'workflow_dispatch'
@@ -80,7 +80,7 @@ jobs:
           cd TDengine
           mkdir debug
           cd debug
-          cmake .. -DBUILD_TEST=off -DBUILD_HTTP=false -DVERNUMBER=3.9.9.9 -DBUILD_DEPENDENCY_TESTS=false
+          cmake .. -DBUILD_TEST=off -DBUILD_HTTP=false -DTAOSADAPTER_GIT_TAG=3.3.8 -DVERNUMBER=3.9.9.9 -DBUILD_DEPENDENCY_TESTS=false
           make -j 8
 
       - name: Package
