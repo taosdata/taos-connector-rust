@@ -1,3 +1,4 @@
+#[cfg(not(windows))]
 use std::ffi::CStr;
 
 #[cfg(windows)]
