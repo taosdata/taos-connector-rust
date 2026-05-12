@@ -13,8 +13,6 @@ anyhow = "1"
 bytes = "1.1.0"
 byteorder = "1.5.0"
 cargo_metadata = "0.18.1"
-chrono = "0.4"
-chrono-tz = "0.10.4"
 ctor = "0.2.9"
 dashmap = "6.1.0"
 dlopen2 = "0.7"
@@ -36,6 +34,10 @@ tracing-log = "0.2.0"
 tracing-subscriber = { version = "0.3.18", default-features = false, features = [
     "env-filter",
 ] }
+
+[target.'cfg(windows)'.dependencies]
+chrono = "0.4"
+chrono-tz = "0.10.4"
 
 [build-dependencies]
 cbindgen = "0.27.0"
