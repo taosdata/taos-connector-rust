@@ -23,10 +23,13 @@ use crate::{
     WsStreamSender,
 };
 
+type ConnCallbackOutput<'a> =
+    Pin<Box<dyn Future<Output = RawResult<Option<Vec<String>>>> + Send + 'a>>;
+
 pub fn send_conn_request(
     conn_req: WsConnReq,
     conn_timeout: Duration,
-) -> impl for<'a> Fn(&'a mut WsStream) -> Pin<Box<dyn Future<Output = RawResult<()>> + Send + 'a>> {
+) -> impl for<'a> Fn(&'a mut WsStream) -> ConnCallbackOutput<'a> {
     move |ws_stream| {
         let conn_req = conn_req.clone();
 
@@ -65,7 +68,7 @@ pub fn send_conn_request(
                         let (_, data, ok) = resp.ok();
                         ok?;
                         match data {
-                            WsRecvData::Conn => return Ok(()),
+                            WsRecvData::Conn { list_instances } => return Ok(list_instances),
                             WsRecvData::Version { .. } => {}
                             _ => {
                                 return Err(RawError::from_string(format!(
@@ -425,7 +428,7 @@ fn parse_text_message(text: String, query_sender: WsQuerySender, cache: MessageC
     cache.remove(&req_id);
 
     match &data {
-        WsRecvData::Conn
+        WsRecvData::Conn { .. }
         | WsRecvData::Version { .. }
         | WsRecvData::Block { .. }
         | WsRecvData::BlockNew { .. }

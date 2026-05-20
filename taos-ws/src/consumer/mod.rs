@@ -91,6 +91,7 @@ impl TBuilder for TmqBuilder {
     fn available_params() -> &'static [&'static str] {
         &[
             "token",
+            "adapter_ha",
             "timeout",
             "group.id",
             "client.id",
@@ -136,7 +137,7 @@ impl TBuilder for TmqBuilder {
     }
 
     fn get_edition(&self) -> RawResult<taos_query::util::Edition> {
-        let addr = self.info.active_addr();
+        let addr = taos_query::block_in_place_or_global(self.info.active_addr());
         if addr.matches(".cloud.tdengine.com").next().is_some()
             || addr.matches(".cloud.taosdata.com").next().is_some()
         {
@@ -229,7 +230,7 @@ impl taos_query::AsyncTBuilder for TmqBuilder {
         // Ensure server is ready
         taos.exec("select server_version()").await?;
 
-        let addr = self.info.active_addr();
+        let addr = self.info.active_addr().await;
         if addr.matches(".cloud.tdengine.com").next().is_some()
             || addr.matches(".cloud.taosdata.com").next().is_some()
         {
@@ -659,34 +660,62 @@ impl AsAsyncConsumer for Consumer {
         let topics = topics.into_iter().map(Into::into).collect_vec();
         self.with_topics(topics.clone()).await;
 
+        self.conn = self.builder.build_conn_request();
         let action = TmqSend::Subscribe {
             req_id: self.sender.req_id(),
             req: self.tmq_conf.clone().disable_auto_commit(),
             topics: topics.clone(),
             conn: self.conn.clone(),
         };
-        if let Err(err) = self.sender.send_recv(action).await {
-            tracing::error!("subscribe error: {err:?}");
-            if self.tmq_conf.enable_batch_meta.is_none() {
-                return Err(err);
+        let list_instances = match self.sender.send_recv(action).await {
+            Ok(TmqRecvData::Subscribe { list_instances }) => list_instances,
+            Ok(data) => {
+                return Err(RawError::from_string(format!(
+                    "unexpected subscribe response: {data:?}"
+                )));
             }
+            Err(err) => {
+                tracing::error!("subscribe error: {err:?}");
+                if self.tmq_conf.enable_batch_meta.is_none() {
+                    return Err(err);
+                }
 
-            let code: i32 = err.code().into();
-            if code & 0xFFFF == 0xFFFE {
-                // subscribe conf error -2.
-                let action = TmqSend::Subscribe {
-                    req_id: self.sender.req_id(),
-                    req: self
-                        .tmq_conf
-                        .clone()
-                        .disable_batch_meta()
-                        .disable_auto_commit(),
-                    topics: topics.clone(),
-                    conn: self.conn.clone(),
-                };
-                self.sender.send_recv(action).await?;
-            } else {
-                return Err(err);
+                let code: i32 = err.code().into();
+                if code & 0xFFFF == 0xFFFE {
+                    // subscribe conf error -2.
+                    let action = TmqSend::Subscribe {
+                        req_id: self.sender.req_id(),
+                        req: self
+                            .tmq_conf
+                            .clone()
+                            .disable_batch_meta()
+                            .disable_auto_commit(),
+                        topics: topics.clone(),
+                        conn: self.conn.clone(),
+                    };
+                    match self.sender.send_recv(action).await? {
+                        TmqRecvData::Subscribe { list_instances } => list_instances,
+                        data => {
+                            return Err(RawError::from_string(format!(
+                                "unexpected subscribe response: {data:?}"
+                            )));
+                        }
+                    }
+                } else {
+                    return Err(err);
+                }
+            }
+        };
+
+        if self.builder.adapter_ha
+            && self
+                .builder
+                .instances_fetched
+                .compare_exchange(false, true, Ordering::AcqRel, Ordering::Relaxed)
+                .is_ok()
+        {
+            if let Some(instances) = list_instances {
+                self.builder.merge_instances(instances).await;
             }
         }
 
@@ -1186,6 +1215,7 @@ impl TmqBuilder {
 
         Ok(Consumer {
             conn: self.info.build_conn_request(),
+            builder: self.info.clone(),
             conn_id,
             tmq_conf: self.conf.clone(),
             sender: tmq_sender,
@@ -1208,6 +1238,7 @@ impl TmqBuilder {
 #[derive(Debug)]
 pub struct Consumer {
     conn: WsConnReq,
+    builder: TaosBuilder,
     conn_id: u64,
     tmq_conf: TmqInit,
     sender: WsTmqSender,
@@ -3502,6 +3533,7 @@ mod tests {
 
         let expected = [
             "token",
+            "adapter_ha",
             "timeout",
             "group.id",
             "client.id",
