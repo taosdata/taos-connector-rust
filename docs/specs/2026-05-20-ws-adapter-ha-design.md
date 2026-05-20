@@ -111,7 +111,7 @@ fn is_valid_host_port(s: &str) -> bool {
 }
 ```
 
-注意：`merge_instances` 不负责设置 `instances_fetched`。该标记由调用方（`connect_with_opt_cb` / `Consumer::subscribe()`）在实际收到实例列表后设置。若响应不包含实例列表（老版本 adapter 或混合部署），`instances_fetched` 保持 `false`，后续连接继续发送 `list_instances=true`，直到真正获取到端点列表。
+注意：`merge_instances` 不负责设置 `instances_fetched`。该标记由调用方（`connect_with_opt_cb` / `Consumer::subscribe()`）在首次成功握手后统一设置（见下文），无论响应是否包含实例列表。
 
 ### build_conn_request 变更
 
@@ -152,17 +152,15 @@ F: for<'a> Fn(&'a mut WsStream) -> Pin<Box<dyn Future<Output = RawResult<Option<
 if let Some(ref cb) = cb {
     let instances = call!(cb(&mut ws_stream), "call callback");
 
-    // 只有实际收到端点列表才算"首次拉取完成"。
+    // 无论是否收到实例列表，首次成功握手后即标记"已尝试拉取"。
     // 使用 compare_exchange 作为一次性门闩，防止并发建连时多次 merge。
-    // 若连接到老版本 adapter（返回 None），instances_fetched 保持 false，
-    // 后续连接继续发送 list_instances=true 直到获取到端点列表。
-    if let Some(instances) = instances {
-        if self.adapter_ha
-            && self
-                .instances_fetched
-                .compare_exchange(false, true, Ordering::AcqRel, Ordering::Relaxed)
-                .is_ok()
-        {
+    if self.adapter_ha
+        && self
+            .instances_fetched
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Relaxed)
+            .is_ok()
+    {
+        if let Some(instances) = instances {
             self.merge_instances(instances).await;
         }
     }
@@ -172,8 +170,8 @@ if let Some(ref cb) = cb {
 并发安全说明：
 
 - `build_conn_request` 中的 `load(Acquire)` 是快照读，并发建连时多个线程可能都读到 `false` 并发送 `list_instances=true`。
-- `connect_with_opt_cb` 中的 `compare_exchange` 保证只有第一个成功完成握手且收到实例列表的连接执行 merge。
-- 其他并发连接收到的相同实例列表被丢弃（CAS 失败），不会重复合并。
+- `connect_with_opt_cb` 中的 `compare_exchange` 保证只有第一个成功完成握手的连接执行 merge。
+- 其他并发连接发送的 `list_instances=true` 不会造成副作用（adapter 返回相同列表，但客户端不执行 merge）。
 
 ## 各连接流程的处理
 
@@ -224,12 +222,12 @@ let action = TmqSend::Subscribe {
 
 match self.sender.send_recv(action).await {
     Ok(TmqRecvData::Subscribe { list_instances }) => {
-        if let Some(instances) = list_instances {
-            if self.builder.adapter_ha
-                && self.builder.instances_fetched
-                    .compare_exchange(false, true, Ordering::AcqRel, Ordering::Relaxed)
-                    .is_ok()
-            {
+        if self.builder.adapter_ha
+            && self.builder.instances_fetched
+                .compare_exchange(false, true, Ordering::AcqRel, Ordering::Relaxed)
+                .is_ok()
+        {
+            if let Some(instances) = list_instances {
                 self.builder.merge_instances(instances).await;
             }
         }
