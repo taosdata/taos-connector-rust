@@ -137,7 +137,7 @@ impl TBuilder for TmqBuilder {
     }
 
     fn get_edition(&self) -> RawResult<taos_query::util::Edition> {
-        let addr = taos_query::block_in_place_or_global(self.info.active_addr());
+        let addr = self.info.active_addr();
         if addr.matches(".cloud.tdengine.com").next().is_some()
             || addr.matches(".cloud.taosdata.com").next().is_some()
         {
@@ -230,7 +230,7 @@ impl taos_query::AsyncTBuilder for TmqBuilder {
         // Ensure server is ready
         taos.exec("select server_version()").await?;
 
-        let addr = self.info.active_addr().await;
+        let addr = self.info.active_addr();
         if addr.matches(".cloud.tdengine.com").next().is_some()
             || addr.matches(".cloud.taosdata.com").next().is_some()
         {
@@ -715,7 +715,7 @@ impl AsAsyncConsumer for Consumer {
                 .is_ok()
         {
             if let Some(instances) = list_instances {
-                self.builder.merge_instances(instances).await;
+                self.builder.merge_instances(instances);
             }
         }
 

@@ -6,7 +6,7 @@ use std::fmt::{Debug, Display};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use chrono_tz::Tz;
@@ -25,7 +25,6 @@ use rustls::{ClientConfig, DigitallySignedStruct};
 use taos_query::prelude::Code;
 use taos_query::util::{generate_req_id, Edition};
 use taos_query::{DsnError, IntoDsn, RawError, RawResult};
-use tokio::sync::RwLock;
 use tokio::time;
 use tokio_tungstenite::tungstenite::error::ProtocolError;
 use tokio_tungstenite::tungstenite::extensions::DeflateConfig;
@@ -244,7 +243,7 @@ impl taos_query::TBuilder for TaosBuilder {
     }
 
     fn is_enterprise_edition(&self) -> RawResult<bool> {
-        let addr = block_in_place_or_global(self.active_addr());
+        let addr = self.active_addr();
         if addr.matches(".cloud.tdengine.com").next().is_some()
             || addr.matches(".cloud.taosdata.com").next().is_some()
         {
@@ -281,7 +280,7 @@ impl taos_query::TBuilder for TaosBuilder {
     }
 
     fn get_edition(&self) -> RawResult<Edition> {
-        let addr = block_in_place_or_global(self.active_addr());
+        let addr = self.active_addr();
         if addr.matches(".cloud.tdengine.com").next().is_some()
             || addr.matches(".cloud.taosdata.com").next().is_some()
         {
@@ -367,7 +366,7 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
         // Ensure server is ready
         taos.exec("select server_version()").await?;
 
-        let addr = self.active_addr().await;
+        let addr = self.active_addr();
         if addr.matches(".cloud.tdengine.com").next().is_some()
             || addr.matches(".cloud.taosdata.com").next().is_some()
         {
@@ -410,7 +409,7 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
         // Ensure server is ready
         taos.exec("select server_version()").await?;
 
-        let addr = self.active_addr().await;
+        let addr = self.active_addr();
         if addr.matches(".cloud.tdengine.com").next().is_some()
             || addr.matches(".cloud.taosdata.com").next().is_some()
         {
@@ -480,11 +479,12 @@ impl TaosBuilder {
         };
 
         let token = dsn.params.remove("token");
+
         let adapter_ha = dsn
             .remove("adapter_ha")
             .and_then(|s| {
                 if s.trim().is_empty() {
-                    Some(true)
+                    Some(false)
                 } else {
                     s.trim().parse::<bool>().ok()
                 }
@@ -713,9 +713,9 @@ impl TaosBuilder {
         let mut last_err = None;
         let connector = self.build_tls_connector()?;
 
-        let addrs_len = self.addrs.read().await.len();
+        let addrs_len = self.addrs.read().unwrap().len();
         for _ in 0..addrs_len {
-            let mut url = self.to_url(ty).await;
+            let mut url = self.to_url(ty);
             for i in 0..=self.retry_policy.retries {
                 tracing::trace!("connecting to TDengine WebSocket server, url: {url}");
                 match connect_async_tls_with_config(
@@ -767,7 +767,7 @@ impl TaosBuilder {
                                     .is_ok()
                             {
                                 if let Some(instances) = instances {
-                                    self.merge_instances(instances).await;
+                                    self.merge_instances(instances);
                                 }
                             }
                         }
@@ -793,9 +793,9 @@ impl TaosBuilder {
                         } else if matches!(&err, WsError::Http(resp) if resp.status() == 400 || resp.status() == 404)
                         {
                             url = match ty {
-                                EndpointType::Ws => self.to_query_url().await,
-                                EndpointType::Stmt => self.to_stmt_url().await,
-                                EndpointType::Tmq => self.to_tmq_url().await,
+                                EndpointType::Ws => self.to_query_url(),
+                                EndpointType::Stmt => self.to_stmt_url(),
+                                EndpointType::Tmq => self.to_tmq_url(),
                             };
                             last_err = Some(QueryError::from(err).into());
                             continue;
@@ -827,7 +827,7 @@ impl TaosBuilder {
 
         tracing::error!(
             "failed to connect to all addresses: {:?}",
-            self.addrs.read().await
+            self.addrs.read().unwrap()
         );
 
         if let Some(err) = last_err {
@@ -1024,8 +1024,8 @@ impl TaosBuilder {
         }
     }
 
-    pub(crate) async fn merge_instances(&self, instances: Vec<String>) {
-        let mut addrs = self.addrs.write().await;
+    pub(crate) fn merge_instances(&self, instances: Vec<String>) {
+        let mut addrs = self.addrs.write().unwrap();
         let new_instances: Vec<String> = {
             let existing: HashSet<&str> = addrs.iter().map(String::as_str).collect();
             let mut seen = HashSet::new();
@@ -1075,35 +1075,35 @@ impl TaosBuilder {
     }
 
     #[inline]
-    pub(crate) async fn to_url(&self, ty: EndpointType) -> String {
+    pub(crate) fn to_url(&self, ty: EndpointType) -> String {
         match ty {
-            EndpointType::Tmq => self.to_tmq_url().await,
-            _ => self.to_ws_url().await,
+            EndpointType::Tmq => self.to_tmq_url(),
+            _ => self.to_ws_url(),
         }
     }
 
     #[inline]
-    pub(crate) async fn to_ws_url(&self) -> String {
-        self.format_url("ws").await
+    pub(crate) fn to_ws_url(&self) -> String {
+        self.format_url("ws")
     }
 
     #[inline]
-    pub(crate) async fn to_query_url(&self) -> String {
-        self.format_url("rest/ws").await
+    pub(crate) fn to_query_url(&self) -> String {
+        self.format_url("rest/ws")
     }
 
     #[inline]
-    pub(crate) async fn to_stmt_url(&self) -> String {
-        self.format_url("rest/stmt").await
+    pub(crate) fn to_stmt_url(&self) -> String {
+        self.format_url("rest/stmt")
     }
 
     #[inline]
-    pub(crate) async fn to_tmq_url(&self) -> String {
-        self.format_url("rest/tmq").await
+    pub(crate) fn to_tmq_url(&self) -> String {
+        self.format_url("rest/tmq")
     }
 
-    async fn format_url(&self, path: &str) -> String {
-        let addr = self.active_addr().await;
+    fn format_url(&self, path: &str) -> String {
+        let addr = self.active_addr();
         match &self.auth {
             WsAuth::Token(token) => {
                 format!("{}://{}/{}?token={}", self.scheme(), addr, path, token)
@@ -1115,8 +1115,8 @@ impl TaosBuilder {
     }
 
     #[inline]
-    async fn active_addr(&self) -> String {
-        let addrs = self.addrs.read().await;
+    fn active_addr(&self) -> String {
+        let addrs = self.addrs.read().unwrap();
         let cur_addr_idx = self.current_addr_index.load(Ordering::Relaxed) % addrs.len();
         addrs[cur_addr_idx].clone()
     }
@@ -1430,23 +1430,21 @@ mod tests {
     #[tokio::test]
     async fn test_merge_instances_filters_invalid_and_duplicates() -> Result<(), anyhow::Error> {
         let builder = TaosBuilder::from_dsn("ws://localhost:6041?adapter_ha=true")?;
-        let initial_addrs = builder.addrs.read().await.clone();
+        let initial_addrs = builder.addrs.read().unwrap().clone();
 
-        builder
-            .merge_instances(vec![
-                initial_addrs[0].clone(),
-                "127.0.0.1:6042".to_string(),
-                "127.0.0.1:6042".to_string(),
-                "127.0.0.1".to_string(),
-                ":6041".to_string(),
-                "localhost:abc".to_string(),
-                "localhost:0".to_string(),
-                "localhost:65536".to_string(),
-                "localhost:6043".to_string(),
-            ])
-            .await;
+        builder.merge_instances(vec![
+            initial_addrs[0].clone(),
+            "127.0.0.1:6042".to_string(),
+            "127.0.0.1:6042".to_string(),
+            "127.0.0.1".to_string(),
+            ":6041".to_string(),
+            "localhost:abc".to_string(),
+            "localhost:0".to_string(),
+            "localhost:65536".to_string(),
+            "localhost:6043".to_string(),
+        ]);
 
-        let addrs = builder.addrs.read().await.clone();
+        let addrs = builder.addrs.read().unwrap().clone();
         assert!(addrs.contains(&initial_addrs[0]));
         assert!(addrs.contains(&"127.0.0.1:6042".to_string()));
         assert!(addrs.contains(&"localhost:6043".to_string()));

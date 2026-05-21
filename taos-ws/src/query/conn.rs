@@ -23,13 +23,12 @@ use crate::{
     WsStreamSender,
 };
 
-type ConnCallbackOutput<'a> =
-    Pin<Box<dyn Future<Output = RawResult<Option<Vec<String>>>> + Send + 'a>>;
-
 pub fn send_conn_request(
     conn_req: WsConnReq,
     conn_timeout: Duration,
-) -> impl for<'a> Fn(&'a mut WsStream) -> ConnCallbackOutput<'a> {
+) -> impl for<'a> Fn(
+    &'a mut WsStream,
+) -> Pin<Box<dyn Future<Output = RawResult<Option<Vec<String>>>> + Send + 'a>> {
     move |ws_stream| {
         let conn_req = conn_req.clone();
 
