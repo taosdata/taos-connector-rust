@@ -1,5 +1,3 @@
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -22,11 +20,9 @@ use crate::query::asyn::{is_support_binary_sql, WS_ERROR_NO};
 use crate::query::messages::ToMessage;
 use crate::query::WsConnReq;
 use crate::{
-    handle_disconnect_error, EndpointType, TaosBuilder, WsStream, WsStreamReader, WsStreamSender,
+    handle_disconnect_error, EndpointType, TaosBuilder, WsConnectCallbackFuture, WsStream,
+    WsStreamReader, WsStreamSender,
 };
-
-type SubscribeCallbackOutput<'a> =
-    Pin<Box<dyn Future<Output = RawResult<Option<Vec<String>>>> + Send + 'a>>;
 
 #[derive(Debug, Clone)]
 struct MessageCache {
@@ -482,7 +478,7 @@ fn send_subscribe_request(
     tmq_conf: TmqInit,
     topics: Arc<RwLock<Vec<String>>>,
     conn_timeout: Duration,
-) -> impl for<'a> Fn(&'a mut WsStream) -> SubscribeCallbackOutput<'a> {
+) -> impl for<'a> Fn(&'a mut WsStream) -> WsConnectCallbackFuture<'a> {
     move |ws_stream| {
         let conn_req = conn_req.clone();
         let tmq_conf = tmq_conf.clone();

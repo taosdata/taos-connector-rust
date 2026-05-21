@@ -61,6 +61,9 @@ type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
 type WsStreamReader = SplitStream<WsStream>;
 type WsStreamSender = SplitSink<WsStream, Message>;
 
+type WsConnectCallbackFuture<'a> =
+    Pin<Box<dyn Future<Output = RawResult<Option<Vec<String>>>> + Send + 'a>>;
+
 const CONNECTOR_INFO: &str = concat!(
     "rust-ws-v",
     env!("CARGO_PKG_VERSION"),
@@ -663,12 +666,8 @@ impl TaosBuilder {
     }
 
     pub(crate) async fn connect_with_ty(&self, ty: EndpointType) -> RawResult<(WsStream, Version)> {
-        self.connect_with_opt_cb::<fn(
-            &mut WsStream,
-        ) -> Pin<Box<dyn Future<Output = RawResult<Option<Vec<String>>>> + Send + '_>>>(
-            ty, None
-        )
-        .await
+        self.connect_with_opt_cb::<fn(&mut WsStream) -> WsConnectCallbackFuture<'_>>(ty, None)
+            .await
     }
 
     pub(crate) async fn connect_with_cb<F>(
@@ -677,10 +676,7 @@ impl TaosBuilder {
         cb: F,
     ) -> RawResult<(WsStream, Version)>
     where
-        F: for<'a> Fn(
-            &'a mut WsStream,
-        )
-            -> Pin<Box<dyn Future<Output = RawResult<Option<Vec<String>>>> + Send + 'a>>,
+        F: for<'a> Fn(&'a mut WsStream) -> WsConnectCallbackFuture<'a>,
     {
         self.connect_with_opt_cb(ty, Some(cb)).await
     }
@@ -691,10 +687,7 @@ impl TaosBuilder {
         cb: Option<F>,
     ) -> RawResult<(WsStream, Version)>
     where
-        F: for<'a> Fn(
-            &'a mut WsStream,
-        )
-            -> Pin<Box<dyn Future<Output = RawResult<Option<Vec<String>>>> + Send + 'a>>,
+        F: for<'a> Fn(&'a mut WsStream) -> WsConnectCallbackFuture<'a>,
     {
         let mut config = WebSocketConfig::default();
         config.max_frame_size = None;
@@ -1416,6 +1409,12 @@ mod tests {
     #[test]
     fn test_adapter_ha_build_conn_request_list_instances() -> Result<(), anyhow::Error> {
         let builder = TaosBuilder::from_dsn("ws://localhost:6041")?;
+        assert_eq!(builder.build_conn_request().list_instances, None);
+
+        let builder = TaosBuilder::from_dsn("ws://localhost:6041?adapter_ha=false")?;
+        assert_eq!(builder.build_conn_request().list_instances, None);
+
+        let builder = TaosBuilder::from_dsn("ws://localhost:6041?adapter_ha=")?;
         assert_eq!(builder.build_conn_request().list_instances, None);
 
         let builder = TaosBuilder::from_dsn("ws://localhost:6041?adapter_ha=true")?;
