@@ -1427,6 +1427,34 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_adapter_ha_connect_and_disable_next_fetch() -> Result<(), anyhow::Error> {
+        let builder = TaosBuilder::from_dsn("ws://localhost:6041?adapter_ha=true")?;
+
+        let taos = builder.build().await?;
+        taos.exec("select server_version()").await?;
+
+        assert!(builder.instances_fetched.load(Ordering::Acquire));
+        assert_eq!(builder.build_conn_request().list_instances, Some(false));
+
+        let addrs_after_first = builder.addrs.read().unwrap().clone();
+        assert!(!addrs_after_first.is_empty());
+        assert!(addrs_after_first
+            .iter()
+            .all(|addr| is_valid_host_port(addr)));
+
+        let mut deduped = addrs_after_first.clone();
+        deduped.sort_unstable();
+        deduped.dedup();
+        assert_eq!(deduped.len(), addrs_after_first.len());
+
+        let _ = builder.build().await?;
+        let addrs_after_second = builder.addrs.read().unwrap().clone();
+        assert_eq!(addrs_after_second, addrs_after_first);
+
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn test_merge_instances_filters_invalid_and_duplicates() -> Result<(), anyhow::Error> {
         let builder = TaosBuilder::from_dsn("ws://localhost:6041?adapter_ha=true")?;
         let initial_addrs = builder.addrs.read().unwrap().clone();

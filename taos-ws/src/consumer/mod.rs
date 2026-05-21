@@ -2382,6 +2382,63 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_tmq_adapter_ha_subscribe() -> anyhow::Result<()> {
+        use std::sync::atomic::Ordering;
+        use taos_query::prelude::*;
+
+        let taos = TaosBuilder::from_dsn("ws://localhost:6041")?
+            .build()
+            .await?;
+
+        taos.exec_many([
+            "drop topic if exists topic_1779348321",
+            "drop database if exists test_1779348321",
+            "create database test_1779348321",
+            "create topic topic_1779348321 as database test_1779348321",
+            "use test_1779348321",
+            "create table t0 (ts timestamp, c1 int)",
+            "insert into t0 values(now, 1)",
+        ])
+        .await?;
+
+        let builder = TmqBuilder::new(
+            "ws://localhost:6041?group.id=9865&auto.offset.reset=earliest&adapter_ha=true",
+        )?;
+
+        assert_eq!(builder.info.build_conn_request().list_instances, Some(true));
+        assert!(!builder.info.instances_fetched.load(Ordering::Acquire));
+
+        let mut consumer = builder.build_consumer().await?;
+        assert_eq!(
+            consumer.builder.build_conn_request().list_instances,
+            Some(true)
+        );
+        assert!(!consumer.builder.instances_fetched.load(Ordering::Acquire));
+
+        consumer.subscribe(["topic_1779348321"]).await?;
+
+        assert!(consumer.builder.instances_fetched.load(Ordering::Acquire));
+        assert_eq!(
+            consumer.builder.build_conn_request().list_instances,
+            Some(false)
+        );
+
+        let addrs = consumer.builder.addrs.read().unwrap().clone();
+        assert!(!addrs.is_empty());
+        assert!(addrs.iter().all(|addr| crate::is_valid_host_port(addr)));
+
+        consumer.unsubscribe().await;
+
+        taos.exec_many([
+            "drop topic if exists topic_1779348321",
+            "drop database if exists test_1779348321",
+        ])
+        .await?;
+
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn test_filter_td_connect_websocket_scheme_config() -> anyhow::Result<()> {
         use taos_query::prelude::*;
 
