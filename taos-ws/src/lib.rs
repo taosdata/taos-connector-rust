@@ -1129,9 +1129,10 @@ fn is_valid_host_port(s: &str) -> bool {
     }
 
     if host.starts_with('[') || host.ends_with(']') {
-        return host.starts_with('[')
-            && host.ends_with(']')
-            && host[1..host.len() - 1].contains(':');
+        return host
+            .strip_prefix('[')
+            .and_then(|h| h.strip_suffix(']'))
+            .is_some_and(|h| h.contains(':'));
     }
 
     !host.contains(':')
