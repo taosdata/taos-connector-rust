@@ -1116,11 +1116,25 @@ impl TaosBuilder {
 }
 
 fn is_valid_host_port(s: &str) -> bool {
-    if let Some((host, port)) = s.rsplit_once(':') {
-        !host.is_empty() && port.parse::<u16>().is_ok_and(|p| p > 0)
-    } else {
-        false
+    let Some((host, port)) = s.rsplit_once(':') else {
+        return false;
+    };
+
+    if host.is_empty() || !port.parse::<u16>().is_ok_and(|p| p > 0) {
+        return false;
     }
+
+    if host.chars().any(|c| c.is_whitespace()) || host.contains(['/', '\\', '?', '#', '@']) {
+        return false;
+    }
+
+    if host.starts_with('[') || host.ends_with(']') {
+        return host.starts_with('[')
+            && host.ends_with(']')
+            && host[1..host.len() - 1].contains(':');
+    }
+
+    !host.contains(':')
 }
 
 async fn send_request_with_timeout(
@@ -1407,6 +1421,13 @@ mod tests {
     }
 
     #[test]
+    fn test_taos_builder_available_params() {
+        use taos_query::TBuilder;
+
+        assert_eq!(TaosBuilder::available_params(), ["token", "adapter_ha"]);
+    }
+
+    #[test]
     fn test_adapter_ha_build_conn_request_list_instances() -> Result<(), anyhow::Error> {
         let builder = TaosBuilder::from_dsn("ws://localhost:6041")?;
         assert_eq!(builder.build_conn_request().list_instances, None);
@@ -1415,6 +1436,9 @@ mod tests {
         assert_eq!(builder.build_conn_request().list_instances, None);
 
         let builder = TaosBuilder::from_dsn("ws://localhost:6041?adapter_ha=")?;
+        assert_eq!(builder.build_conn_request().list_instances, None);
+
+        let builder = TaosBuilder::from_dsn("ws://localhost:6041?adapter_ha=invalid")?;
         assert_eq!(builder.build_conn_request().list_instances, None);
 
         let builder = TaosBuilder::from_dsn("ws://localhost:6041?adapter_ha=true")?;
@@ -1454,6 +1478,24 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn test_merge_instances_no_new_entries_keeps_addresses() -> Result<(), anyhow::Error> {
+        let builder = TaosBuilder::from_dsn("ws://localhost:6041?adapter_ha=true")?;
+        let before = builder.addrs.read().unwrap().clone();
+
+        builder.merge_instances(vec![
+            before[0].clone(),
+            "localhost".to_string(),
+            "localhost:0".to_string(),
+            "invalid:port".to_string(),
+        ]);
+
+        let after = builder.addrs.read().unwrap().clone();
+        assert_eq!(after, before);
+
+        Ok(())
+    }
+
     #[tokio::test]
     async fn test_merge_instances_filters_invalid_and_duplicates() -> Result<(), anyhow::Error> {
         let builder = TaosBuilder::from_dsn("ws://localhost:6041?adapter_ha=true")?;
@@ -1468,13 +1510,21 @@ mod tests {
             "localhost:abc".to_string(),
             "localhost:0".to_string(),
             "localhost:65536".to_string(),
+            "evil.com/path:6041".to_string(),
+            "evil.com?x=1:6041".to_string(),
+            "user@evil.com:6041".to_string(),
+            "a b:6041".to_string(),
+            "::1:6041".to_string(),
+            "[::1:6041".to_string(),
             "localhost:6043".to_string(),
+            "[::1]:6041".to_string(),
         ]);
 
         let addrs = builder.addrs.read().unwrap().clone();
         assert!(addrs.contains(&initial_addrs[0]));
         assert!(addrs.contains(&"127.0.0.1:6042".to_string()));
         assert!(addrs.contains(&"localhost:6043".to_string()));
+        assert!(addrs.contains(&"[::1]:6041".to_string()));
         assert_eq!(
             addrs
                 .iter()
@@ -1487,8 +1537,32 @@ mod tests {
         assert!(!addrs.iter().any(|addr| addr == "localhost:abc"));
         assert!(!addrs.iter().any(|addr| addr == "localhost:0"));
         assert!(!addrs.iter().any(|addr| addr == "localhost:65536"));
+        assert!(!addrs.iter().any(|addr| addr == "evil.com/path:6041"));
+        assert!(!addrs.iter().any(|addr| addr == "evil.com?x=1:6041"));
+        assert!(!addrs.iter().any(|addr| addr == "user@evil.com:6041"));
+        assert!(!addrs.iter().any(|addr| addr == "a b:6041"));
+        assert!(!addrs.iter().any(|addr| addr == "::1:6041"));
+        assert!(!addrs.iter().any(|addr| addr == "[::1:6041"));
 
         Ok(())
+    }
+
+    #[test]
+    fn test_is_valid_host_port_cases() {
+        assert!(is_valid_host_port("localhost:6041"));
+        assert!(is_valid_host_port("127.0.0.1:1"));
+        assert!(is_valid_host_port("[::1]:6041"));
+        assert!(!is_valid_host_port("localhost"));
+        assert!(!is_valid_host_port(":6041"));
+        assert!(!is_valid_host_port("localhost:0"));
+        assert!(!is_valid_host_port("localhost:65536"));
+        assert!(!is_valid_host_port("localhost:abc"));
+        assert!(!is_valid_host_port("evil.com/path:6041"));
+        assert!(!is_valid_host_port("evil.com?x=1:6041"));
+        assert!(!is_valid_host_port("user@evil.com:6041"));
+        assert!(!is_valid_host_port("a b:6041"));
+        assert!(!is_valid_host_port("::1:6041"));
+        assert!(!is_valid_host_port("[::1:6041"));
     }
 
     #[tokio::test(flavor = "multi_thread")]
