@@ -130,6 +130,9 @@ jobs:
           taosadapter --version
           nohup sudo taosadapter > /dev/null 2>&1 &
 
+      - name: Build C WebSocket package artifacts
+        run: cargo build -p taos-ws-sys --release
+
       - name: Run examples
         run: |
           ./taos-ws-sys/ci/package.sh
