@@ -70,6 +70,13 @@ jobs:
           path: "TDengine"
           ref: "main"
 
+      - name: Checkout taosadapter
+        uses: actions/checkout@v4
+        with:
+          repository: "taosdata/taosadapter"
+          path: "taosadapter"
+          ref: "main"
+
       - name: Prepare development tools
         run: |
           sudo apt update
@@ -81,6 +88,12 @@ jobs:
         uses: lukka/get-cmake@latest
         with:
           cmakeVersion: 3.31.6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.25.10"
+          cache-dependency-path: taosadapter/go.sum
 
       - name: Build TDengine
         env:
@@ -102,9 +115,17 @@ jobs:
         run: |
           cd TDengine/release/
           make -j8 || exit 1
-          make install
+          sudo make install
           nohup sudo taosd > /dev/null 2>&1 &
           sleep 5
+
+      - name: Build and install taosadapter
+        run: |
+          cd taosadapter
+          go mod download
+          go build -o taosadapter
+          sudo install -m 755 taosadapter /bin/taosadapter
+          taosadapter --version
           nohup sudo taosadapter > /dev/null 2>&1 &
 
       - name: Run examples
