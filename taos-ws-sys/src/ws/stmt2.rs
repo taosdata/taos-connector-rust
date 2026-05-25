@@ -51,6 +51,25 @@ pub struct TAOS_STMT2_BINDV {
 }
 
 #[repr(C)]
+#[derive(Clone, Debug)]
+#[allow(non_camel_case_types)]
+pub struct TAOS_STMT2_COLUMN_BIND {
+    pub buffer_type: c_int,
+    pub buffer: *mut c_void,
+    pub length: *mut i32,
+    pub is_null: *mut c_char,
+}
+
+#[repr(C)]
+#[allow(non_camel_case_types)]
+pub struct TAOS_STMT2_COLUMN_BINDV {
+    pub num_columns: c_int,
+    pub num_rows: c_int,
+    pub num_tables: c_int,
+    pub columns: *mut TAOS_STMT2_COLUMN_BIND,
+}
+
+#[repr(C)]
 #[derive(Debug)]
 #[allow(non_camel_case_types)]
 pub struct TAOS_FIELD_ALL {
@@ -254,6 +273,24 @@ pub unsafe extern "C" fn taos_stmt2_bind_param_a(
     stmt: *mut TAOS_STMT2,
     bindv: *mut TAOS_STMT2_BINDV,
     col_idx: i32,
+    fp: __taos_async_fn_t,
+    param: *mut c_void,
+) -> c_int {
+    0
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn taos_stmt2_bind_param_column(
+    stmt: *mut TAOS_STMT2,
+    bindv: *mut TAOS_STMT2_COLUMN_BINDV,
+) -> c_int {
+    0
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn taos_stmt2_bind_param_column_a(
+    stmt: *mut TAOS_STMT2,
+    bindv: *mut TAOS_STMT2_COLUMN_BINDV,
     fp: __taos_async_fn_t,
     param: *mut c_void,
 ) -> c_int {
@@ -908,6 +945,41 @@ mod tests {
                 num: $length.len() as _,
             }
         };
+    }
+
+    extern "C" fn noop_async(_param: *mut c_void, _res: *mut TAOS_RES, _code: c_int) {}
+
+    #[test]
+    fn test_stmt2_column_bind_c_abi_shape() {
+        let mut column = TAOS_STMT2_COLUMN_BIND {
+            buffer_type: Ty::Timestamp as _,
+            buffer: ptr::null_mut(),
+            length: ptr::null_mut(),
+            is_null: ptr::null_mut(),
+        };
+        let mut bindv = TAOS_STMT2_COLUMN_BINDV {
+            num_columns: 1,
+            num_rows: 0,
+            num_tables: 0,
+            columns: &mut column,
+        };
+
+        let bind: unsafe extern "C" fn(*mut TAOS_STMT2, *mut TAOS_STMT2_COLUMN_BINDV) -> c_int =
+            taos_stmt2_bind_param_column;
+        let bind_a: unsafe extern "C" fn(
+            *mut TAOS_STMT2,
+            *mut TAOS_STMT2_COLUMN_BINDV,
+            __taos_async_fn_t,
+            *mut c_void,
+        ) -> c_int = taos_stmt2_bind_param_column_a;
+
+        unsafe {
+            assert_eq!(bind(ptr::null_mut(), &mut bindv), 0);
+            assert_eq!(
+                bind_a(ptr::null_mut(), &mut bindv, noop_async, ptr::null_mut()),
+                0
+            );
+        }
     }
 
     #[test]
