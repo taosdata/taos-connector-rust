@@ -63,6 +63,8 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+      
       - name: Checkout TDengine
         uses: actions/checkout@v4
         with:
@@ -130,7 +132,6 @@ jobs:
 
       - name: Run examples
         run: |
-          cd TDengine/.externals/build/ext_taosws/src/ext_taosws
           ./taos-ws-sys/ci/package.sh
           cd ./target/libtaosws
           make
