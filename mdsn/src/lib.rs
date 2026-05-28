@@ -989,10 +989,10 @@ where
 }
 
 fn is_sensitive_dsn_param(key: &str) -> bool {
-    let key = key.to_ascii_lowercase();
     let compact: String = key
         .chars()
-        .filter(|c| !matches!(c, '_' | '-' | '.'))
+        .filter(|&c| !matches!(c, '_' | '-' | '.'))
+        .map(|c| c.to_ascii_lowercase())
         .collect();
 
     compact.contains("password")
@@ -1002,7 +1002,6 @@ fn is_sensitive_dsn_param(key: &str) -> bool {
         || compact.contains("accesskey")
         || compact.contains("privatekey")
         || compact.contains("totpcode")
-        || compact == "token"
         || compact.ends_with("token")
 }
 
