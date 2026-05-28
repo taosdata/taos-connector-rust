@@ -790,6 +790,20 @@ impl Dsn {
     pub fn redacted(&self) -> RedactedDsn<'_> {
         RedactedDsn(self)
     }
+
+    /// Display with sensitive fields redacted using caller-provided parameter policy.
+    ///
+    /// Passwords in the DSN authority are always redacted. The predicate only
+    /// decides which query parameters should be redacted.
+    pub fn redacted_with<F>(&self, is_sensitive_param: F) -> RedactedDsnWith<'_, F>
+    where
+        F: Fn(&str) -> bool,
+    {
+        RedactedDsnWith {
+            dsn: self,
+            is_sensitive_param,
+        }
+    }
 }
 
 pub trait IntoDsn: Send {
@@ -882,78 +896,114 @@ impl Display for Dsn {
 /// A wrapper around `&Dsn` that implements `Display` with sensitive fields redacted.
 ///
 /// Use this type when you need to log or display a DSN without exposing passwords
-/// or sensitive params (totp_code, totpCode, bearer_token, bearerToken, token).
+/// or sensitive params such as tokens, secrets, API keys, access keys, and private keys.
 pub struct RedactedDsn<'a>(pub &'a Dsn);
 
 impl<'a> Display for RedactedDsn<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let dsn = self.0;
-        write!(f, "{}", dsn.driver)?;
-        if let Some(protocol) = &dsn.protocol {
-            write!(f, "+{protocol}")?;
-        }
-
-        if dsn.is_path_like() {
-            write!(f, ":")?;
-        } else {
-            write!(f, "://")?;
-        }
-
-        match (&dsn.username, &dsn.password) {
-            (Some(username), Some(_)) => {
-                write!(f, "{}:[REDACTED]@", encode(username))?;
-            }
-            (Some(username), None) => write!(f, "{}@", encode(username))?,
-            (None, Some(_)) => write!(f, ":[REDACTED]@")?,
-            (None, None) => {}
-        }
-
-        if !dsn.addresses.is_empty() {
-            write!(
-                f,
-                "{}",
-                dsn.addresses.iter().map(ToString::to_string).join(",")
-            )?;
-        }
-
-        if let Some(database) = &dsn.subject {
-            write!(f, "/{database}")?;
-        } else if let Some(path) = &dsn.path {
-            write!(f, "{path}")?;
-        }
-
-        if !dsn.params.is_empty() {
-            write!(
-                f,
-                "?{}",
-                dsn.params
-                    .iter()
-                    .map(|(k, v)| {
-                        const SENSITIVE_PARAMS: &[&str] = &[
-                            "totp_code",
-                            "totpCode",
-                            "bearer_token",
-                            "bearerToken",
-                            "token",
-                            "td.connect.token",
-                        ];
-                        let value = if SENSITIVE_PARAMS.contains(&k.as_str()) {
-                            "[REDACTED]"
-                        } else {
-                            v.as_str()
-                        };
-
-                        format!(
-                            "{}={}",
-                            percent_encode_or_not(k),
-                            percent_encode_or_not(value)
-                        )
-                    })
-                    .join("&")
-            )?;
-        }
-        Ok(())
+        fmt_redacted_dsn(self.0, f, is_sensitive_dsn_param)
     }
+}
+
+/// A wrapper around `&Dsn` that implements `Display` with caller-provided
+/// query parameter redaction policy.
+pub struct RedactedDsnWith<'a, F> {
+    dsn: &'a Dsn,
+    is_sensitive_param: F,
+}
+
+impl<F> Display for RedactedDsnWith<'_, F>
+where
+    F: Fn(&str) -> bool,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        fmt_redacted_dsn(self.dsn, f, |key| (self.is_sensitive_param)(key))
+    }
+}
+
+fn fmt_redacted_dsn<F>(
+    dsn: &Dsn,
+    f: &mut std::fmt::Formatter<'_>,
+    is_sensitive_param: F,
+) -> std::fmt::Result
+where
+    F: Fn(&str) -> bool,
+{
+    write!(f, "{}", dsn.driver)?;
+    if let Some(protocol) = &dsn.protocol {
+        write!(f, "+{protocol}")?;
+    }
+
+    if dsn.is_path_like() {
+        write!(f, ":")?;
+    } else {
+        write!(f, "://")?;
+    }
+
+    match (&dsn.username, &dsn.password) {
+        (Some(username), Some(_)) => {
+            write!(f, "{}:[REDACTED]@", encode(username))?;
+        }
+        (Some(username), None) => write!(f, "{}@", encode(username))?,
+        (None, Some(_)) => write!(f, ":[REDACTED]@")?,
+        (None, None) => {}
+    }
+
+    if !dsn.addresses.is_empty() {
+        write!(
+            f,
+            "{}",
+            dsn.addresses.iter().map(ToString::to_string).join(",")
+        )?;
+    }
+
+    if let Some(database) = &dsn.subject {
+        write!(f, "/{database}")?;
+    } else if let Some(path) = &dsn.path {
+        write!(f, "{path}")?;
+    }
+
+    if !dsn.params.is_empty() {
+        write!(
+            f,
+            "?{}",
+            dsn.params
+                .iter()
+                .map(|(k, v)| {
+                    let value = if is_sensitive_param(k) {
+                        "[REDACTED]"
+                    } else {
+                        v.as_str()
+                    };
+
+                    format!(
+                        "{}={}",
+                        percent_encode_or_not(k),
+                        percent_encode_or_not(value)
+                    )
+                })
+                .join("&")
+        )?;
+    }
+    Ok(())
+}
+
+fn is_sensitive_dsn_param(key: &str) -> bool {
+    let key = key.to_ascii_lowercase();
+    let compact: String = key
+        .chars()
+        .filter(|c| !matches!(c, '_' | '-' | '.'))
+        .collect();
+
+    compact.contains("password")
+        || compact.contains("passwd")
+        || compact.contains("secret")
+        || compact.contains("apikey")
+        || compact.contains("accesskey")
+        || compact.contains("privatekey")
+        || compact.contains("totpcode")
+        || compact == "token"
+        || compact.ends_with("token")
 }
 
 /// Convenience function to redact a DSN string.
@@ -2262,5 +2312,42 @@ j/p1+4zmwB7F4u64uwBzwcZN5qCcAkfYYxjPbGARED4pA8YVpMx2DqmeYdR5pTj8
             "ws://root:[REDACTED]@localhost:6041/db",
         );
         assert_eq!(redact_dsn("invalid_dsn"), "<invalid dsn>");
+    }
+
+    #[test]
+    fn test_redacted_display_keeps_identity_and_hides_sensitive_params() {
+        let dsn = Dsn::from_str(
+            "ws://root:secret@localhost:6041?access_key=ak&client_secret=cs&password=param_pass&param=1",
+        )
+        .unwrap();
+
+        let redacted = dsn.redacted().to_string();
+
+        assert_eq!(
+            redacted,
+            "ws://root:[REDACTED]@localhost:6041?access_key=[REDACTED]&client_secret=[REDACTED]&param=1&password=[REDACTED]"
+        );
+        assert!(redacted.contains("root"));
+        assert!(!redacted.contains(":secret@"));
+        assert!(!redacted.contains("ak"));
+        assert!(!redacted.contains("cs"));
+        assert!(!redacted.contains("param_pass"));
+    }
+
+    #[test]
+    fn test_redacted_with_uses_caller_sensitive_param_policy() {
+        let dsn =
+            Dsn::from_str("ws://root:secret@localhost:6041?session_cookie=cookie_value&param=1")
+                .unwrap();
+
+        let redacted = dsn.redacted_with(|key| key == "session_cookie").to_string();
+
+        assert_eq!(
+            redacted,
+            "ws://root:[REDACTED]@localhost:6041?param=1&session_cookie=[REDACTED]"
+        );
+        assert!(redacted.contains("root"));
+        assert!(!redacted.contains(":secret@"));
+        assert!(!redacted.contains("cookie_value"));
     }
 }
