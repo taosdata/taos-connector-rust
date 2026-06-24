@@ -876,10 +876,13 @@ impl ApiEntry {
 
     fn connect_with_auth(&self, auth: &Auth) -> Result<*mut TAOS, RawError> {
         if auth.token().is_some() {
+            tracing::debug!("call connect_token");
             self.connect_token(auth)
         } else if auth.totp().is_some() {
+            tracing::debug!("call connect_totp");
             self.connect_totp(auth)
         } else {
+            tracing::debug!("call connect");
             Ok(self.connect(auth))
         }
     }
@@ -900,7 +903,19 @@ impl ApiEntry {
             if ptr.is_null() {
                 tracing::trace!(cost = ?elapsed, "connect failed");
                 retries -= 1;
-                let err = self.check(ptr).unwrap_err();
+                let err = match self.check(ptr) {
+                    Ok(()) => RawError::new(
+                        Code::FAILED,
+                        "taos_connect returned null without an error code",
+                    ),
+                    Err(err) => err,
+                };
+                tracing::error!(
+                    error = ?err,
+                    retries_remaining = retries,
+                    cost = ?elapsed,
+                    "connect failed"
+                );
                 if retries == 0 {
                     break Err(err);
                 }
