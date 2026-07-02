@@ -100,7 +100,7 @@ jobs:
           (github.event_name == 'push' && steps.cache-server-push.outputs.cache-hit != 'true')
         uses: actions/setup-go@v6
         with:
-          go-version: "1.25.10"
+          go-version: "1.26.0"
           cache-dependency-path: taosadapter/go.sum
 
       - name: Build taosadapter
