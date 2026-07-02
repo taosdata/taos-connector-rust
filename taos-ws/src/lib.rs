@@ -51,6 +51,8 @@ use tokio_tungstenite::{
     connect_async_tls_with_config, Connector, MaybeTlsStream, WebSocketStream,
 };
 
+pub(crate) mod cluster;
+
 use crate::query::asyn::WS_ERROR_NO;
 use crate::query::messages::{ToMessage, WsRecv, WsRecvData, WsSend};
 use crate::query::{send_conn_request, ConnOption};
@@ -506,6 +508,11 @@ impl TaosBuilder {
 
         if addrs.is_empty() {
             addrs.push("localhost:6041".to_string());
+        }
+
+        if adapter_ha {
+            let registry = cluster::ClusterRegistry::global();
+            addrs = registry.expand_endpoints(&addrs);
         }
 
         addrs.shuffle(&mut rand::rng());
@@ -1018,17 +1025,24 @@ impl TaosBuilder {
     }
 
     pub(crate) fn merge_instances(&self, instances: Vec<String>) {
+        let valid: Vec<String> = instances
+            .into_iter()
+            .filter(|addr| is_valid_host_port(addr))
+            .collect();
+
+        if valid.is_empty() {
+            return;
+        }
+
+        cluster::ClusterRegistry::global().update_cluster(&valid);
+
         let mut addrs = self.addrs.write().unwrap();
         let new_instances: Vec<String> = {
             let existing: HashSet<&str> = addrs.iter().map(String::as_str).collect();
             let mut seen = HashSet::new();
-            instances
+            valid
                 .into_iter()
-                .filter(|s| {
-                    is_valid_host_port(s)
-                        && !existing.contains(s.as_str())
-                        && seen.insert(s.clone())
-                })
+                .filter(|s| !existing.contains(s.as_str()) && seen.insert(s.clone()))
                 .collect()
         };
 
@@ -1317,10 +1331,13 @@ fn parse_ca_to_certs(input: &str) -> Result<Vec<CertificateDer<'static>>, DsnErr
 #[cfg(test)]
 mod tests {
     use std::sync::atomic::Ordering;
+    use std::sync::Arc;
+    use std::thread;
 
     use futures::{SinkExt, StreamExt};
     use taos_query::prelude::*;
 
+    use crate::cluster::ClusterRegistry;
     use crate::query::messages::{ToMessage, WsRecv, WsRecvData, WsSend};
     use crate::*;
 
@@ -1451,6 +1468,189 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn test_adapter_ha_from_dsn_inherits_global_cluster_instances() -> Result<(), anyhow::Error> {
+        let registry = ClusterRegistry::global();
+        registry.update_cluster(&[
+            "ha-builder-inherit-a.example:6041".to_string(),
+            "ha-builder-inherit-b.example:6041".to_string(),
+            "ha-builder-inherit-c.example:6041".to_string(),
+        ]);
+
+        let builder =
+            TaosBuilder::from_dsn("ws://ha-builder-inherit-b.example:6041?adapter_ha=true")?;
+        let addrs = builder.addrs.read().unwrap().clone();
+
+        assert_eq!(addrs.len(), 3);
+        assert!(addrs.contains(&"ha-builder-inherit-a.example:6041".to_string()));
+        assert!(addrs.contains(&"ha-builder-inherit-b.example:6041".to_string()));
+        assert!(addrs.contains(&"ha-builder-inherit-c.example:6041".to_string()));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_adapter_ha_false_does_not_read_global_cluster_instances() -> Result<(), anyhow::Error> {
+        let registry = ClusterRegistry::global();
+        registry.update_cluster(&[
+            "ha-builder-disabled-a.example:6041".to_string(),
+            "ha-builder-disabled-b.example:6041".to_string(),
+        ]);
+
+        let builder = TaosBuilder::from_dsn("ws://ha-builder-disabled-b.example:6041")?;
+        assert_eq!(
+            builder.addrs.read().unwrap().as_slice(),
+            ["ha-builder-disabled-b.example:6041"]
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_adapter_ha_merge_instances_updates_global_cluster() -> Result<(), anyhow::Error> {
+        let builder =
+            TaosBuilder::from_dsn("ws://ha-builder-merge-a.example:6041?adapter_ha=true")?;
+
+        builder.merge_instances(vec![
+            "ha-builder-merge-a.example:6041".to_string(),
+            "ha-builder-merge-b.example:6041".to_string(),
+        ]);
+
+        let second = TaosBuilder::from_dsn("ws://ha-builder-merge-b.example:6041?adapter_ha=true")?;
+        let addrs = second.addrs.read().unwrap().clone();
+
+        assert_eq!(addrs.len(), 2);
+        assert!(addrs.contains(&"ha-builder-merge-a.example:6041".to_string()));
+        assert!(addrs.contains(&"ha-builder-merge-b.example:6041".to_string()));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_adapter_ha_merge_instances_uses_discovered_instances_without_active_addr_anchor(
+    ) -> Result<(), anyhow::Error> {
+        let builder =
+            TaosBuilder::from_dsn("ws://ha-builder-anchor-a.example:6041?adapter_ha=true")?;
+
+        builder.merge_instances(vec!["ha-builder-anchor-b.example:6041".to_string()]);
+        let discovered_seed =
+            TaosBuilder::from_dsn("ws://ha-builder-anchor-b.example:6041?adapter_ha=true")?;
+        let original_seed =
+            TaosBuilder::from_dsn("ws://ha-builder-anchor-a.example:6041?adapter_ha=true")?;
+        let discovered_addrs = discovered_seed.addrs.read().unwrap().clone();
+        let original_addrs = original_seed.addrs.read().unwrap().clone();
+
+        assert_eq!(
+            discovered_addrs,
+            ["ha-builder-anchor-b.example:6041".to_string()]
+        );
+        assert_eq!(
+            original_addrs,
+            ["ha-builder-anchor-a.example:6041".to_string()]
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_adapter_ha_from_dsn_dead_seed_does_not_pollute_registry() -> Result<(), anyhow::Error> {
+        let registry = ClusterRegistry::global();
+        registry.update_cluster(&[
+            "ha-builder-degrade-real-a.example:6041".to_string(),
+            "ha-builder-degrade-real-b.example:6041".to_string(),
+        ]);
+
+        let dead_only =
+            TaosBuilder::from_dsn("ws://ha-builder-degrade-dead.example:6041?adapter_ha=true")?;
+        assert_eq!(
+            dead_only.addrs.read().unwrap().as_slice(),
+            ["ha-builder-degrade-dead.example:6041"]
+        );
+
+        let builder = TaosBuilder::from_dsn(
+            "ws://ha-builder-degrade-dead.example:6041,ha-builder-degrade-real-a.example:6041?adapter_ha=true",
+        )?;
+        let addrs = builder.addrs.read().unwrap().clone();
+        assert_eq!(addrs.len(), 3);
+        assert!(addrs.contains(&"ha-builder-degrade-dead.example:6041".to_string()));
+        assert!(addrs.contains(&"ha-builder-degrade-real-a.example:6041".to_string()));
+        assert!(addrs.contains(&"ha-builder-degrade-real-b.example:6041".to_string()));
+        assert_eq!(
+            registry.expand_endpoints(&[
+                "ha-builder-degrade-dead.example:6041".to_string(),
+                "ha-builder-degrade-real-a.example:6041".to_string()
+            ]),
+            [
+                "ha-builder-degrade-dead.example:6041".to_string(),
+                "ha-builder-degrade-real-a.example:6041".to_string(),
+                "ha-builder-degrade-real-b.example:6041".to_string(),
+            ]
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_adapter_ha_concurrent_first_merges_from_different_seeds_do_not_split_registry(
+    ) -> Result<(), anyhow::Error> {
+        let builders = Arc::new([
+            TaosBuilder::from_dsn("ws://ha-builder-concurrent-a.example:6041?adapter_ha=true")?,
+            TaosBuilder::from_dsn("ws://ha-builder-concurrent-b.example:6041?adapter_ha=true")?,
+        ]);
+
+        let handles: Vec<_> = (0..2)
+            .map(|idx| {
+                let builders = Arc::clone(&builders);
+                thread::spawn(move || {
+                    builders[idx].merge_instances(vec![
+                        "ha-builder-concurrent-a.example:6041".to_string(),
+                        "ha-builder-concurrent-b.example:6041".to_string(),
+                        "ha-builder-concurrent-c.example:6041".to_string(),
+                    ]);
+                })
+            })
+            .collect();
+
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        let inherited =
+            TaosBuilder::from_dsn("ws://ha-builder-concurrent-c.example:6041?adapter_ha=true")?;
+        let addrs = inherited.addrs.read().unwrap().clone();
+
+        assert_eq!(addrs.len(), 3);
+        assert!(addrs.contains(&"ha-builder-concurrent-a.example:6041".to_string()));
+        assert!(addrs.contains(&"ha-builder-concurrent-b.example:6041".to_string()));
+        assert!(addrs.contains(&"ha-builder-concurrent-c.example:6041".to_string()));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_adapter_ha_from_dsn_multi_cluster_seed_degrades_to_original_seeds(
+    ) -> Result<(), anyhow::Error> {
+        let registry = ClusterRegistry::global();
+        registry.update_cluster(&["ha-builder-multi-a.example:6041".to_string()]);
+        registry.update_cluster(&["ha-builder-multi-b.example:6041".to_string()]);
+
+        let builder = TaosBuilder::from_dsn(
+            "ws://ha-builder-multi-a.example:6041,ha-builder-multi-b.example:6041?adapter_ha=true",
+        )?;
+        let mut addrs = builder.addrs.read().unwrap().clone();
+        addrs.sort();
+
+        assert_eq!(
+            addrs,
+            [
+                "ha-builder-multi-a.example:6041".to_string(),
+                "ha-builder-multi-b.example:6041".to_string(),
+            ]
+        );
+
+        Ok(())
+    }
+
     #[tokio::test]
     async fn test_adapter_ha_connect_and_disable_next_fetch() -> Result<(), anyhow::Error> {
         let builder = TaosBuilder::from_dsn("ws://localhost:6041?adapter_ha=true")?;
@@ -1472,6 +1672,30 @@ mod tests {
         deduped.dedup();
         assert_eq!(deduped.len(), addrs_after_first.len());
 
+        let discovered_addrs: Vec<String> = addrs_after_first
+            .iter()
+            .filter(|addr| addr.as_str() != "localhost:6041")
+            .cloned()
+            .collect();
+        let registry_expected = if discovered_addrs.is_empty() {
+            addrs_after_first.clone()
+        } else {
+            discovered_addrs
+        };
+        let registry_seed = registry_expected[0].clone();
+        let registry_addrs =
+            ClusterRegistry::global().expand_endpoints(std::slice::from_ref(&registry_seed));
+        for addr in &registry_expected {
+            assert!(registry_addrs.contains(addr));
+        }
+
+        let inherited_builder =
+            TaosBuilder::from_dsn(format!("ws://{registry_seed}?adapter_ha=true"))?;
+        let inherited_addrs = inherited_builder.addrs.read().unwrap().clone();
+        for addr in &registry_expected {
+            assert!(inherited_addrs.contains(addr));
+        }
+
         let _ = builder.build().await?;
         let addrs_after_second = builder.addrs.read().unwrap().clone();
         assert_eq!(addrs_after_second, addrs_after_first);
@@ -1481,13 +1705,13 @@ mod tests {
 
     #[test]
     fn test_merge_instances_no_new_entries_keeps_addresses() -> Result<(), anyhow::Error> {
-        let builder = TaosBuilder::from_dsn("ws://localhost:6041?adapter_ha=true")?;
+        let builder = TaosBuilder::from_dsn("ws://ha-merge-no-new-a.example:6041?adapter_ha=true")?;
         let before = builder.addrs.read().unwrap().clone();
 
         builder.merge_instances(vec![
             before[0].clone(),
-            "localhost".to_string(),
-            "localhost:0".to_string(),
+            "ha-merge-no-new-invalid".to_string(),
+            "ha-merge-no-new-zero.example:0".to_string(),
             "invalid:port".to_string(),
         ]);
 
@@ -1499,13 +1723,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_merge_instances_filters_invalid_and_duplicates() -> Result<(), anyhow::Error> {
-        let builder = TaosBuilder::from_dsn("ws://localhost:6041?adapter_ha=true")?;
+        let builder = TaosBuilder::from_dsn("ws://ha-merge-filter-a.example:6041?adapter_ha=true")?;
         let initial_addrs = builder.addrs.read().unwrap().clone();
 
         builder.merge_instances(vec![
             initial_addrs[0].clone(),
-            "127.0.0.1:6042".to_string(),
-            "127.0.0.1:6042".to_string(),
+            "ha-merge-filter-b.example:6041".to_string(),
+            "ha-merge-filter-b.example:6041".to_string(),
             "127.0.0.1".to_string(),
             ":6041".to_string(),
             "localhost:abc".to_string(),
@@ -1517,19 +1741,19 @@ mod tests {
             "a b:6041".to_string(),
             "::1:6041".to_string(),
             "[::1:6041".to_string(),
-            "localhost:6043".to_string(),
+            "ha-merge-filter-c.example:6041".to_string(),
             "[::1]:6041".to_string(),
         ]);
 
         let addrs = builder.addrs.read().unwrap().clone();
         assert!(addrs.contains(&initial_addrs[0]));
-        assert!(addrs.contains(&"127.0.0.1:6042".to_string()));
-        assert!(addrs.contains(&"localhost:6043".to_string()));
+        assert!(addrs.contains(&"ha-merge-filter-b.example:6041".to_string()));
+        assert!(addrs.contains(&"ha-merge-filter-c.example:6041".to_string()));
         assert!(addrs.contains(&"[::1]:6041".to_string()));
         assert_eq!(
             addrs
                 .iter()
-                .filter(|addr| addr.as_str() == "127.0.0.1:6042")
+                .filter(|addr| addr.as_str() == "ha-merge-filter-b.example:6041")
                 .count(),
             1
         );

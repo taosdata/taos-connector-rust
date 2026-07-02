@@ -998,10 +998,13 @@ impl ApiEntry {
 
     fn connect_with_auth(&self, auth: &Auth) -> Result<*mut TAOS, RawError> {
         if auth.token().is_some() {
+            tracing::debug!(connect_method = "connect_token", "calling connect method");
             self.connect_token(auth)
         } else if auth.totp().is_some() {
+            tracing::debug!(connect_method = "connect_totp", "calling connect method");
             self.connect_totp(auth)
         } else {
+            tracing::debug!(connect_method = "connect", "calling connect method");
             Ok(self.connect(auth))
         }
     }
@@ -1022,7 +1025,19 @@ impl ApiEntry {
             if ptr.is_null() {
                 tracing::trace!(cost = ?elapsed, "connect failed");
                 retries -= 1;
-                let err = self.check(ptr).unwrap_err();
+                let err = match self.check(ptr) {
+                    Ok(()) => RawError::new(
+                        Code::FAILED,
+                        "taos_connect returned null without an error code",
+                    ),
+                    Err(err) => err,
+                };
+                tracing::error!(
+                    error = ?err,
+                    retries_remaining = retries,
+                    cost = ?elapsed,
+                    "connect failed"
+                );
                 if retries == 0 {
                     break Err(err);
                 }
@@ -2069,6 +2084,34 @@ pub struct BlockState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_connect_with_retries_reports_null_connect_without_error_code() {
+        unsafe extern "C" fn null_connect(
+            _ip: *const c_char,
+            _user: *const c_char,
+            _pass: *const c_char,
+            _db: *const c_char,
+            _port: u16,
+        ) -> *mut TAOS {
+            std::ptr::null_mut()
+        }
+
+        unsafe extern "C" fn success_errno(_taos: *const TAOS) -> c_int {
+            0
+        }
+
+        let mut api = ApiEntry::open_default().unwrap();
+        api.taos_connect = null_connect;
+        api.taos_errno = success_errno;
+
+        let err = api.connect_with_retries(&Auth::default(), 1).unwrap_err();
+
+        assert_eq!(err.code(), Code::FAILED);
+        assert!(err
+            .message()
+            .contains("taos_connect returned null without an error code"));
+    }
 
     #[test]
     fn test_raw_taos() {

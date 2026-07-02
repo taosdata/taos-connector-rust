@@ -217,6 +217,7 @@ fn handle_connect_error(mut err: TaosError) -> *mut TAOS {
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn taos_connect_with_dsn(dsn: *const c_char) -> *mut TAOS {
+    taos_init();
     match connect_with_dsn(dsn) {
         Ok(taos) => Box::into_raw(Box::new(taos)) as _,
         Err(err) => {
@@ -523,6 +524,7 @@ const DB: &str = "db";
 
 const COMPRESSION: &str = "compression";
 const ADAPTER_LIST: &str = "adapterList";
+const ADAPTER_HA: &str = "adapterHa";
 const CONN_RETRIES: &str = "connRetries";
 const RETRY_BACKOFF_MS: &str = "retryBackoffMs";
 const RETRY_BACKOFF_MAX_MS: &str = "retryBackoffMaxMs";
@@ -636,6 +638,10 @@ unsafe fn build_dsn_from_options(options: *const OPTIONS) -> TaosResult<String> 
     }
     if !map.contains_key(RETRY_BACKOFF_MAX_MS) {
         map.insert(RETRY_BACKOFF_MAX_MS, &retry_backoff_max_ms);
+    }
+
+    if config::adapter_ha() && !map.contains_key(ADAPTER_HA) {
+        map.insert(ADAPTER_HA, "true");
     }
 
     let compression = match map.remove(COMPRESSION) {
@@ -1457,6 +1463,19 @@ mod tests {
             let dsn = build_dsn_from_options(&opts as *const _).unwrap();
             assert!(dsn.starts_with("ws://root:taosdata@localhost:6041/"));
         }
+    }
+
+    #[test]
+    fn test_build_dsn_from_options_keeps_explicit_adapter_ha_false() {
+        let opts = make_options(&[(IP, "localhost"), (PORT, "6041"), (ADAPTER_HA, "false")]);
+
+        unsafe {
+            let dsn = build_dsn_from_options(&opts as *const _).unwrap();
+            assert!(dsn.contains("adapter_ha=false"), "{dsn}");
+            assert_eq!(dsn.matches("adapter_ha=").count(), 1, "{dsn}");
+        }
+
+        free_options(&opts);
     }
 
     pub(super) fn make_options(kvs: &[(&str, &str)]) -> OPTIONS {

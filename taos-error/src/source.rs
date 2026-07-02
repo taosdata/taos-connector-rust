@@ -41,7 +41,7 @@ impl Clone for Inner {
                 #[cfg(nightly)]
                 backtrace: Backtrace::force_capture(),
             },
-            Self::Any(any) => Self::Any(anyhow::format_err!("{:#}", any)),
+            Self::Any(any) => Self::Any(anyhow::format_err!("{any:#}")),
         }
     }
 }

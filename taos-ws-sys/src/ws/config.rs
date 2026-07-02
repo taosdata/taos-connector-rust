@@ -9,8 +9,8 @@ use taos_error::Code;
 use tracing::level_filters::LevelFilter;
 
 use crate::ws::{
-    ADAPTER_LIST, COMPRESSION, CONN_RETRIES, RETRY_BACKOFF_MAX_MS, RETRY_BACKOFF_MS, WS_TLS_CA,
-    WS_TLS_MODE, WS_TLS_VERSION,
+    ADAPTER_HA, ADAPTER_LIST, COMPRESSION, CONN_RETRIES, RETRY_BACKOFF_MAX_MS, RETRY_BACKOFF_MS,
+    WS_TLS_CA, WS_TLS_MODE, WS_TLS_VERSION,
 };
 
 use super::error::TaosError;
@@ -29,75 +29,7 @@ pub fn init() -> Result<(), String> {
     ONCE.get_or_init(|| {
         let mut config = CONFIG.write().unwrap();
 
-        if let Ok(s) = std::env::var("TAOS_COMPRESSION") {
-            if let Ok(compression) = s.parse() {
-                config.set_compression(compression);
-            }
-        }
-
-        if let Ok(s) = std::env::var("TAOS_LOG_DIR") {
-            config.set_log_dir(s);
-        }
-
-        if let Ok(s) = std::env::var("RUST_LOG") {
-            if let Ok(level) = LevelFilter::from_str(&s) {
-                config.set_log_level(level);
-            }
-        }
-
-        if let Ok(s) = std::env::var("TAOS_DEBUG_FLAG") {
-            config.set_debug_flag(&s);
-        }
-
-        if let Ok(s) = std::env::var("TAOS_LOG_OUTPUT_TO_SCREEN") {
-            config.set_log_output_to_screen(s == "1");
-        }
-
-        if let Ok(s) = std::env::var("TAOS_TIMEZONE") {
-            config.set_timezone(s);
-        }
-
-        if let Ok(s) = std::env::var("TAOS_FQDN") {
-            config.set_fqdn(s);
-        }
-
-        if let Ok(s) = std::env::var("TAOS_SERVER_PORT") {
-            if let Ok(port) = s.parse() {
-                config.set_server_port(port);
-            }
-        }
-
-        if let Ok(s) = std::env::var("TAOS_ADAPTER_LIST") {
-            config.set_adapter_list(s);
-        }
-
-        if let Ok(s) = std::env::var("TAOS_CONN_RETRIES") {
-            if let Ok(retries) = s.parse() {
-                config.set_conn_retries(retries);
-            }
-        }
-
-        if let Ok(s) = std::env::var("TAOS_RETRY_BACKOFF_MS") {
-            if let Ok(backoff_ms) = s.parse() {
-                config.set_retry_backoff_ms(backoff_ms);
-            }
-        }
-
-        if let Ok(s) = std::env::var("TAOS_RETRY_BACKOFF_MAX_MS") {
-            if let Ok(backoff_max_ms) = s.parse() {
-                config.set_retry_backoff_max_ms(backoff_max_ms);
-            }
-        }
-
-        if let Ok(s) = std::env::var("TAOS_LOG_KEEP_DAYS") {
-            if let Ok(days) = s.parse() {
-                config.set_log_keep_days(days);
-            }
-        }
-
-        if let Ok(s) = std::env::var("TAOS_ROTATION_SIZE") {
-            config.set_rotation_size(s);
-        }
+        apply_env(&mut config);
 
         let cfg_dir = if let Some(dir) = &config.config_dir {
             dir.to_string()
@@ -166,6 +98,10 @@ pub fn adapter_list() -> Option<FastStr> {
     CONFIG.read().unwrap().adapter_list().cloned()
 }
 
+pub fn adapter_ha() -> bool {
+    CONFIG.read().unwrap().adapter_ha()
+}
+
 pub fn conn_retries() -> u32 {
     CONFIG.read().unwrap().conn_retries()
 }
@@ -210,6 +146,79 @@ pub fn print() {
     CONFIG.read().unwrap().print();
 }
 
+fn apply_env(config: &mut Config) {
+    for key in [
+        "TAOS_COMPRESSION",
+        "TAOS_LOG_DIR",
+        "RUST_LOG",
+        "TAOS_DEBUG_FLAG",
+        "TAOS_LOG_OUTPUT_TO_SCREEN",
+        "TAOS_TIMEZONE",
+        "TAOS_FQDN",
+        "TAOS_SERVER_PORT",
+        "TAOS_ADAPTER_LIST",
+        "TAOS_ADAPTER_HA",
+        "TAOS_CONN_RETRIES",
+        "TAOS_RETRY_BACKOFF_MS",
+        "TAOS_RETRY_BACKOFF_MAX_MS",
+        "TAOS_LOG_KEEP_DAYS",
+        "TAOS_ROTATION_SIZE",
+    ] {
+        if let Ok(value) = std::env::var(key) {
+            apply_env_value(config, key, &value);
+        }
+    }
+}
+
+fn apply_env_value(config: &mut Config, key: &str, value: &str) {
+    match key {
+        "TAOS_COMPRESSION" => {
+            if let Ok(compression) = value.parse() {
+                config.set_compression(compression);
+            }
+        }
+        "TAOS_LOG_DIR" => config.set_log_dir(value.to_string()),
+        "RUST_LOG" => {
+            if let Ok(level) = LevelFilter::from_str(value) {
+                config.set_log_level(level);
+            }
+        }
+        "TAOS_DEBUG_FLAG" => config.set_debug_flag(value),
+        "TAOS_LOG_OUTPUT_TO_SCREEN" => config.set_log_output_to_screen(value == "1"),
+        "TAOS_TIMEZONE" => config.set_timezone(value.to_string()),
+        "TAOS_FQDN" => config.set_fqdn(value.to_string()),
+        "TAOS_SERVER_PORT" => {
+            if let Ok(port) = value.parse() {
+                config.set_server_port(port);
+            }
+        }
+        "TAOS_ADAPTER_LIST" => config.set_adapter_list(value.to_string()),
+        "TAOS_ADAPTER_HA" => config.set_adapter_ha(parse_bool_loose(value)),
+        "TAOS_CONN_RETRIES" => {
+            if let Ok(retries) = value.parse() {
+                config.set_conn_retries(retries);
+            }
+        }
+        "TAOS_RETRY_BACKOFF_MS" => {
+            if let Ok(backoff_ms) = value.parse() {
+                config.set_retry_backoff_ms(backoff_ms);
+            }
+        }
+        "TAOS_RETRY_BACKOFF_MAX_MS" => {
+            if let Ok(backoff_max_ms) = value.parse() {
+                config.set_retry_backoff_max_ms(backoff_max_ms);
+            }
+        }
+        "TAOS_LOG_KEEP_DAYS" => {
+            if let Ok(days) = value.parse() {
+                config.set_log_keep_days(days);
+            }
+        }
+        "TAOS_ROTATION_SIZE" => config.set_rotation_size(value.to_string()),
+        _ => {}
+    }
+}
+
 const FQDN: &str = "fqdn";
 const SERVER_PORT: &str = "serverPort";
 const TIMEZONE: &str = "timezone";
@@ -231,6 +240,7 @@ const DEFAULT_LOG_DIR: &str = if cfg!(windows) {
 };
 
 const DEFAULT_COMPRESSION: bool = false;
+const DEFAULT_ADAPTER_HA: bool = false;
 const DEFAULT_LOG_LEVEL: LevelFilter = LevelFilter::WARN;
 const DEFAULT_LOG_OUTPUT_TO_SCREEN: bool = false;
 const DEFAULT_SERVER_PORT: u16 = 0;
@@ -308,6 +318,7 @@ pub struct Config {
     fqdn: Option<FastStr>,
     server_port: Option<u16>,
     adapter_list: Option<FastStr>,
+    adapter_ha: Option<bool>,
     conn_retries: Option<u32>,
     retry_backoff_ms: Option<u64>,
     retry_backoff_max_ms: Option<u64>,
@@ -330,6 +341,7 @@ impl Config {
             fqdn: None,
             server_port: None,
             adapter_list: None,
+            adapter_ha: None,
             conn_retries: None,
             retry_backoff_ms: None,
             retry_backoff_max_ms: None,
@@ -382,6 +394,10 @@ impl Config {
 
     fn adapter_list(&self) -> Option<&FastStr> {
         self.adapter_list.as_ref()
+    }
+
+    fn adapter_ha(&self) -> bool {
+        self.adapter_ha.unwrap_or(DEFAULT_ADAPTER_HA)
     }
 
     fn conn_retries(&self) -> u32 {
@@ -495,6 +511,10 @@ impl Config {
         self.adapter_list = Some(adapter_list.into());
     }
 
+    fn set_adapter_ha(&mut self, adapter_ha: bool) {
+        self.adapter_ha = Some(adapter_ha);
+    }
+
     fn set_conn_retries(&mut self, conn_retries: u32) {
         self.conn_retries = Some(conn_retries);
     }
@@ -581,6 +601,7 @@ impl Config {
             fqdn,
             server_port,
             adapter_list,
+            adapter_ha,
             conn_retries,
             retry_backoff_ms,
             retry_backoff_max_ms,
@@ -608,6 +629,11 @@ impl Config {
         }
 
         show!(self.adapter_list, ADAPTER_LIST, "");
+        show!(
+            self.adapter_ha.map(|b| b as u8),
+            ADAPTER_HA,
+            DEFAULT_ADAPTER_HA as u8
+        );
         show!(
             self.compression.map(|b| b as u8),
             COMPRESSION,
@@ -654,6 +680,10 @@ fn read_config_lines<P: AsRef<Path>>(path: P) -> Result<Vec<String>, io::Error> 
     reader.lines().collect()
 }
 
+fn parse_bool_loose(value: &str) -> bool {
+    matches!(value.trim(), "true" | "1")
+}
+
 fn parse_config(lines: Vec<String>) -> Result<Config, TaosError> {
     let mut config = Config::new();
 
@@ -690,6 +720,7 @@ fn parse_config(lines: Vec<String>) -> Result<Config, TaosError> {
                     config.set_server_port(server_port);
                 }
                 ADAPTER_LIST => config.set_adapter_list(value.to_string()),
+                ADAPTER_HA => config.set_adapter_ha(parse_bool_loose(value)),
                 CONN_RETRIES => {
                     let conn_retries = value.parse::<u32>().map_err(|_| {
                         TaosError::new(
@@ -764,6 +795,44 @@ mod tests {
         assert_eq!(config.ws_tls_mode(), WsTlsMode::Disabled);
         assert_eq!(config.ws_tls_version(), &FastStr::from("TLSv1.3"));
         assert_eq!(config.ws_tls_ca(), None);
+        assert_eq!(config.adapter_ha(), false);
+    }
+
+    #[test]
+    fn test_parse_adapter_ha_from_config() {
+        let config = parse_config(vec!["adapterHa true".to_string()]).unwrap();
+        assert!(config.adapter_ha());
+
+        let config = parse_config(vec!["adapterHa 1".to_string()]).unwrap();
+        assert!(config.adapter_ha());
+
+        let config = parse_config(vec!["adapterHa false".to_string()]).unwrap();
+        assert!(!config.adapter_ha());
+    }
+
+    #[test]
+    fn test_update_from_copies_adapter_ha_when_unset() {
+        let mut config = Config::new();
+        let rhs = parse_config(vec!["adapterHa true".to_string()]).unwrap();
+
+        config.update_from(rhs);
+
+        assert!(config.adapter_ha());
+    }
+
+    #[test]
+    fn test_apply_env_reads_adapter_ha() {
+        let mut config = Config::new();
+        apply_env_value(&mut config, "TAOS_ADAPTER_HA", "true");
+        assert!(config.adapter_ha());
+
+        let mut config = Config::new();
+        apply_env_value(&mut config, "TAOS_ADAPTER_HA", "1");
+        assert!(config.adapter_ha());
+
+        let mut config = Config::new();
+        apply_env_value(&mut config, "TAOS_ADAPTER_HA", "false");
+        assert!(!config.adapter_ha());
     }
 
     #[test]
@@ -787,6 +856,7 @@ mod tests {
             assert_eq!(config.ws_tls_mode(), WsTlsMode::Disabled);
             assert_eq!(config.ws_tls_version(), &FastStr::from("TLSv1.3"));
             assert_eq!(config.ws_tls_ca(), None);
+            assert_eq!(config.adapter_ha(), false);
         }
 
         {
@@ -808,6 +878,7 @@ mod tests {
             assert_eq!(config.ws_tls_mode(), WsTlsMode::Disabled);
             assert_eq!(config.ws_tls_version(), &FastStr::from("TLSv1.3"));
             assert_eq!(config.ws_tls_ca(), None);
+            assert_eq!(config.adapter_ha(), false);
         }
 
         Ok(())
@@ -846,6 +917,7 @@ mod tests {
             set_var("TAOS_RETRY_BACKOFF_MAX_MS", "1000");
             set_var("TAOS_LOG_KEEP_DAYS", "30");
             set_var("TAOS_ROTATION_SIZE", "1GB");
+            set_var("TAOS_ADAPTER_HA", "false");
         }
 
         init()?;
@@ -861,6 +933,7 @@ mod tests {
         assert_eq!(ws_tls_mode(), WsTlsMode::Disabled);
         assert_eq!(ws_tls_version(), FastStr::from("TLSv1.3"));
         assert_eq!(ws_tls_ca(), None);
+        assert_eq!(adapter_ha(), false);
 
         Ok(())
     }
