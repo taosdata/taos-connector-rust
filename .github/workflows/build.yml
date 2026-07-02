@@ -2,6 +2,9 @@ name: Build
 
 on:
   push:
+    branches: ["main", "3.0", "3.3.6"]
+  pull_request:
+    branches: ["main", "3.0", "3.3.6"]
 
 env:
   TOOLS_BUILD_TYPE: Release
@@ -64,7 +67,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Checkout TDengine
         uses: actions/checkout@v4
         with:
