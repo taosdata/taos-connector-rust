@@ -3661,7 +3661,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_subscribe_with_adapter_ha_merges_instances_from_response() -> anyhow::Result<()> {
-        let builder = TaosBuilder::from_dsn("ws://localhost:6041?adapter_ha=true")?;
+        let builder =
+            TaosBuilder::from_dsn("ws://ha-consumer-merge-a.example:6041?adapter_ha=true")?;
         let existing_addr = builder.addrs.read().unwrap()[0].clone();
         let mut consumer = build_mock_consumer(
             builder,
@@ -3669,8 +3670,8 @@ mod tests {
             vec![Ok(TmqRecvData::Subscribe {
                 list_instances: Some(vec![
                     existing_addr,
-                    "127.0.0.1:6042".to_string(),
-                    "127.0.0.1:6042".to_string(),
+                    "ha-consumer-merge-b.example:6041".to_string(),
+                    "ha-consumer-merge-b.example:6041".to_string(),
                     "invalid-instance".to_string(),
                 ]),
             })],
@@ -3680,11 +3681,11 @@ mod tests {
 
         let addrs = consumer.builder.addrs.read().unwrap().clone();
         assert!(consumer.builder.instances_fetched.load(Ordering::Acquire));
-        assert!(addrs.contains(&"127.0.0.1:6042".to_string()));
+        assert!(addrs.contains(&"ha-consumer-merge-b.example:6041".to_string()));
         assert_eq!(
             addrs
                 .iter()
-                .filter(|addr| addr.as_str() == "127.0.0.1:6042")
+                .filter(|addr| addr.as_str() == "ha-consumer-merge-b.example:6041")
                 .count(),
             1
         );
@@ -3695,7 +3696,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_subscribe_retries_when_batch_meta_not_supported() -> anyhow::Result<()> {
-        let builder = TaosBuilder::from_dsn("ws://localhost:6041?adapter_ha=true")?;
+        let builder =
+            TaosBuilder::from_dsn("ws://ha-consumer-retry-a.example:6041?adapter_ha=true")?;
         let mut consumer = build_mock_consumer(
             builder,
             tmq_conf(Some("1")),
@@ -3705,7 +3707,7 @@ mod tests {
                     "batch meta is unsupported",
                 )),
                 Ok(TmqRecvData::Subscribe {
-                    list_instances: Some(vec!["127.0.0.1:6043".to_string()]),
+                    list_instances: Some(vec!["ha-consumer-retry-b.example:6041".to_string()]),
                 }),
             ],
         );
@@ -3718,14 +3720,15 @@ mod tests {
             Some(false)
         );
         let addrs = consumer.builder.addrs.read().unwrap().clone();
-        assert!(addrs.contains(&"127.0.0.1:6043".to_string()));
+        assert!(addrs.contains(&"ha-consumer-retry-b.example:6041".to_string()));
 
         Ok(())
     }
 
     #[tokio::test]
     async fn test_subscribe_returns_error_when_batch_meta_disabled() -> anyhow::Result<()> {
-        let builder = TaosBuilder::from_dsn("ws://localhost:6041?adapter_ha=true")?;
+        let builder =
+            TaosBuilder::from_dsn("ws://ha-consumer-batch-disabled.example:6041?adapter_ha=true")?;
         let mut consumer = build_mock_consumer(
             builder,
             tmq_conf(None),
@@ -3747,7 +3750,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_subscribe_returns_error_on_unexpected_response() -> anyhow::Result<()> {
-        let builder = TaosBuilder::from_dsn("ws://localhost:6041?adapter_ha=true")?;
+        let builder =
+            TaosBuilder::from_dsn("ws://ha-consumer-unexpected.example:6041?adapter_ha=true")?;
         let mut consumer = build_mock_consumer(
             builder,
             tmq_conf(Some("1")),

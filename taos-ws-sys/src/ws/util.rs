@@ -122,6 +122,7 @@ pub struct DsnBuilder<'a> {
     totp_code: Option<&'a str>,
     bearer_token: Option<&'a str>,
     db: Option<&'a str>,
+    adapter_ha: Option<bool>,
     ws_tls_mode: Option<config::WsTlsMode>,
     ws_tls_version: Option<&'a str>,
     ws_tls_ca: Option<&'a str>,
@@ -159,6 +160,11 @@ impl<'a> DsnBuilder<'a> {
 
     pub fn db(mut self, db: Option<&'a str>) -> Self {
         self.db = db;
+        self
+    }
+
+    pub fn adapter_ha(mut self, adapter_ha: Option<bool>) -> Self {
+        self.adapter_ha = adapter_ha;
         self
     }
 
@@ -202,6 +208,7 @@ impl<'a> DsnBuilder<'a> {
             .or_else(|| config::ws_tls_ca().map(|s| s.to_string()));
 
         let compression = config::compression();
+        let adapter_ha = self.adapter_ha.unwrap_or_else(config::adapter_ha);
         let conn_retries = config::conn_retries();
         let retry_backoff_ms = config::retry_backoff_ms();
         let retry_backoff_max_ms = config::retry_backoff_max_ms();
@@ -233,8 +240,10 @@ impl<'a> DsnBuilder<'a> {
             _ => String::new(),
         };
 
+        let adapter_ha = if adapter_ha { "&adapter_ha=true" } else { "" };
+
         let other_params =
-            format!("&tls_version={ws_tls_version}{tls_mode}{tls_ca}{totp_or_token}");
+            format!("&tls_version={ws_tls_version}{tls_mode}{tls_ca}{totp_or_token}{adapter_ha}");
 
         let params = format!(
             "compression={compression}\
@@ -277,6 +286,26 @@ mod tests {
         assert_eq!(camel_to_snake("camelCaseTest"), "camel_case_test");
         assert_eq!(camel_to_snake("lowercase"), "lowercase");
         assert_eq!(camel_to_snake("UPPERCASE"), "_u_p_p_e_r_c_a_s_e");
+    }
+
+    #[test]
+    fn test_dsn_builder_includes_explicit_adapter_ha() {
+        let dsn = DsnBuilder::new()
+            .addr(Some("localhost:6041"))
+            .adapter_ha(Some(true))
+            .build();
+
+        assert!(dsn.contains("adapter_ha=true"), "{dsn}");
+    }
+
+    #[test]
+    fn test_dsn_builder_omits_explicit_adapter_ha_false() {
+        let dsn = DsnBuilder::new()
+            .addr(Some("localhost:6041"))
+            .adapter_ha(Some(false))
+            .build();
+
+        assert!(!dsn.contains("adapter_ha"), "{dsn}");
     }
 
     #[test]

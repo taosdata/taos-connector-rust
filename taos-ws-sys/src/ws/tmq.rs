@@ -369,6 +369,7 @@ pub unsafe extern "C" fn tmq_consumer_new(
     errstrLen: i32,
 ) -> *mut tmq_t {
     debug!("tmq_consumer_new start, conf: {conf:?}, errstr: {errstr:?}, errstr_len: {errstrLen}");
+    ws::taos_init();
     match consumer_new(conf) {
         Ok(tmq) => {
             let tmq: TaosMaybeError<Tmq> = tmq.into();
@@ -398,44 +399,7 @@ unsafe fn consumer_new(conf: *mut tmq_conf_t) -> TaosResult<Tmq> {
         Some(conf) => {
             debug!("consumer_new, conf: {conf:?}");
 
-            let ip = conf.map.get("td.connect.ip");
-
-            let port = conf
-                .map
-                .get("td.connect.port")
-                .map_or(0, |s| s.parse().unwrap());
-
-            let user = conf.map.get("td.connect.user");
-            let pass = conf.map.get("td.connect.pass");
-
-            let addr = if let Some(ip) = ip {
-                let port = util::resolve_port(ip, port);
-                format!("{ip}:{port}")
-            } else if let Some(addr) = config::adapter_list() {
-                addr.to_string()
-            } else {
-                let host = ws::DEFAULT_HOST;
-                let port = util::resolve_port(host, port);
-                format!("{host}:{port}")
-            };
-
-            let ws_tls_mode = conf
-                .map
-                .get("ws.tls.mode")
-                .map(|s| s.parse::<config::WsTlsMode>())
-                .transpose()?;
-            let ws_tls_version = conf.map.get("ws.tls.version");
-            let ws_tls_ca = conf.map.get("ws.tls.ca");
-
-            let dsn = util::DsnBuilder::new()
-                .addr(Some(&addr))
-                .user(user.map(|s| s.as_str()))
-                .pass(pass.map(|s| s.as_str()))
-                .ws_tls_mode(ws_tls_mode)
-                .ws_tls_version(ws_tls_version.map(|s| s.as_str()))
-                .ws_tls_ca(ws_tls_ca.map(|s| s.as_str()))
-                .build();
-            let mut dsn = Dsn::from_str(&dsn)?;
+            let mut dsn = build_consumer_dsn(conf)?;
 
             let mut auto_commit = false;
             let mut auto_commit_interval_ms = 5000;
@@ -468,6 +432,56 @@ unsafe fn consumer_new(conf: *mut tmq_conf_t) -> TaosResult<Tmq> {
         }
         None => Err(TaosError::new(Code::INVALID_PARA, "conf is null")),
     }
+}
+
+fn build_consumer_dsn(conf: &TmqConf) -> TaosResult<Dsn> {
+    let ip = conf.map.get("td.connect.ip");
+
+    let port = conf
+        .map
+        .get("td.connect.port")
+        .map_or(0, |s| s.parse().unwrap());
+
+    let user = conf.map.get("td.connect.user");
+    let pass = conf.map.get("td.connect.pass");
+
+    let addr = if let Some(ip) = ip {
+        let port = util::resolve_port(ip, port);
+        format!("{ip}:{port}")
+    } else if let Some(addr) = config::adapter_list() {
+        addr.to_string()
+    } else {
+        let host = ws::DEFAULT_HOST;
+        let port = util::resolve_port(host, port);
+        format!("{host}:{port}")
+    };
+
+    let ws_tls_mode = conf
+        .map
+        .get("ws.tls.mode")
+        .map(|s| s.parse::<config::WsTlsMode>())
+        .transpose()?;
+    let ws_tls_version = conf.map.get("ws.tls.version");
+    let ws_tls_ca = conf.map.get("ws.tls.ca");
+
+    let adapter_ha = match conf.map.get("ws.adapter.ha").map(String::as_str) {
+        Some("true") => Some(true),
+        Some(_) => Some(false),
+        None => None,
+    };
+
+    let dsn = util::DsnBuilder::new()
+        .addr(Some(&addr))
+        .user(user.map(|s| s.as_str()))
+        .pass(pass.map(|s| s.as_str()))
+        .adapter_ha(adapter_ha)
+        .ws_tls_mode(ws_tls_mode)
+        .ws_tls_version(ws_tls_version.map(|s| s.as_str()))
+        .ws_tls_ca(ws_tls_ca.map(|s| s.as_str()))
+        .build()
+        .parse::<Dsn>()?;
+
+    Ok(dsn)
 }
 
 #[no_mangle]
@@ -1776,6 +1790,24 @@ mod tests {
             tmq_consumer_close(tmq);
             tmq_conf_destroy(conf);
         }
+    }
+
+    #[test]
+    fn test_build_consumer_dsn_passes_adapter_ha_conf_override() {
+        let mut conf = TmqConf::new();
+        conf.map
+            .insert("td.connect.ip".to_string(), "localhost".to_string());
+        conf.map
+            .insert("td.connect.port".to_string(), "6041".to_string());
+        conf.map
+            .insert("ws.adapter.ha".to_string(), "true".to_string());
+
+        let dsn = build_consumer_dsn(&conf).unwrap();
+
+        assert_eq!(
+            dsn.params.get("adapter_ha").map(String::as_str),
+            Some("true")
+        );
     }
 
     #[test]
