@@ -2,9 +2,6 @@ name: Enterprise
 
 on:
   push:
-    branches: ["main", "3.0", "3.3.6"]
-  pull_request:
-    branches: ["main", "3.0", "3.3.6"]
 
 jobs:
   test:
