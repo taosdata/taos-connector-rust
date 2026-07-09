@@ -398,6 +398,10 @@ pub unsafe extern "C" fn taos_stmt2_close(stmt: *mut TAOS_STMT2) -> c_int {
     if stmt.is_null() {
         return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null"));
     }
+    // Dropping TaosMaybeError<TaosStmt2> also drops TaosStmt2.result (the
+    // Option<Box<...>>), which frees any result set obtained via
+    // taos_stmt2_result.  This matches the native driver where the result
+    // set lifetime is tied to the statement handle.
     let _ = Box::from_raw(stmt as *mut TaosMaybeError<TaosStmt2>);
     clear_err_and_ret_succ()
 }
@@ -546,21 +550,26 @@ pub unsafe extern "C" fn taos_stmt2_result(stmt: *mut TAOS_STMT2) -> *mut TAOS_R
         }
     };
 
-    let stmt2 = match maybe_err.deref_mut() {
-        Some(taos_stmt2) => &mut taos_stmt2.stmt2,
+    let taos_stmt2 = match maybe_err.deref_mut() {
+        Some(taos_stmt2) => taos_stmt2,
         None => {
             maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "stmt is invalid")));
             return ptr::null_mut();
         }
     };
 
-    match stmt2.result_set() {
+    match taos_stmt2.stmt2.result_set() {
         Ok(rs) => {
             let rs: TaosMaybeError<ResultSet> = ResultSet::Query(QueryResultSet::new(rs)).into();
             debug!("taos_stmt2_result succ, result_set: {rs:?}");
+            // Store the result set in the statement handle.  Any previously
+            // held result is dropped automatically by the Option replacement.
+            let boxed = Box::new(rs);
+            let res_ptr = &*boxed as *const TaosMaybeError<ResultSet> as *mut TAOS_RES;
+            taos_stmt2.result = Some(boxed);
             maybe_err.clear_err();
             clear_err_and_ret_succ();
-            Box::into_raw(Box::new(rs)) as _
+            res_ptr
         }
         Err(err) => {
             error!("taos_stmt2_result failed, err: {err:?}");
@@ -581,6 +590,9 @@ struct TaosStmt2 {
     async_exec_fn: Option<__taos_async_fn_t>,
     userdata: *mut c_void,
     fields_len: Option<usize>,
+    /// Result set returned by the most recent `taos_stmt2_result` call.
+    /// Owned by the statement handle; freed automatically by `taos_stmt2_close`.
+    result: Option<Box<TaosMaybeError<ResultSet>>>,
 }
 
 impl TaosStmt2 {
@@ -590,6 +602,7 @@ impl TaosStmt2 {
             async_exec_fn,
             userdata,
             fields_len: None,
+            result: None,
         }
     }
 }
@@ -1566,8 +1579,6 @@ mod tests {
             assert!(len > 0);
             println!("str: {:?}, len: {}", CStr::from_ptr(str.as_ptr()), len);
 
-            taos_free_result(res);
-
             let code = taos_stmt2_close(stmt2);
             assert_eq!(code, 0);
 
@@ -1833,7 +1844,6 @@ mod tests {
                 assert!(row_text.contains("NULL"));
             }
 
-            taos_free_result(res);
             assert_eq!(taos_stmt2_close(stmt2), 0);
 
             test_exec(taos, "drop database if exists test_1778045960");
@@ -2005,8 +2015,6 @@ mod tests {
 
             taos_stop_query(res);
 
-            taos_free_result(res);
-
             let code = taos_stmt2_close(stmt2);
             assert_eq!(code, 0);
 
@@ -2110,8 +2118,6 @@ mod tests {
             let len = taos_print_row(str.as_mut_ptr(), row, fields, num_fields);
             assert!(len > 0);
             println!("str: {:?}, len: {}", CStr::from_ptr(str.as_ptr()), len);
-
-            taos_free_result(res);
 
             let code = taos_stmt2_close(stmt2);
             assert_eq!(code, 0);
@@ -2256,7 +2262,6 @@ mod tests {
                 "1739521477834 4 \\x12345678",
             );
 
-            taos_free_result(res);
             assert_eq!(taos_stmt2_close(stmt2), 0);
             test_exec(taos, "drop database test_1753168041");
             taos_close(taos);
@@ -2391,7 +2396,6 @@ mod tests {
                 "1726803356468 NULL NULL NULL",
             );
 
-            taos_free_result(res);
             assert_eq!(taos_stmt2_close(stmt2), 0);
             test_exec(taos, "drop database if exists test_1776764597");
             taos_close(taos);
@@ -2935,6 +2939,63 @@ mod tests {
             assert_eq!(code, 0);
 
             test_exec(taos, "drop database if exists test_1765161954");
+            taos_close(taos);
+        }
+    }
+
+    /// Regression test for memory leak when using stmt2 with a literal SELECT
+    /// (no bind parameters).  Previously, `taos_stmt2_result` allocated a new
+    /// Box on the heap that was never freed by `taos_stmt2_close`, causing a
+    /// definite leak visible under valgrind.
+    ///
+    /// The fix stores the result set inside the statement handle so that
+    /// `taos_stmt2_close` drops it automatically, matching native driver
+    /// semantics.
+    #[test]
+    fn test_taos_stmt2_result_no_leak_on_literal_select() {
+        unsafe {
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    "drop database if exists test_stmt2_leak",
+                    "create database test_stmt2_leak",
+                    "use test_stmt2_leak",
+                    "create table t (ts timestamp, v int)",
+                    "insert into t values (now, 1)",
+                    "insert into t values (now + 1s, 2)",
+                ],
+            );
+
+            let stmt2 = taos_stmt2_init(taos, ptr::null_mut());
+            assert!(!stmt2.is_null());
+
+            // Literal SQL without bind placeholders — previously rejected by
+            // prepare but now succeeds.
+            let sql = c"select * from t";
+            let code = taos_stmt2_prepare(stmt2, sql.as_ptr(), 0);
+            assert_eq!(code, 0);
+
+            let mut affected_rows: c_int = 0;
+            let code = taos_stmt2_exec(stmt2, &mut affected_rows);
+            assert_eq!(code, 0);
+
+            let res = taos_stmt2_result(stmt2);
+            assert!(!res.is_null());
+
+            // Consume the result set to confirm it is valid.
+            let num_fields = taos_num_fields(res);
+            assert_eq!(num_fields, 2);
+
+            let row = taos_fetch_row(res);
+            assert!(!row.is_null());
+
+            // Do NOT call taos_free_result — closing the stmt must free the
+            // result set automatically (matching native driver behavior).
+            let code = taos_stmt2_close(stmt2);
+            assert_eq!(code, 0);
+
+            test_exec(taos, "drop database if exists test_stmt2_leak");
             taos_close(taos);
         }
     }
