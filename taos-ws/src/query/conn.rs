@@ -161,31 +161,24 @@ pub(super) async fn run(
             .in_current_span(),
         );
 
-        tokio::select! {
+        let mut connection_errors = Vec::with_capacity(2);
+        let received_close_signal = tokio::select! {
             err = err_rx.recv() => {
                 if let Some(err) = err {
-                    tracing::error!("WebSocket error: {err}");
-                    let _ = close_tx.send(true);
-                    if !is_disconnect_error(&err) {
-                        tracing::error!("non-disconnect error detected, cleaning up all pending queries");
-                        if let Some(taos) = ws_taos.upgrade() {
-                            taos.set_state(ConnState::Disconnected);
-                        }
-                        cleanup_after_disconnect(query_sender.clone());
-                        return;
-                    }
-                    tracing::warn!("disconnect error detected, attempting to reconnect");
+                    connection_errors.push(err);
                 }
+                let _ = close_tx.send(true);
+                false
             }
             _ = close_reader.changed() => {
                 tracing::info!("WebSocket received close signal");
                 let _ = close_tx.send(true);
-                return;
+                true
             }
-        }
+        };
 
-        if let Some(taos) = ws_taos.upgrade() {
-            taos.set_state(ConnState::Reconnecting);
+        if received_close_signal {
+            return;
         }
 
         if let Err(err) = send_handle.await {
@@ -193,6 +186,33 @@ pub(super) async fn run(
         }
         if let Err(err) = recv_handle.await {
             tracing::error!("read messages task failed: {err:?}");
+        }
+
+        while let Ok(err) = err_rx.try_recv() {
+            connection_errors.push(err);
+        }
+
+        for err in &connection_errors {
+            tracing::error!("WebSocket error: {err}");
+        }
+
+        if connection_errors
+            .iter()
+            .any(|err| !is_disconnect_error(err))
+        {
+            tracing::error!("non-disconnect error detected, cleaning up all pending queries");
+            if let Some(taos) = ws_taos.upgrade() {
+                taos.set_state(ConnState::Disconnected);
+            }
+            drop(message_reader);
+            cleanup_after_disconnect(query_sender.clone());
+            return;
+        }
+
+        tracing::warn!("disconnect error detected, attempting to reconnect");
+
+        if let Some(taos) = ws_taos.upgrade() {
+            taos.set_state(ConnState::Reconnecting);
         }
 
         tracing::warn!("WebSocket disconnected, starting to reconnect");
@@ -328,19 +348,14 @@ async fn read_messages(
 ) {
     tracing::trace!("start reading messages from WebSocket stream");
 
-    let (message_tx, message_rx) = mpsc::channel(64);
-
-    let message_handle =
-        tokio::spawn(handle_messages(message_rx, query_sender.clone(), cache).in_current_span());
-
     loop {
         tokio::select! {
             res = ws_stream_reader.try_next() => {
                 match res {
                     Ok(Some(message)) => {
-                        if let Err(err) = message_tx.send(message).await {
-                            tracing::error!("failed to send message to handler, err: {err:?}");
-                            let _ = err_sender.send(WsError::ConnectionClosed.into()).await;
+                        if let Err(err) = parse_message(message, query_sender.clone(), cache.clone()) {
+                            tracing::error!("failed to handle WebSocket message: {err}");
+                            let _ = err_sender.send(err).await;
                             break;
                         }
                     }
@@ -362,28 +377,16 @@ async fn read_messages(
         }
     }
 
-    drop(message_tx);
-
-    if let Err(err) = message_handle.await {
-        tracing::error!("handle messages task failed: {err:?}");
-    }
-
     tracing::trace!("stop reading messages from WebSocket stream");
 }
 
-async fn handle_messages(
-    mut message_reader: mpsc::Receiver<Message>,
+fn parse_message(
+    message: Message,
     query_sender: WsQuerySender,
     cache: MessageCache,
-) {
-    while let Some(message) = message_reader.recv().await {
-        parse_message(message, query_sender.clone(), cache.clone());
-    }
-}
-
-fn parse_message(message: Message, query_sender: WsQuerySender, cache: MessageCache) {
+) -> Result<(), Error> {
     match message {
-        Message::Text(text) => parse_text_message(text, query_sender, cache),
+        Message::Text(text) => return parse_text_message(text, query_sender, cache),
         Message::Binary(data) => parse_binary_message(data, query_sender, cache),
         Message::Ping(data) => {
             tokio::spawn(async move {
@@ -404,18 +407,22 @@ fn parse_message(message: Message, query_sender: WsQuerySender, cache: MessageCa
             tracing::trace!("frame message: {message:?}");
         }
     }
+
+    Ok(())
 }
 
-fn parse_text_message(text: String, query_sender: WsQuerySender, cache: MessageCache) {
+fn parse_text_message(
+    text: String,
+    query_sender: WsQuerySender,
+    cache: MessageCache,
+) -> Result<(), Error> {
     tracing::trace!("received text message, text: {text}");
 
-    let resp = match serde_json::from_str::<WsRecv>(&text) {
-        Ok(resp) => resp,
-        Err(err) => {
-            tracing::warn!("failed to deserialize json text: {text}, err: {err:?}");
-            return;
-        }
-    };
+    let resp: WsRecv = serde_json::from_str(&text).map_err(|err| {
+        RawError::any(err)
+            .with_code(WS_ERROR_NO::DE_ERROR.as_code())
+            .context("invalid json response")
+    })?;
 
     let (req_id, data, ok) = resp.ok();
 
@@ -437,6 +444,8 @@ fn parse_text_message(text: String, query_sender: WsQuerySender, cache: MessageC
             }
         }
     }
+
+    Ok(())
 }
 
 fn parse_binary_message(data: Vec<u8>, query_sender: WsQuerySender, cache: MessageCache) {
@@ -624,8 +633,121 @@ mod tests {
     use warp::ws::Message;
     use warp::Filter;
 
+    use crate::query::asyn::WS_ERROR_NO;
     use crate::query::ConnOption;
     use crate::TaosBuilder;
+
+    #[tokio::test]
+    async fn malformed_query_response_fails_without_waiting_for_read_timeout() -> anyhow::Result<()>
+    {
+        let routes = warp::path("ws").and(warp::ws()).map(|ws: warp::ws::Ws| {
+            ws.on_upgrade(|ws| async move {
+                let (mut ws_tx, mut ws_rx) = ws.split();
+                let mut first_query_req_id = None;
+
+                while let Some(Ok(message)) = ws_rx.next().await {
+                    if !message.is_text() {
+                        continue;
+                    }
+
+                    let text = message.to_str().unwrap();
+                    let req: Value = serde_json::from_str(text).unwrap();
+                    let req_id = req
+                        .get("args")
+                        .and_then(|value| value.get("req_id"))
+                        .and_then(Value::as_u64)
+                        .unwrap_or_default();
+
+                    let is_query = text.contains("query");
+                    let response = if text.contains("version") {
+                        json!({
+                            "code": 0,
+                            "message": "",
+                            "action": "version",
+                            "req_id": req_id,
+                            "version": "3.0"
+                        })
+                    } else if text.contains("conn") {
+                        json!({
+                            "code": 0,
+                            "message": "",
+                            "action": "conn",
+                            "req_id": req_id
+                        })
+                    } else if is_query && first_query_req_id.is_none() {
+                        first_query_req_id = Some(req_id);
+                        continue;
+                    } else if is_query {
+                        json!({
+                            "code": 0,
+                            "message": "",
+                            "action": "binary_query",
+                            "req_id": first_query_req_id.unwrap(),
+                            "timing": -1,
+                            "id": 0,
+                            "is_update": true,
+                            "affected_rows": 1,
+                            "fields_count": 0,
+                            "precision": 0
+                        })
+                    } else {
+                        continue;
+                    };
+
+                    if ws_tx
+                        .send(Message::text(response.to_string()))
+                        .await
+                        .is_err()
+                    {
+                        break;
+                    }
+
+                    if is_query {
+                        break;
+                    }
+                }
+            })
+        });
+
+        let (addr, server) = warp::serve(routes).bind_ephemeral(([127, 0, 0, 1], 0));
+        let server = tokio::spawn(server);
+        let taos = TaosBuilder::from_dsn(format!("ws://{addr}?read_timeout=30"))?
+            .build()
+            .await?;
+
+        let result = tokio::time::timeout(Duration::from_secs(2), async {
+            tokio::join!(taos.query("show databases"), taos.query("show tables"))
+        })
+        .await;
+
+        server.abort();
+
+        assert!(
+            result.is_ok(),
+            "malformed response was silently dropped and the query remained pending"
+        );
+        let (first, second) = result.unwrap();
+        assert_eq!(
+            first.unwrap_err().code(),
+            WS_ERROR_NO::CONN_CLOSED.as_code()
+        );
+        assert_eq!(
+            second.unwrap_err().code(),
+            WS_ERROR_NO::CONN_CLOSED.as_code()
+        );
+
+        let next = tokio::time::timeout(Duration::from_secs(2), taos.query("show stables")).await;
+        assert!(
+            next.is_ok(),
+            "query sent after the fatal response remained pending"
+        );
+        assert_eq!(
+            next.unwrap().unwrap_err().code(),
+            WS_ERROR_NO::CONN_CLOSED.as_code()
+        );
+
+        Ok(())
+    }
 
     #[tokio::test]
     async fn test_ws_auto_reconnect() -> anyhow::Result<()> {
