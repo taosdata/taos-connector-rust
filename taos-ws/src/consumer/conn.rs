@@ -1,3 +1,25 @@
+// Copyright (c) 2025 TAOS Data, Inc.
+//
+// SPDX-License-Identifier: MIT
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -64,7 +86,7 @@ pub(super) async fn run(
     builder: TaosBuilder,
     mut ws_stream: WsStream,
     tmq_sender: WsTmqSender,
-    poll_cache_sender: mpsc::Sender<Option<TmqRecvData>>,
+    poll_res_sender: flume::Sender<RawResult<TmqRecvData>>,
     message_reader: flume::Receiver<WsMessage>,
     mut close_reader: watch::Receiver<bool>,
     tmq_conf: TmqInit,
@@ -93,7 +115,7 @@ pub(super) async fn run(
             read_messages(
                 ws_stream_rx,
                 tmq_sender.clone(),
-                poll_cache_sender.clone(),
+                poll_res_sender.clone(),
                 close_rx,
                 err_tx,
                 cache.clone(),
@@ -108,7 +130,7 @@ pub(super) async fn run(
                     let _ = close_tx.send(true);
                     if !is_disconnect_error(&err) {
                         tracing::error!("non-disconnect error detected, cleaning up all pending queries");
-                        cleanup_after_disconnect(tmq_sender.queries.clone()).await;
+                        cleanup_after_disconnect(tmq_sender.queries.clone(), &poll_res_sender).await;
                         return;
                     }
                     tracing::warn!("disconnect error detected, attempting to reconnect");
@@ -149,7 +171,7 @@ pub(super) async fn run(
             }
             Err(err) => {
                 tracing::error!("WebSocket reconnection failed: {err}");
-                cleanup_after_disconnect(tmq_sender.queries.clone()).await;
+                cleanup_after_disconnect(tmq_sender.queries.clone(), &poll_res_sender).await;
                 return;
             }
         }
@@ -222,11 +244,19 @@ async fn send_messages(
 
 async fn send_ping_message(ws_stream_sender: &mut WsStreamSender) -> Result<(), WsTmqError> {
     ws_stream_sender
+        .send(Message::Pong(b"TAOS".to_vec()))
+        .await
+        .map_err(Into::<WsTmqError>::into)?;
+
+    ws_stream_sender
         .send(Message::Ping(b"TAOS".to_vec()))
         .await
         .map_err(Into::<WsTmqError>::into)?;
 
-    Ok(())
+    ws_stream_sender
+        .flush()
+        .await
+        .map_err(Into::<WsTmqError>::into)
 }
 
 async fn send_close_message(ws_stream_sender: &mut WsStreamSender) {
@@ -241,7 +271,7 @@ async fn send_close_message(ws_stream_sender: &mut WsStreamSender) {
 async fn read_messages(
     mut ws_stream_reader: WsStreamReader,
     tmq_sender: WsTmqSender,
-    poll_cache_sender: mpsc::Sender<Option<TmqRecvData>>,
+    poll_res_sender: flume::Sender<RawResult<TmqRecvData>>,
     mut close_reader: watch::Receiver<bool>,
     err_sender: mpsc::Sender<WsTmqError>,
     cache: MessageCache,
@@ -254,7 +284,7 @@ async fn read_messages(
         handle_messages(
             message_rx,
             tmq_sender.clone(),
-            poll_cache_sender,
+            poll_res_sender.clone(),
             err_sender.clone(),
             cache,
         )
@@ -305,7 +335,13 @@ async fn read_messages(
     }
 
     if closed_normally {
-        cleanup_after_disconnect(tmq_sender.queries.clone()).await;
+        // Clean close is followed by a reconnect attempt in `run`, so no
+        // CONN_CLOSED sentinel is pushed into the poll-response queue here:
+        // an in-flight poll is replayed via `MessageCache` and its response
+        // arrives through the same queue. A sentinel would outlive the
+        // reconnect and surface as a spurious error to a later poll (and
+        // block `commit_all` with a misleading "polling data is in queue").
+        cleanup_pending_queries(tmq_sender.queries.clone()).await;
     }
 
     tracing::trace!("stop reading messages from WebSocket stream");
@@ -314,7 +350,7 @@ async fn read_messages(
 async fn handle_messages(
     mut message_reader: mpsc::Receiver<Message>,
     tmq_sender: WsTmqSender,
-    poll_cache_sender: mpsc::Sender<Option<TmqRecvData>>,
+    poll_res_sender: flume::Sender<RawResult<TmqRecvData>>,
     err_sender: mpsc::Sender<WsTmqError>,
     cache: MessageCache,
 ) {
@@ -322,7 +358,7 @@ async fn handle_messages(
         parse_message(
             message,
             tmq_sender.clone(),
-            poll_cache_sender.clone(),
+            poll_res_sender.clone(),
             err_sender.clone(),
             cache.clone(),
         )
@@ -333,7 +369,7 @@ async fn handle_messages(
 async fn parse_message(
     message: Message,
     tmq_sender: WsTmqSender,
-    poll_cache_sender: mpsc::Sender<Option<TmqRecvData>>,
+    poll_res_sender: flume::Sender<RawResult<TmqRecvData>>,
     err_sender: mpsc::Sender<WsTmqError>,
     cache: MessageCache,
 ) {
@@ -342,7 +378,7 @@ async fn parse_message(
             parse_text_message(
                 text,
                 tmq_sender.queries.clone(),
-                poll_cache_sender,
+                poll_res_sender,
                 err_sender,
                 cache,
             )
@@ -373,7 +409,7 @@ async fn parse_message(
 async fn parse_text_message(
     text: String,
     queries: WsTmqAgent,
-    poll_cache_sender: mpsc::Sender<Option<TmqRecvData>>,
+    poll_res_sender: flume::Sender<RawResult<TmqRecvData>>,
     err_sender: mpsc::Sender<WsTmqError>,
     cache: MessageCache,
 ) {
@@ -399,38 +435,35 @@ async fn parse_text_message(
         TmqRecvData::Poll(_) => {
             cache.remove().await;
 
-            let data = match queries.remove(&req_id) {
-                Some((_, sender)) => {
-                    #[cfg(test)]
-                    #[allow(static_mut_refs)]
-                    {
-                        if std::env::var("TEST_POLLING_LOST").is_ok() {
-                            static mut POLLING_LOST_IDX: u64 = 0;
-                            unsafe {
-                                POLLING_LOST_IDX += 1;
-                                tokio::time::sleep(Duration::from_millis(500)).await;
-                                tracing::warn!(lost = POLLING_LOST_IDX, "polling lost");
-                            }
-                        }
-                    }
-
-                    match sender.send(ok.map(|_| data)).await {
-                        Ok(_) => None,
-                        Err(err) => match err.0 {
-                            Ok(data) => Some(data),
-                            Err(err) => {
-                                tracing::warn!("poll message received, err: {err:?}");
-                                None
-                            }
-                        },
+            #[cfg(test)]
+            #[allow(static_mut_refs)]
+            {
+                if std::env::var("TEST_POLLING_LOST").is_ok() {
+                    static mut POLLING_LOST_IDX: u64 = 0;
+                    unsafe {
+                        POLLING_LOST_IDX += 1;
+                        tokio::time::sleep(Duration::from_millis(500)).await;
+                        tracing::warn!(lost = POLLING_LOST_IDX, "polling lost");
                     }
                 }
-                None => Some(data),
-            };
+            }
 
-            tracing::trace!("poll end: {data:?}");
-            if let Err(err) = poll_cache_sender.send(data).await {
-                tracing::error!("poll end notification failed, break the connection, err: {err:?}");
+            // Poll responses are pushed into the shared poll-response queue
+            // instead of a per-request channel: the consumer takes them with
+            // `flume::Receiver::recv_async`, which is cancel safe, so a poll
+            // that times out leaves its response queued for the next poll
+            // instead of destroying it. The queue is unbounded, so this send
+            // never blocks the connection's serial message loop.
+            //
+            // The response's req_id is intentionally not matched to a waiter:
+            // responses are FIFO-matched to requests. This relies on two
+            // premises: the consumer issues poll requests serially (at most
+            // one in flight, gated by `Consumer::poll_outstanding`; only the
+            // 60s resend path may briefly have two), and taosAdapter answers
+            // requests on a single connection in order.
+            tracing::trace!("poll end, push response into queue: {data:?}");
+            if let Err(err) = poll_res_sender.send_async(ok.map(|_| data)).await {
+                tracing::error!("poll response queue closed, break the connection, err: {err:?}");
                 let _ = err_sender.send(WsTmqError::ChannelClosedError).await;
             }
         }
@@ -616,7 +649,11 @@ fn is_disconnect_error(err: &WsTmqError) -> bool {
     }
 }
 
-async fn cleanup_after_disconnect(queries: WsTmqAgent) {
+/// Fail every pending per-request waiter with `CONN_CLOSED`.
+///
+/// Used on all disconnect paths. Deliberately does NOT touch the
+/// poll-response queue: see the clean-close call site in `read_messages`.
+async fn cleanup_pending_queries(queries: WsTmqAgent) {
     let keys = queries.iter().map(|r| *r.key()).collect_vec();
     for key in keys {
         if let Some((_, sender)) = queries.remove(&key) {
@@ -628,6 +665,26 @@ async fn cleanup_after_disconnect(queries: WsTmqAgent) {
                 .await;
         }
     }
+}
+
+/// Terminal cleanup: pending waiters are failed, and a `CONN_CLOSED` sentinel
+/// is pushed into the poll-response queue to wake a pending or future poll
+/// take — with the connection gone for good, its response will never arrive.
+///
+/// Only for paths with no reconnect: a sentinel pushed before a successful
+/// reconnect would be mistaken for a poll response and delivered to the next
+/// poll as a spurious error.
+async fn cleanup_after_disconnect(
+    queries: WsTmqAgent,
+    poll_res_sender: &flume::Sender<RawResult<TmqRecvData>>,
+) {
+    cleanup_pending_queries(queries).await;
+    let _ = poll_res_sender
+        .send_async(Err(RawError::new(
+            WS_ERROR_NO::CONN_CLOSED.as_code(),
+            "WebSocket connection is closed",
+        )))
+        .await;
 }
 
 async fn cleanup_after_reconnect(queries: WsTmqAgent, cache: MessageCache) {
@@ -655,11 +712,193 @@ mod tests {
     use futures::{SinkExt, StreamExt};
     use serde_json::json;
     use taos_query::AsyncTBuilder;
+    use tokio::sync::{mpsc, watch};
     use tokio::task::JoinHandle;
     use warp::ws::Message;
     use warp::Filter;
 
+    use super::{
+        cleanup_after_disconnect, cleanup_pending_queries, parse_text_message, MessageCache,
+    };
+    use crate::consumer::messages::TmqRecvData;
+    use crate::consumer::WsTmqAgent;
     use crate::TmqBuilder;
+    use taos_query::RawResult;
+
+    #[tokio::test]
+    async fn test_cleanup_after_disconnect_pushes_sentinel() {
+        let queries = WsTmqAgent::default();
+        let (response_tx, mut response_rx) = mpsc::channel(1);
+        queries.insert(3, response_tx);
+        let (poll_res_tx, poll_res_rx) = flume::unbounded();
+
+        cleanup_after_disconnect(queries, &poll_res_tx).await;
+
+        let err = response_rx
+            .recv()
+            .await
+            .expect("waiter should be notified")
+            .expect_err("waiter should receive an error");
+        assert!(err.to_string().contains("WebSocket connection is closed"));
+
+        let sentinel = poll_res_rx
+            .try_recv()
+            .expect("terminal cleanup should wake poll takes with a sentinel");
+        assert!(sentinel
+            .expect_err("sentinel should be an error")
+            .to_string()
+            .contains("WebSocket connection is closed"));
+    }
+
+    #[tokio::test]
+    async fn test_cleanup_pending_queries_leaves_poll_queue_untouched() {
+        let queries = WsTmqAgent::default();
+        let (response_tx, mut response_rx) = mpsc::channel(1);
+        queries.insert(4, response_tx);
+        let (_poll_res_tx, poll_res_rx) = flume::unbounded::<RawResult<TmqRecvData>>();
+
+        cleanup_pending_queries(queries).await;
+
+        assert!(response_rx
+            .recv()
+            .await
+            .expect("waiter should be notified")
+            .is_err());
+        assert!(
+            poll_res_rx.try_recv().is_err(),
+            "clean-close cleanup must not push a sentinel: the reconnect replay delivers the response"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_position_error_response_notifies_waiter() {
+        const REQ_ID: u64 = 538;
+
+        let queries = WsTmqAgent::default();
+        let (response_tx, mut response_rx) = mpsc::channel(1);
+        queries.insert(REQ_ID, response_tx);
+
+        let (poll_res_tx, _poll_res_rx) = flume::bounded(1);
+        let (error_tx, _error_rx) = mpsc::channel(1);
+
+        let response = json!({
+            "code": 16392,
+            "message": "VgId does not belong to this consumer",
+            "action": "position",
+            "req_id": REQ_ID,
+            "timing": 736730
+        });
+
+        parse_text_message(
+            response.to_string(),
+            queries.clone(),
+            poll_res_tx,
+            error_tx,
+            MessageCache::new(),
+        )
+        .await;
+
+        let response = tokio::time::timeout(Duration::from_millis(100), response_rx.recv()).await;
+
+        queries.remove(&REQ_ID);
+
+        let result = response
+            .expect("position error response should notify its waiter without hanging")
+            .expect("position response channel should remain open");
+        let error = result.expect_err("position error response should remain an error");
+
+        assert_eq!(error.code(), taos_query::prelude::Code::new(16392));
+        assert!(error
+            .to_string()
+            .contains("VgId does not belong to this consumer"));
+    }
+
+    #[tokio::test]
+    async fn test_fetch_json_meta_error_response_notifies_waiter() {
+        const REQ_ID: u64 = 539;
+
+        let queries = WsTmqAgent::default();
+        let (response_tx, mut response_rx) = mpsc::channel(1);
+        queries.insert(REQ_ID, response_tx);
+
+        let (poll_res_tx, _poll_res_rx) = flume::bounded(1);
+        let (error_tx, _error_rx) = mpsc::channel(1);
+
+        let response = json!({
+            "code": 65535,
+            "message": "message type can not get meta, type: 5",
+            "action": "fetch_json_meta",
+            "req_id": REQ_ID,
+            "timing": 736731,
+            "message_id": 1
+        });
+
+        parse_text_message(
+            response.to_string(),
+            queries.clone(),
+            poll_res_tx,
+            error_tx,
+            MessageCache::new(),
+        )
+        .await;
+
+        let response = tokio::time::timeout(Duration::from_millis(100), response_rx.recv()).await;
+
+        queries.remove(&REQ_ID);
+
+        let result = response
+            .expect("fetch_json_meta error response should notify its waiter without hanging")
+            .expect("fetch_json_meta response channel should remain open");
+        let error = result.expect_err("fetch_json_meta response should remain an error");
+
+        assert_eq!(error.code(), taos_query::prelude::Code::new(65535));
+        assert!(error
+            .to_string()
+            .contains("message type can not get meta, type: 5"));
+    }
+
+    #[tokio::test]
+    async fn test_committed_error_response_notifies_waiter() {
+        const REQ_ID: u64 = 540;
+
+        let queries = WsTmqAgent::default();
+        let (response_tx, mut response_rx) = mpsc::channel(1);
+        queries.insert(REQ_ID, response_tx);
+
+        let (poll_res_tx, _poll_res_rx) = flume::bounded(1);
+        let (error_tx, _error_rx) = mpsc::channel(1);
+
+        let response = json!({
+            "code": 16392,
+            "message": "VgId does not belong to this consumer",
+            "action": "committed",
+            "req_id": REQ_ID,
+            "timing": 736732
+        });
+
+        parse_text_message(
+            response.to_string(),
+            queries.clone(),
+            poll_res_tx,
+            error_tx,
+            MessageCache::new(),
+        )
+        .await;
+
+        let response = tokio::time::timeout(Duration::from_millis(100), response_rx.recv()).await;
+
+        queries.remove(&REQ_ID);
+
+        let result = response
+            .expect("committed error response should notify its waiter without hanging")
+            .expect("committed response channel should remain open");
+        let error = result.expect_err("committed response should remain an error");
+
+        assert_eq!(error.code(), taos_query::prelude::Code::new(16392));
+        assert!(error
+            .to_string()
+            .contains("VgId does not belong to this consumer"));
+    }
 
     #[tokio::test]
     async fn test_tmq_auto_reconnect() -> anyhow::Result<()> {
@@ -669,37 +908,35 @@ mod tests {
             .with_max_level(tracing::Level::INFO)
             .try_init();
 
-        let poll_handle: JoinHandle<anyhow::Result<()>> = tokio::spawn(async move {
-            let tmq = TmqBuilder::from_dsn("ws://127.0.0.1:9988?group.id=10")?;
-            let consumer = tmq.build().await?;
-            let timeout = Duration::from_secs(10);
-
-            let res = consumer.poll_timeout(timeout).await?;
-            assert!(res.is_some());
-
-            let res = consumer.poll_timeout(timeout).await?;
-            assert!(res.is_some());
-
-            Ok(())
-        });
-
-        let (close_tx, close_rx) = flume::bounded(1);
+        let (shutdown_tx, shutdown_rx) = watch::channel(0_u8);
         let poll_cnt = Arc::new(AtomicUsize::new(0));
 
         let routes = warp::path!("rest" / "tmq").and(warp::ws()).map({
             move |ws: warp::ws::Ws| {
-                let close = close_tx.clone();
+                let shutdown = shutdown_tx.clone();
                 let poll_cnt = poll_cnt.clone();
 
-                ws.on_upgrade(move |ws| async {
-                    let close = close;
+                ws.on_upgrade(move |ws| async move {
                     let poll_cnt = poll_cnt;
                     let (mut ws_tx, mut ws_rx) = ws.split();
+                    let mut received_heartbeat = false;
+                    let mut received_initial_poll = false;
+                    let mut received_final_poll = false;
 
                     while let Some(res) = ws_rx.next().await {
-                        let message = res.unwrap();
-                        tracing::debug!("ws recv message: {message:?}");
-                        if message.is_text() {
+                        let message = match res {
+                            Ok(message) => message,
+                            Err(err) => {
+                                tracing::debug!("mock WebSocket read failed: {err:?}");
+                                break;
+                            }
+                        };
+                        tracing::debug!("mock ws recv message: {message:?}");
+                        if message.is_ping() || message.is_pong() {
+                            received_heartbeat = true;
+                        } else if message.is_close() && received_final_poll {
+                            break;
+                        } else if message.is_text() {
                             let text = message.to_str().unwrap();
                             if text.contains("version") {
                                 let data = json!({
@@ -723,8 +960,7 @@ mod tests {
                             } else if text.contains("poll") {
                                 let cnt = poll_cnt.fetch_add(1, Ordering::Relaxed);
                                 if cnt == 0 {
-                                    let _ = close.send_async(()).await;
-                                    break;
+                                    received_initial_poll = true;
                                 } else if cnt == 1 {
                                     let data = json!({
                                         "code": 0,
@@ -759,38 +995,78 @@ mod tests {
                                     });
                                     let msg = Message::text(data.to_string());
                                     let _ = ws_tx.send(msg).await;
-                                    let _ = close.send_async(()).await;
-                                    break;
+                                    received_final_poll = true;
                                 }
                             }
                         }
+
+                        if received_initial_poll && received_heartbeat {
+                            let _ = shutdown.send(1);
+                            break;
+                        }
+                    }
+
+                    if received_final_poll {
+                        let _ = shutdown.send(2);
                     }
                 })
             }
         });
 
-        let close = close_rx.clone();
+        let mut first_shutdown = shutdown_rx.clone();
         let (_, server1) = warp::serve(routes.clone()).bind_with_graceful_shutdown(
             ([127, 0, 0, 1], 9988),
             async move {
-                let _ = close.recv_async().await;
+                first_shutdown
+                    .wait_for(|state| *state >= 1)
+                    .await
+                    .expect("mock shutdown sender must remain alive");
                 tracing::debug!("server1 shutting down...");
             },
         );
 
-        server1.await;
+        let poll_handle: JoinHandle<anyhow::Result<()>> = tokio::spawn(async move {
+            let tmq = TmqBuilder::from_dsn("ws://127.0.0.1:9988?group.id=10")?;
+            let consumer = tmq.build().await?;
+            let timeout = Duration::from_secs(10);
 
-        tokio::time::sleep(Duration::from_millis(500)).await;
+            let res = consumer.poll_timeout(timeout).await?;
+            assert!(res.is_some());
 
+            let res = consumer.poll_timeout(timeout).await?;
+            assert!(res.is_some());
+
+            Ok(())
+        });
+
+        tokio::time::timeout(Duration::from_secs(15), server1)
+            .await
+            .map_err(|_| {
+                anyhow::anyhow!("first mock server did not stop after the initial poll")
+            })?;
+
+        let mut second_shutdown = shutdown_rx;
         let (_, server2) =
             warp::serve(routes).bind_with_graceful_shutdown(([127, 0, 0, 1], 9988), async move {
-                let _ = close_rx.recv_async().await;
+                second_shutdown
+                    .wait_for(|state| *state >= 2)
+                    .await
+                    .expect("mock shutdown sender must remain alive");
                 tracing::debug!("server2 shutting down...");
             });
 
-        server2.await;
+        let (poll_result, server2_result) = tokio::join!(
+            tokio::time::timeout(Duration::from_secs(15), poll_handle),
+            tokio::time::timeout(Duration::from_secs(15), server2),
+        );
 
-        poll_handle.await??;
+        let poll_result =
+            poll_result.map_err(|_| anyhow::anyhow!("consumer did not finish both polls"))?;
+        poll_result??;
+
+        server2_result.map_err(|_| {
+            anyhow::anyhow!("second mock server did not stop after the second poll")
+        })?;
 
         Ok(())
     }
@@ -803,32 +1079,35 @@ mod tests {
             .with_max_level(tracing::Level::INFO)
             .try_init();
 
-        let poll_handle: JoinHandle<anyhow::Result<()>> = tokio::spawn(async move {
-            let tmq = TmqBuilder::from_dsn("ws://127.0.0.1:9984,127.0.0.1:9985?group.id=10")?;
-            let consumer = tmq.build().await?;
-            let timeout = Duration::from_secs(10);
-            let res = consumer.poll_timeout(timeout).await?;
-            assert!(res.is_some());
-            Ok(())
-        });
-
-        let (close_tx, close_rx) = flume::bounded(1);
+        let (shutdown_tx, shutdown_rx) = watch::channel(0_u8);
         let poll_cnt = Arc::new(AtomicUsize::new(0));
 
         let routes = warp::path!("rest" / "tmq").and(warp::ws()).map({
             move |ws: warp::ws::Ws| {
-                let close = close_tx.clone();
+                let shutdown = shutdown_tx.clone();
                 let poll_cnt = poll_cnt.clone();
 
-                ws.on_upgrade(move |ws| async {
-                    let close = close;
+                ws.on_upgrade(move |ws| async move {
                     let poll_cnt = poll_cnt;
                     let (mut ws_tx, mut ws_rx) = ws.split();
+                    let mut received_heartbeat = false;
+                    let mut received_initial_poll = false;
+                    let mut received_final_poll = false;
 
                     while let Some(res) = ws_rx.next().await {
-                        let message = res.unwrap();
-                        tracing::debug!("ws recv message: {message:?}");
-                        if message.is_text() {
+                        let message = match res {
+                            Ok(message) => message,
+                            Err(err) => {
+                                tracing::debug!("mock WebSocket read failed: {err:?}");
+                                break;
+                            }
+                        };
+                        tracing::debug!("mock ws recv message: {message:?}");
+                        if message.is_ping() || message.is_pong() {
+                            received_heartbeat = true;
+                        } else if message.is_close() && received_final_poll {
+                            break;
+                        } else if message.is_text() {
                             let text = message.to_str().unwrap();
                             if text.contains("version") {
                                 let data = json!({
@@ -850,7 +1129,10 @@ mod tests {
                                 let msg = Message::text(data.to_string());
                                 let _ = ws_tx.send(msg).await;
                             } else if text.contains("poll") {
-                                if poll_cnt.load(Ordering::Relaxed) == 1 {
+                                let cnt = poll_cnt.fetch_add(1, Ordering::Relaxed);
+                                if cnt == 0 {
+                                    received_initial_poll = true;
+                                } else if cnt == 1 {
                                     let data = json!({
                                         "code": 0,
                                         "message": "",
@@ -867,36 +1149,70 @@ mod tests {
                                     });
                                     let msg = Message::text(data.to_string());
                                     let _ = ws_tx.send(msg).await;
+                                    received_final_poll = true;
                                 }
-
-                                poll_cnt.fetch_add(1, Ordering::Relaxed);
-                                let _ = close.send_async(()).await;
-                                break;
                             }
                         }
+
+                        if received_initial_poll && received_heartbeat {
+                            let _ = shutdown.send(1);
+                            break;
+                        }
+                    }
+
+                    if received_final_poll {
+                        let _ = shutdown.send(2);
                     }
                 })
             }
         });
 
-        let close = close_rx.clone();
+        let mut first_shutdown = shutdown_rx.clone();
         let (_, server1) = warp::serve(routes.clone()).bind_with_graceful_shutdown(
             ([127, 0, 0, 1], 9984),
             async move {
-                let _ = close.recv_async().await;
+                first_shutdown
+                    .wait_for(|state| *state >= 1)
+                    .await
+                    .expect("mock shutdown sender must remain alive");
                 tracing::debug!("server1 shutting down...");
             },
         );
 
+        let mut second_shutdown = shutdown_rx;
         let (_, server2) =
             warp::serve(routes).bind_with_graceful_shutdown(([127, 0, 0, 1], 9985), async move {
-                let _ = close_rx.recv_async().await;
+                second_shutdown
+                    .wait_for(|state| *state >= 2)
+                    .await
+                    .expect("mock shutdown sender must remain alive");
                 tracing::debug!("server2 shutting down...");
             });
 
-        tokio::join!(server1, server2);
+        let poll_handle: JoinHandle<anyhow::Result<()>> = tokio::spawn(async move {
+            let tmq = TmqBuilder::from_dsn("ws://127.0.0.1:9984,127.0.0.1:9985?group.id=10")?;
+            let consumer = tmq.build().await?;
+            let timeout = Duration::from_secs(10);
+            let res = consumer.poll_timeout(timeout).await?;
+            assert!(res.is_some());
+            Ok(())
+        });
 
-        poll_handle.await??;
+        let (poll_result, server1_result, server2_result) = tokio::join!(
+            tokio::time::timeout(Duration::from_secs(15), poll_handle),
+            tokio::time::timeout(Duration::from_secs(15), server1),
+            tokio::time::timeout(Duration::from_secs(15), server2),
+        );
+
+        let poll_result =
+            poll_result.map_err(|_| anyhow::anyhow!("consumer did not finish the poll"))?;
+        poll_result??;
+
+        server1_result
+            .map_err(|_| anyhow::anyhow!("first mock server did not stop after failover"))?;
+
+        server2_result
+            .map_err(|_| anyhow::anyhow!("second mock server did not stop after the poll"))?;
 
         Ok(())
     }

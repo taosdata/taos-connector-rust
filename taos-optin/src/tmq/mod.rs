@@ -1,3 +1,25 @@
+// Copyright (c) 2022 TAOS Data, Inc.
+//
+// SPDX-License-Identifier: MIT
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 use std::fmt::Debug;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -13,7 +35,6 @@ use taos_query::tmq::{
 };
 use taos_query::util::Edition;
 use taos_query::{Dsn, IntoDsn, RawBlock};
-use tokio::sync::oneshot;
 use tokio::{self, time};
 use tracing::instrument;
 
@@ -294,6 +315,14 @@ impl Drop for Offset {
     }
 }
 
+/// TMQ consumer over the native (C) client library.
+///
+/// After `subscribe`, stick to one receive path: either the synchronous
+/// `AsConsumer` methods or the asynchronous `AsAsyncConsumer` ones. The async
+/// path is served by a poll thread that owns the message queue; mixing both
+/// paths polls the same underlying consumer handle from two threads and
+/// silently splits the message stream between them (messages fetched by one
+/// path are invisible to the other).
 #[derive(Debug)]
 pub struct Consumer {
     tmq: RawTmq,
@@ -430,27 +459,10 @@ impl AsConsumer for Consumer {
             taos_query::tmq::MessageSet<Self::Meta, Self::Data>,
         )>,
     > {
-        Ok(self.tmq.poll_timeout(timeout.as_raw_timeout())?.map(|raw| {
-            (
-                Offset(raw.clone()),
-                match raw.tmq_message_type() {
-                    tmq_res_t::TMQ_RES_INVALID => unreachable!(),
-                    tmq_res_t::TMQ_RES_DATA => taos_query::tmq::MessageSet::Data(Data::new(raw)),
-                    tmq_res_t::TMQ_RES_TABLE_META => {
-                        taos_query::tmq::MessageSet::Meta(Meta::new(raw))
-                    }
-                    // tmq_res_t::TMQ_RES_METADATA => taos_query::tmq::MessageSet::MetaData(
-                    //     Meta::new(raw.clone()),
-                    //     Data::new(raw),
-                    // ),
-                    // TODO: New variant RAWDATA since 3.3.6.0
-                    _ => taos_query::tmq::MessageSet::MetaData(
-                        Meta::new(raw.clone()),
-                        Data::new(raw),
-                    ),
-                },
-            )
-        }))
+        Ok(self
+            .tmq
+            .poll_timeout(timeout.as_raw_timeout())?
+            .map(|raw| (Offset(raw.clone()), MessageSet::from(raw))))
     }
 
     fn commit(&self, offset: Self::Offset) -> RawResult<()> {
@@ -493,8 +505,43 @@ impl AsConsumer for Consumer {
         self.tmq.committed(topic, vg_id)
     }
 
+    /// Consume position read from libtaos' local state.
+    ///
+    /// With the async poll thread up to 2 messages can be prefetched ahead of
+    /// delivery (queue capacity 1 plus one message held in a blocked send),
+    /// so the position may run ahead of what the application has actually
+    /// received by up to 2 messages.
     fn position(&self, topic: &str, vg_id: VGroupId) -> RawResult<i64> {
         self.tmq.position(topic, vg_id)
+    }
+}
+
+/// Take a message from the shared queue fed by the TMQ poll thread, waiting
+/// at most `duration`.
+///
+/// The poll thread (`RawTmq::spawn_thread`) calls `tmq_consumer_poll` only
+/// while a take is waiting (registered via `RawTmq::demand_guard`) and pushes
+/// polled messages into the bounded queue, blocking when it is full
+/// (backpressure), so a message is owned either by libtaos, by the queue, or
+/// by the consumer that took it. Timing out only abandons the *take*:
+/// `tokio::time::Timeout` polls the inner future first and
+/// `flume::Receiver::recv_async` is cancel safe (verified against the flume
+/// 0.11.1 implementation; not a documented guarantee), so a queued message
+/// survives a timed-out take and is delivered to the next call.
+///
+/// Note: this function only *takes*; it does not register demand by itself.
+/// Callers that need the poll thread to fetch must hold a `DemandGuard`.
+async fn poll_with_timeout<T: Send + 'static>(
+    receiver: &flume::Receiver<RawResult<T>>,
+    duration: Duration,
+) -> RawResult<Option<T>> {
+    match tokio::time::timeout(duration, receiver.recv_async()).await {
+        Err(_) => {
+            tracing::trace!("take message timed out");
+            Ok(None)
+        }
+        Ok(Err(_)) => Err(RawError::from_string("tmq poll response channel closed")),
+        Ok(Ok(res)) => res.map(Some),
     }
 }
 
@@ -514,7 +561,7 @@ impl AsAsyncConsumer for Consumer {
             self.tmq.tmq().list_api,
             topics.into_iter().map(|s| s.into()),
         )?;
-        let r = self.tmq.subscribe(&topics);
+        let res = self.tmq.subscribe(&topics);
 
         if let Some(offset) = self.dsn.get("offset") {
             let offsets = offset
@@ -541,7 +588,24 @@ impl AsAsyncConsumer for Consumer {
 
         self.tmq.spawn_thread();
 
-        r
+        // The poll thread prefetches ahead of delivery (queue capacity 1 plus
+        // one message held in a blocked send), and libtaos auto-commits the
+        // local position: with enable.auto.commit=true a crash can skip up to
+        // 2 prefetched-but-undelivered messages.
+        if self
+            .dsn
+            .get("enable.auto.commit")
+            .is_some_and(taos_query::value_is_true)
+        {
+            tracing::warn!(
+                "enable.auto.commit=true with an async consumer: the poll thread prefetches \
+                 up to 2 messages ahead of delivery and libtaos may auto-commit their offsets \
+                 before the application sees them; a crash can then skip those messages. \
+                 For at-least-once delivery keep enable.auto.commit=false and commit manually"
+            );
+        }
+
+        res
     }
 
     #[instrument(skip_all)]
@@ -554,47 +618,20 @@ impl AsAsyncConsumer for Consumer {
             taos_query::tmq::MessageSet<Self::Meta, Self::Data>,
         )>,
     > {
-        let recv_fut = async move {
-            let (tx, rx) = oneshot::channel();
-            self.tmq
-                .sender()
-                .send_async(tx)
-                .await
-                .map_err(RawError::from_any)?;
-            let res = rx.await;
-            let raw = res.map_err(RawError::from_any)??.map(|raw| {
-                (
-                    Offset(raw.clone()),
-                    match raw.tmq_message_type() {
-                        tmq_res_t::TMQ_RES_INVALID => unreachable!(),
-                        tmq_res_t::TMQ_RES_DATA => MessageSet::Data(Data::new(raw)),
-                        tmq_res_t::TMQ_RES_TABLE_META => MessageSet::Meta(Meta::new(raw)),
-                        // TODO: new variant RAWDATA since 3.3.6.0
-                        _ => MessageSet::MetaData(Meta::new(raw.clone()), Data::new(raw)),
-                    },
-                )
-            });
-            Ok(raw)
-        };
-
         let now = time::Instant::now();
 
         let duration = match timeout {
             Timeout::Duration(duration) => duration,
             _ => Duration::MAX,
         };
-        let sleep = tokio::time::sleep(duration);
-        tokio::pin!(sleep);
 
         tracing::trace!("Waiting for next message");
 
-        let res = tokio::select! {
-            _ = &mut sleep, if !sleep.is_elapsed() => {
-                tracing::trace!("sleep is elapsed");
-                Ok(None)
-            }
-            res = recv_fut => res,
-        };
+        // Register demand for the duration of this take: the poll thread
+        // calls into libtaos only while a take is waiting, so an idle
+        // consumer issues no RPCs (see `DemandGuard`).
+        let _demand = self.tmq.demand_guard();
+        let res = poll_with_timeout(self.tmq.msg_receiver(), duration).await;
 
         let elapsed = now.elapsed();
         match res {
@@ -603,7 +640,7 @@ impl AsAsyncConsumer for Consumer {
                     consumer.recv.elapsed.ms = elapsed.as_millis(),
                     "Got a new message"
                 );
-                Ok(res)
+                Ok(res.map(|raw| (Offset(raw.clone()), MessageSet::from(raw))))
             }
             Err(err) => {
                 tracing::warn!(
@@ -676,6 +713,12 @@ impl AsAsyncConsumer for Consumer {
         self.tmq.committed(topic, vgroup_id)
     }
 
+    /// Consume position read from libtaos' local state.
+    ///
+    /// The poll thread can prefetch up to 2 messages ahead of delivery (queue
+    /// capacity 1 plus one message held in a blocked send), so the position
+    /// may run ahead of what the application has actually received by up to 2
+    /// messages.
     async fn position(&self, topic: &str, vgroup_id: VGroupId) -> RawResult<i64> {
         self.tmq.position(topic, vgroup_id)
     }
@@ -1111,6 +1154,7 @@ mod tests {
                                     table_name,
                                     columns: _,
                                     tags: _,
+                                    ..
                                 } => {
                                     let _desc = taos.describe(table_name.as_str())?;
                                     // dbg!(_desc);
@@ -1311,6 +1355,7 @@ mod tests {
                                     table_name,
                                     columns: _,
                                     tags: _,
+                                    ..
                                 } => {
                                     let desc = taos.describe(table_name.as_str())?;
                                     tracing::trace!("{:?}", desc);
@@ -1448,23 +1493,24 @@ mod tests {
         use std::sync::mpsc;
         use std::thread;
         use taos_query::prelude::sync::*;
-        use taos_query::util::test_utils::test_username;
 
         let taos = crate::TaosBuilder::from_dsn("taos://localhost:6030")?.build()?;
         taos.exec_many([
             "drop token if exists token_1772592400",
+            "drop user if exists user_1772592400",
             "drop topic if exists topic_1772592400",
             "drop database if exists test_1772592400",
             "create database test_1772592400",
             "create topic topic_1772592400 as database test_1772592400",
+            "create user user_1772592400 pass 'token_pass_1'",
+            "grant all on test_1772592400.* to user_1772592400",
+            "grant use on database test_1772592400 to user_1772592400",
+            "grant subscribe on topic test_1772592400.topic_1772592400 to user_1772592400",
             "use test_1772592400",
             "create table t0 (ts timestamp, c1 int)",
         ])?;
 
-        let mut rs = taos.query(format!(
-            "create token token_1772592400 from user {}",
-            test_username()
-        ))?;
+        let mut rs = taos.query("create token token_1772592400 from user user_1772592400")?;
         let mut rows: Vec<String> = rs.deserialize().try_collect()?;
         assert_eq!(rows.len(), 1);
         let token = rows.remove(0);
@@ -1535,6 +1581,7 @@ mod tests {
 
         taos.exec_many([
             "drop token if exists token_1772592400",
+            "drop user if exists user_1772592400",
             "drop topic if exists topic_1772592400",
             "drop database if exists test_1772592400",
         ])?;
@@ -1593,21 +1640,22 @@ mod tests {
     #[test]
     fn test_token_priority() -> anyhow::Result<()> {
         use taos_query::prelude::sync::*;
-        use taos_query::util::test_utils::test_username;
 
         let taos = crate::TaosBuilder::from_dsn("taos://localhost:6030")?.build()?;
         taos.exec_many([
             "drop token if exists token_1772593616",
+            "drop user if exists user_1772593616",
             "drop topic if exists topic_1772593616",
             "drop database if exists test_1772593616",
             "create database test_1772593616",
             "create topic topic_1772593616 as database test_1772593616",
+            "create user user_1772593616 pass 'token_pass_1'",
+            "grant all on test_1772593616.* to user_1772593616",
+            "grant use on database test_1772593616 to user_1772593616",
+            "grant subscribe on topic test_1772593616.topic_1772593616 to user_1772593616",
         ])?;
 
-        let mut rs = taos.query(format!(
-            "create token token_1772593616 from user {}",
-            test_username()
-        ))?;
+        let mut rs = taos.query("create token token_1772593616 from user user_1772593616")?;
         let mut rows: Vec<String> = rs.deserialize().try_collect()?;
         assert_eq!(rows.len(), 1);
         let token = rows.remove(0);
@@ -1651,6 +1699,7 @@ mod tests {
 
         taos.exec_many([
             "drop token if exists token_1772593616",
+            "drop user if exists user_1772593616",
             "drop topic if exists topic_1772593616",
             "drop database if exists test_1772593616",
         ])?;
@@ -1709,10 +1758,11 @@ mod async_tests {
 
         consumer.subscribe([db]).await?;
 
-        for message in
-            taos_query::tmq::AsConsumer::iter_with_timeout(&consumer, Timeout::from_secs(1))
-        {
-            let (offset, msg) = message?;
+        // Use the async receive path after an async subscribe: mixing in the
+        // synchronous iterator would poll the same handle from two threads
+        // and split the message stream (see `Consumer` docs).
+        let mut stream = consumer.stream_with_timeout(Timeout::from_secs(1));
+        while let Some((offset, msg)) = stream.try_next().await? {
             tracing::debug!("offset: {:?}", offset);
 
             match msg {
@@ -1762,6 +1812,7 @@ mod async_tests {
 
             let _ = consumer.commit(offset).await;
         }
+        drop(stream);
 
         consumer.unsubscribe().await;
 
@@ -3155,7 +3206,6 @@ mod async_tests {
         use crate::{TaosBuilder, TmqBuilder};
         use taos_query::prelude::*;
         use taos_query::tmq::IsAsyncData;
-        use taos_query::util::test_utils::test_username;
         use tokio::sync::{mpsc, oneshot};
 
         let taos = TaosBuilder::from_dsn("taos://localhost:6030")?
@@ -3164,20 +3214,22 @@ mod async_tests {
 
         taos.exec_many([
             "drop token if exists token_1772587050",
+            "drop user if exists user_1772587050",
             "drop topic if exists topic_1772587050",
             "drop database if exists test_1772587050",
             "create database test_1772587050",
             "create topic topic_1772587050 as database test_1772587050",
+            "create user user_1772587050 pass 'token_pass_1'",
+            "grant all on test_1772587050.* to user_1772587050",
+            "grant use on database test_1772587050 to user_1772587050",
+            "grant subscribe on topic test_1772587050.topic_1772587050 to user_1772587050",
             "use test_1772587050",
             "create table t0 (ts timestamp, c1 int)",
         ])
         .await?;
 
         let mut rs = taos
-            .query(format!(
-                "create token token_1772587050 from user {}",
-                test_username()
-            ))
+            .query("create token token_1772587050 from user user_1772587050")
             .await?;
         let mut rows: Vec<String> = rs.deserialize().try_collect().await?;
         assert_eq!(rows.len(), 1);
@@ -3250,6 +3302,7 @@ mod async_tests {
 
         taos.exec_many([
             "drop token if exists token_1772587050",
+            "drop user if exists user_1772587050",
             "drop topic if exists topic_1772587050",
             "drop database if exists test_1772587050",
         ])
@@ -3310,7 +3363,6 @@ mod async_tests {
     async fn test_token_priority() -> anyhow::Result<()> {
         use crate::{TaosBuilder, TmqBuilder};
         use taos_query::prelude::*;
-        use taos_query::util::test_utils::test_username;
 
         let taos = TaosBuilder::from_dsn("taos://localhost:6030")?
             .build()
@@ -3318,18 +3370,20 @@ mod async_tests {
 
         taos.exec_many([
             "drop token if exists token_1772590919",
+            "drop user if exists user_1772590919",
             "drop topic if exists topic_1772590919",
             "drop database if exists test_1772590919",
             "create database test_1772590919",
             "create topic topic_1772590919 as database test_1772590919",
+            "create user user_1772590919 pass 'token_pass_1'",
+            "grant all on test_1772590919.* to user_1772590919",
+            "grant use on database test_1772590919 to user_1772590919",
+            "grant subscribe on topic test_1772590919.topic_1772590919 to user_1772590919",
         ])
         .await?;
 
         let mut rs = taos
-            .query(format!(
-                "create token token_1772590919 from user {}",
-                test_username()
-            ))
+            .query("create token token_1772590919 from user user_1772590919")
             .await?;
         let mut rows: Vec<String> = rs.deserialize().try_collect().await?;
         assert_eq!(rows.len(), 1);
@@ -3374,11 +3428,161 @@ mod async_tests {
 
         taos.exec_many([
             "drop token if exists token_1772590919",
+            "drop user if exists user_1772590919",
             "drop topic if exists topic_1772590919",
             "drop database if exists test_1772590919",
         ])
         .await?;
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod race_tests {
+    //! Mechanism guard for the shared-queue take path: no message may be lost
+    //! when a take times out exactly as a message arrives.
+    //!
+    //! The poll thread (`RawTmq::spawn_thread`) polls on demand and pushes
+    //! each polled message into a shared bounded queue, blocking when the
+    //! queue is full (backpressure); `recv_timeout` (via `poll_with_timeout`)
+    //! takes from the queue with `tokio::time::timeout`. A timeout only
+    //! abandons the *take*: `tokio::time::Timeout` polls the inner future
+    //! first and `flume::Receiver::recv_async` is cancel safe, so a queued
+    //! message survives any number of timed-out takes.
+    //!
+    //! The test drives the arrival timing that used to kill messages: every
+    //! message arrives one `DELTA` after the take deadline, exercising the
+    //! "message arrives as the take times out" window every round. The
+    //! pre-fix per-call-oneshot + `select!` implementation lost messages
+    //! under exactly this timing (~8% per run on a development harness; the
+    //! harness is not reproducible from the committed tree because
+    //! `poll_with_timeout` did not exist pre-fix). This test guards the
+    //! replacement mechanism — bounded-queue backpressure plus flume
+    //! cancel-safety — against regressions such as a flume behavior change.
+
+    use std::collections::HashSet;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{mpsc, Arc, Mutex};
+    use std::time::Duration;
+
+    use taos_query::prelude::RawResult;
+
+    use super::poll_with_timeout;
+
+    /// Take timeout of each receive call. Every message is timed to arrive
+    /// `TIMEOUT + DELTA` after the take starts, i.e. right after the take
+    /// deadline — the window that used to destroy the delivered message.
+    const TIMEOUT: Duration = Duration::from_millis(20);
+    const DELTA: Duration = Duration::from_micros(300);
+    /// Concurrent consumers; their same-deadline takes are fired together
+    /// and then polled over an extended span, reproducing busy-runtime
+    /// conditions.
+    const CONSUMERS: u64 = 64;
+    /// Receive rounds per consumer.
+    const ROUNDS: usize = 20;
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn test_recv_timeout_does_not_lose_delivered_messages() {
+        let produced = Arc::new(Mutex::new(Vec::new()));
+        let received = Arc::new(Mutex::new(Vec::new()));
+        let none_rounds = Arc::new(AtomicUsize::new(0));
+
+        let mut drivers = Vec::new();
+        for c in 0..CONSUMERS {
+            // The shared bounded queue standing in for the poll thread's
+            // message queue.
+            let (msg_sender, msg_receiver) = flume::bounded::<RawResult<u64>>(1);
+            let (go_tx, go_rx) = mpsc::channel::<Duration>();
+            let produced = produced.clone();
+            // Producer standing in for the poll thread: `delay` after each
+            // take starts, push the next message, blocking on the bounded
+            // queue (backpressure) — the arrival timing that used to
+            // trigger the loss.
+            std::thread::spawn(move || {
+                let mut seq = 0u64;
+                while let Ok(delay) = go_rx.recv() {
+                    let id = c * 1_000_000 + seq;
+                    seq += 1;
+                    produced.lock().unwrap().push(id);
+                    std::thread::sleep(delay);
+                    if msg_sender.send(Ok(id)).is_err() {
+                        break;
+                    }
+                }
+            });
+
+            let received = received.clone();
+            let none_rounds = none_rounds.clone();
+            drivers.push(tokio::spawn(async move {
+                let mut mine = 0usize;
+                for _ in 0..ROUNDS {
+                    // Signal the producer to make the message arrive one
+                    // DELTA after this take's deadline.
+                    go_tx.send(TIMEOUT + DELTA).expect("producer gone");
+                    match poll_with_timeout(&msg_receiver, TIMEOUT).await {
+                        Ok(Some(id)) => {
+                            received.lock().unwrap().push(id);
+                            mine += 1;
+                        }
+                        Ok(None) => {
+                            none_rounds.fetch_add(1, Ordering::SeqCst);
+                        }
+                        Err(err) => panic!("poll_with_timeout failed: {err:?}"),
+                    }
+                }
+                drop(go_tx);
+                // Drain until every pushed message has been taken: a
+                // timed-out take must have left the message queued. The
+                // producer may still be sleeping before its last push under
+                // thread oversubscription, so keep taking (with a generous
+                // cap) instead of stopping at the first empty take.
+                let mut empty_takes = 0;
+                while mine < ROUNDS && empty_takes < 100 {
+                    match poll_with_timeout(&msg_receiver, TIMEOUT).await {
+                        Ok(Some(id)) => {
+                            received.lock().unwrap().push(id);
+                            mine += 1;
+                        }
+                        Ok(None) => empty_takes += 1,
+                        Err(_) => break, // producer gone
+                    }
+                }
+                assert_eq!(
+                    mine, ROUNDS,
+                    "consumer {c} received only {mine} of {ROUNDS} messages"
+                );
+            }));
+        }
+        for driver in drivers {
+            driver.await.expect("driver task panicked");
+        }
+
+        let produced = produced.lock().unwrap().clone();
+        let received = received.lock().unwrap().clone();
+        let received_set: HashSet<u64> = received.iter().copied().collect();
+        let mut lost: Vec<u64> = produced
+            .iter()
+            .copied()
+            .filter(|id| !received_set.contains(id))
+            .collect();
+        lost.sort_unstable();
+
+        assert_eq!(
+            received.len(),
+            received_set.len(),
+            "duplicate delivery detected"
+        );
+        assert!(
+            none_rounds.load(Ordering::SeqCst) > 0,
+            "test is vacuous: the take timeout never fired, the race window was not exercised"
+        );
+        assert!(
+            lost.is_empty(),
+            "SILENT MESSAGE LOSS: {} of {} messages were lost. received={}, lost ids: {lost:?}",
+            lost.len(),
+            produced.len(),
+            received.len(),
+        );
     }
 }

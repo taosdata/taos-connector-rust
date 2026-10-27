@@ -1,3 +1,25 @@
+// Copyright (c) 2024 TAOS Data, Inc.
+//
+// SPDX-License-Identifier: MIT
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 use std::collections::HashMap;
 use std::ffi::{c_char, c_int, c_void, CStr, CString};
 use std::ptr;
@@ -748,6 +770,11 @@ unsafe fn commit_sync(tmq: *mut tmq_t, res: *const TAOS_RES) -> TaosResult<()> {
             Ok(_) => Ok(()),
             Err(err) => Err(TaosError::new(err.code(), &err.message())),
         },
+        // NOTE: commit_all() now fails when the poll-response queue is
+        // non-empty or a poll is in flight (undelivered data must not be
+        // committed). This new failure semantic reaches C users calling
+        // tmq_commit_sync(tmq, NULL, ...): they must drain the consumer
+        // until poll returns no message before committing.
         None => match consumer.commit_all() {
             Ok(_) => Ok(()),
             Err(err) => Err(TaosError::new(err.code(), &err.message())),
@@ -3741,10 +3768,15 @@ mod tests {
                 taos,
                 &[
                     "drop token if exists token_1772709156",
+                    "drop user if exists user_1772709156",
                     "drop topic if exists topic_1772709156",
                     "drop database if exists test_1772709156",
                     "create database test_1772709156",
                     "create topic topic_1772709156 as database test_1772709156",
+                    "create user user_1772709156 pass 'token_pass_1'",
+                    "grant all on test_1772709156.* to user_1772709156",
+                    "grant use on database test_1772709156 to user_1772709156",
+                    "grant subscribe on topic test_1772709156.topic_1772709156 to user_1772709156",
                     "use test_1772709156",
                     "create table t0 (ts timestamp, c1 int)",
                     "insert into t0 values (1726803356466, 1)",
@@ -3754,11 +3786,8 @@ mod tests {
                 ],
             );
 
-            let sql = CString::new(format!(
-                "create token token_1772709156 from user {}",
-                test_username()
-            ))
-            .unwrap();
+            let sql =
+                CString::new("create token token_1772709156 from user user_1772709156").unwrap();
             let res = query::taos_query(taos, sql.as_ptr());
             assert!(!res.is_null());
 
@@ -3865,6 +3894,7 @@ mod tests {
                 taos,
                 &[
                     "drop token if exists token_1772709156",
+                    "drop user if exists user_1772709156",
                     "drop topic if exists topic_1772709156",
                     "drop database if exists test_1772709156",
                 ],

@@ -1,5 +1,27 @@
 #![allow(non_snake_case)]
 
+// Copyright (c) 2022 TAOS Data, Inc.
+//
+// SPDX-License-Identifier: MIT
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 use std::borrow::Cow;
 use std::cell::UnsafeCell;
 use std::collections::HashMap;
@@ -29,6 +51,8 @@ use crate::{err_or, Auth};
 mod exec_future;
 mod query_future;
 
+const TSDB_OPTION_CONNECTION_USER_APP: c_int = 3;
+
 lazy_static::lazy_static! {
     static ref RAW_LIBRARIES: Mutex<HashMap<PathBuf, Arc<Library>>> = Mutex::new(HashMap::new());
 }
@@ -42,6 +66,9 @@ pub struct ApiEntry {
     taos_cleanup: unsafe extern "C" fn(),
     taos_get_client_info: unsafe extern "C" fn() -> *const c_char,
     taos_options: unsafe extern "C" fn(option: TSDB_OPTION, arg: *const c_void, ...) -> c_int,
+    taos_options_connection: Option<
+        unsafe extern "C" fn(taos: *mut TAOS, option: c_int, arg: *const c_void, ...) -> c_int,
+    >,
     taos_connect: unsafe extern "C" fn(
         ip: *const c_char,
         user: *const c_char,
@@ -693,6 +720,7 @@ impl ApiEntry {
             );
 
             optional_symbol!(
+                taos_options_connection,
                 taos_connect_totp,
                 taos_connect_token,
                 taos_fetch_block_s,
@@ -874,6 +902,7 @@ impl ApiEntry {
                 taos_cleanup,
                 taos_get_client_info,
                 taos_options,
+                taos_options_connection,
                 taos_connect,
                 taos_connect_totp,
                 taos_connect_token,
@@ -1009,6 +1038,27 @@ impl ApiEntry {
         }
     }
 
+    fn try_set_user_app(&self, taos: *mut TAOS, user_app: &CStr) {
+        let Some(taos_options_connection) = self.taos_options_connection else {
+            tracing::warn!("taos_options_connection is unavailable, ignore user_app option");
+            return;
+        };
+        let code = unsafe {
+            taos_options_connection(
+                taos,
+                TSDB_OPTION_CONNECTION_USER_APP,
+                user_app.as_ptr() as *const c_void,
+            )
+        };
+        if code != 0 {
+            tracing::warn!(
+                code,
+                error = %self.err_str(taos),
+                "ignore failed user_app option"
+            );
+        }
+    }
+
     #[instrument("connect_with_retries", skip(self, auth), fields(host = auth.host().and_then(|s| s.to_str().ok()), user = ?auth.user().and_then(|s| s.to_str().ok())))]
     pub(super) fn connect_with_retries(
         &self,
@@ -1047,6 +1097,9 @@ impl ApiEntry {
                 break Err(err);
             }
             tracing::trace!(cost = ?elapsed, "connected");
+            if let Some(user_app) = auth.user_app() {
+                self.try_set_user_app(ptr, user_app);
+            }
             break Ok(ptr);
         }
     }

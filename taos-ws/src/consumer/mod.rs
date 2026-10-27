@@ -1,7 +1,29 @@
+// Copyright (c) 2022 TAOS Data, Inc.
+//
+// SPDX-License-Identifier: MIT
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 use std::collections::{HashSet, VecDeque};
 use std::fmt::Debug;
 use std::str::FromStr;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -33,6 +55,10 @@ mod messages;
 
 type WsSender = flume::Sender<WsMessage>;
 type WsTmqAgent = Arc<HashMap<ReqId, mpsc::Sender<RawResult<TmqRecvData>>>>;
+
+/// Error produced when the shared poll-response queue is closed, i.e. the
+/// connection task is gone and no poll response can ever arrive.
+const POLL_RES_QUEUE_CLOSED: &str = "tmq poll response channel closed";
 
 #[derive(Debug, Clone)]
 struct WsTmqSender {
@@ -74,6 +100,26 @@ impl WsTmqSender {
         tracing::trace!("tmq send_recv, req_id: 0x{req_id:x}, received data: {data:?}");
 
         data
+    }
+
+    /// Enqueue a command without registering a per-request response waiter.
+    ///
+    /// Used for `Poll` requests only: poll responses are pushed into the
+    /// shared poll-response queue by the connection task, never into a
+    /// per-request channel, so a response can never be destroyed by a
+    /// cancelled wait.
+    async fn send(&self, message: TmqSend) -> RawResult<()> {
+        tracing::trace!("tmq send, sending message: {message:?}");
+
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            self.sender.send_async(WsMessage::Command(message)),
+        )
+        .await
+        .map_err(WsTmqError::from)?
+        .map_err(WsTmqError::from)?;
+
+        Ok(())
     }
 }
 
@@ -463,23 +509,27 @@ impl WsMessageSet {
 }
 
 impl Consumer {
+    /// Poll the next message, waiting at most `timeout`.
+    ///
+    /// The poll request is sent fire-and-forget; its response is pushed into
+    /// the shared poll-response queue by the connection task (`conn::run`) and
+    /// taken here with `flume::Receiver::recv_async`, which is cancel safe.
+    /// A poll that times out only abandons the *take*: the response stays
+    /// queued and is delivered to a later poll, so a racing timeout can never
+    /// destroy a message.
     pub(crate) async fn poll_timeout(
         &self,
         timeout: Duration,
     ) -> RawResult<Option<(Offset, MessageSet<Meta, Data>)>> {
         tracing::trace!("poll_timeout: {timeout:?}");
-        let sleep = tokio::time::sleep(timeout);
-        tokio::pin!(sleep);
-        tokio::select! {
-            biased;
-            message = self.poll(timeout) => {
-                tracing::trace!("poll_timeout message: {message:?}");
-                message
-            }
-            _ = &mut sleep, if !sleep.is_elapsed() => {
-                tracing::trace!("poll_timeout timeout");
+        // `tokio::time::timeout` polls the inner future first, so a response
+        // that is already available is preferred even at the deadline.
+        match tokio::time::timeout(timeout, self.poll(timeout)).await {
+            Err(_) => {
+                tracing::trace!("poll_timeout: timed out");
                 Ok(None)
             }
+            Ok(res) => res,
         }
     }
 
@@ -494,35 +544,39 @@ impl Consumer {
 
         self.auto_commit().await;
 
-        let permit = self
-            .cache_sender
-            .reserve()
-            .await
-            .expect("poll cache channel closed");
-
-        let mut guard = self.cache_reader.lock().await;
-        if !guard.is_empty() {
-            if let Some(Some(data)) = guard.recv().await {
-                tracing::trace!("poll data from cache, data: {data:?}");
-                permit.send(None);
-                return Ok(self.parse_data(data));
-            }
-        } else {
-            let now = now();
-            let last_poll = self.last_poll_time.load(Ordering::Relaxed);
-            if now - last_poll < 60 * 1000 {
-                tracing::trace!("poll data wait cache, now: {now:?}, last poll: {last_poll}");
-                if let Some(Some(data)) = guard.recv().await {
-                    tracing::trace!("poll data wait cache, data: {data:?}");
-                    permit.send(None);
-                    return Ok(self.parse_data(data));
-                }
-            }
-
-            tracing::warn!("poll data lost: no data received from cache for over 60 seconds, possible data loss");
+        // Take a queued poll response first: it may answer a previous poll
+        // request whose response arrived after that poll had timed out.
+        if let Ok(res) = self.poll_res_reader.try_recv() {
+            // The CONN_CLOSED sentinel is queued by terminal cleanup without
+            // a matching request; only a real poll response implies an
+            // outstanding one.
+            let expect_outstanding =
+                !matches!(&res, Err(err) if err.code() == WS_ERROR_NO::CONN_CLOSED.as_code());
+            self.dec_poll_outstanding(expect_outstanding);
+            tracing::trace!("poll response from queue: {res:?}");
+            return Ok(self.parse_data(res?));
         }
 
-        drop(guard);
+        if self.poll_outstanding.load(Ordering::Relaxed) > 0 {
+            if now() - self.last_poll_time.load(Ordering::Relaxed) < 60 * 1000 {
+                // A poll request is still in flight; wait for its response
+                // instead of piling up more requests. The wait itself is
+                // bounded by the caller's timeout in `poll_timeout`.
+                tracing::trace!("poll request in flight, waiting for its response");
+                let res = self
+                    .poll_res_reader
+                    .recv_async()
+                    .await
+                    .map_err(|_| RawError::from_string(POLL_RES_QUEUE_CLOSED))?;
+                self.dec_poll_outstanding(true);
+                tracing::trace!("poll in-flight response: {res:?}");
+                return Ok(self.parse_data(res?));
+            }
+
+            tracing::warn!(
+                "poll data lost: no poll response for over 60 seconds, possible data loss"
+            );
+        }
 
         self.last_poll_time.store(now(), Ordering::Relaxed);
 
@@ -533,12 +587,42 @@ impl Consumer {
         };
 
         let now = tokio::time::Instant::now();
-        let data = self.sender.send_recv(req).await?;
+        // Count the request before it goes on the wire: a concurrent
+        // `commit_all` must never observe an in-flight poll with a zero
+        // outstanding count.
+        self.poll_outstanding.fetch_add(1, Ordering::Relaxed);
+        if let Err(err) = self.sender.send(req).await {
+            self.dec_poll_outstanding(true);
+            return Err(err);
+        }
+
+        let res = self
+            .poll_res_reader
+            .recv_async()
+            .await
+            .map_err(|_| RawError::from_string(POLL_RES_QUEUE_CLOSED))?;
+        self.dec_poll_outstanding(true);
         tracing::trace!(
-            "poll received data: {data:?}, elapsed: {}ms",
+            "poll received response: {res:?}, elapsed: {}ms",
             now.elapsed().as_millis()
         );
-        Ok(self.parse_data(data))
+        Ok(self.parse_data(res?))
+    }
+
+    fn dec_poll_outstanding(&self, expect_outstanding: bool) {
+        let _ = self
+            .poll_outstanding
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |x| {
+                // A queued CONN_CLOSED sentinel is pushed by terminal cleanup
+                // without a matching request, so taking it may legitimately
+                // find the counter at zero; saturating keeps it at zero.
+                // Every other take must match a live request — an underflow
+                // there signals drift.
+                if expect_outstanding {
+                    debug_assert!(x > 0, "poll_outstanding underflow");
+                }
+                Some(x.saturating_sub(1))
+            });
     }
 
     async fn auto_commit(&self) {
@@ -781,11 +865,27 @@ impl AsAsyncConsumer for Consumer {
         }
     }
 
+    /// Commit the current position of all assigned partitions.
+    ///
+    /// Fails when the poll-response queue is not empty ("polling data is in
+    /// queue") or a poll request is still in flight ("poll request in
+    /// flight"): in both cases committing would include positions whose
+    /// messages have not been delivered to the application yet. These errors
+    /// also reach C API users via `tmq_commit_sync(tmq, NULL)`.
     async fn commit_all(&self) -> RawResult<()> {
-        let has_data = { !self.cache_reader.lock().await.is_empty() };
-        if has_data {
+        if !self.poll_res_reader.is_empty() {
             return Err(RawError::from_string(
                 "polling data is in queue, can't commit all",
+            ));
+        }
+
+        // A poll request may still be in flight: its response advances the
+        // server-side position but has not been delivered yet (a timed-out
+        // poll keeps the outstanding count until a later poll takes the
+        // response). Committing now would commit that never-delivered message.
+        if self.poll_outstanding.load(Ordering::Relaxed) > 0 {
+            return Err(RawError::from_string(
+                "poll request in flight, can't commit all",
             ));
         }
 
@@ -1178,8 +1278,14 @@ impl TmqBuilder {
         let (message_tx, message_rx) = flume::bounded(100);
         let (close_tx, close_rx) = watch::channel(false);
 
-        let (poll_cache_tx, poll_cache_rx) = mpsc::channel(8);
-        let _ = poll_cache_tx.send(None).await;
+        // Poll responses are pushed into this queue by the connection task and
+        // taken by `Consumer::poll` with a cancel-safe recv (`recv_async`
+        // cancel safety verified against the flume 0.11.1 implementation; not
+        // a documented guarantee). The queue is unbounded: entries are small
+        // control messages produced at most at the poll/disconnect rate, and a
+        // bounded full queue would block the connection task's serial message
+        // loop, deadlocking the consumer.
+        let (poll_res_sender, poll_res_receiver) = flume::unbounded();
 
         let tmq_sender = WsTmqSender {
             req_id: Arc::new(AtomicU64::new(1)),
@@ -1197,7 +1303,7 @@ impl TmqBuilder {
                 self.info.clone(),
                 ws_stream,
                 tmq_sender.clone(),
-                poll_cache_tx.clone(),
+                poll_res_sender,
                 message_rx,
                 close_rx,
                 self.conf.clone(),
@@ -1227,14 +1333,21 @@ impl TmqBuilder {
             auto_commit_interval_ms,
             auto_commit_offset: (None, Instant::now()),
             message_id: AtomicU64::new(0),
-            cache_sender: poll_cache_tx,
-            cache_reader: Mutex::new(poll_cache_rx),
+            poll_res_reader: poll_res_receiver,
+            poll_outstanding: AtomicUsize::new(0),
             last_poll_time: AtomicU64::new(0),
             tz: self.info.tz,
         })
     }
 }
 
+/// WebSocket TMQ consumer.
+///
+/// All methods take `&self` and the type is `Send + Sync`, but the consumer
+/// is designed for *sequential* use: `poll`/`recv_timeout` and `commit_all`
+/// coordinate through atomics without a lock, so driving them concurrently
+/// from multiple tasks (e.g. via `Arc<Consumer>`) can race the `commit_all`
+/// in-flight guard and is not supported.
 #[derive(Debug)]
 pub struct Consumer {
     conn: WsConnReq,
@@ -1250,8 +1363,8 @@ pub struct Consumer {
     auto_commit_interval_ms: Option<u64>,
     auto_commit_offset: (Option<Offset>, Instant),
     message_id: AtomicU64,
-    cache_sender: mpsc::Sender<Option<TmqRecvData>>,
-    cache_reader: Mutex<mpsc::Receiver<Option<TmqRecvData>>>,
+    poll_res_reader: flume::Receiver<RawResult<TmqRecvData>>,
+    poll_outstanding: AtomicUsize,
     last_poll_time: AtomicU64,
     tz: Option<Tz>,
 }
@@ -1362,7 +1475,7 @@ impl From<WsTmqError> for RawError {
 #[cfg(test)]
 mod tests {
     use std::collections::VecDeque;
-    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
     use std::sync::Arc;
     use std::time::{Duration, Instant};
 
@@ -1419,7 +1532,7 @@ mod tests {
         });
 
         let (close_signal, _) = watch::channel(false);
-        let (cache_sender, cache_reader) = mpsc::channel(1);
+        let (_poll_res_sender, poll_res_reader) = flume::unbounded();
         let auto_commit = tmq_conf.auto_commit == "true";
 
         Consumer {
@@ -1436,10 +1549,38 @@ mod tests {
             auto_commit_interval_ms: None,
             auto_commit_offset: (None, Instant::now()),
             message_id: AtomicU64::new(0),
-            cache_sender,
-            cache_reader: Mutex::new(cache_reader),
+            poll_res_reader,
+            poll_outstanding: AtomicUsize::new(0),
             last_poll_time: AtomicU64::new(0),
             tz: None,
+        }
+    }
+
+    /// `TEST_POLLING_LOST` is process-global: while one test sets it, every
+    /// poll response in this binary is held back 500ms inside conn.rs, which
+    /// breaks timing-sensitive tests running in parallel (e.g.
+    /// `test_commit_all_rejects_undelivered_poll_state`). Tests that set the
+    /// variable or depend on poll-response timing must hold this lock.
+    fn polling_lost_lock() -> &'static tokio::sync::Mutex<()> {
+        static LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
+        LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+    }
+
+    /// RAII guard for `TEST_POLLING_LOST`: sets the variable on creation and
+    /// removes it on drop, so an early return or panic cannot leak the
+    /// process-global 500ms poll-response delay into other tests.
+    struct PollingLostGuard;
+
+    impl PollingLostGuard {
+        fn set() -> Self {
+            unsafe { std::env::set_var("TEST_POLLING_LOST", "1") };
+            Self
+        }
+    }
+
+    impl Drop for PollingLostGuard {
+        fn drop(&mut self) {
+            unsafe { std::env::remove_var("TEST_POLLING_LOST") };
         }
     }
 
@@ -2117,6 +2258,8 @@ mod tests {
     async fn test_ws_tmq_poll_lost() -> anyhow::Result<()> {
         use taos_query::prelude::*;
 
+        let _polling_lost_guard = polling_lost_lock().lock().await;
+
         let _ = tracing_subscriber::fmt()
             .with_file(true)
             .with_line_number(true)
@@ -2207,7 +2350,7 @@ mod tests {
         )?;
         let mut consumer = builder.build_consumer().await?;
         consumer.subscribe(["test_ws_tmq_poll_lost"]).await?;
-        unsafe { std::env::set_var("TEST_POLLING_LOST", "1") };
+        let _polling_lost_env = PollingLostGuard::set();
 
         {
             let sleep = tokio::time::sleep(Duration::from_millis(400));
@@ -3061,6 +3204,435 @@ mod tests {
         Ok(())
     }
 
+    /// Mechanism guard for the shared poll-response queue: every poll response
+    /// must be delivered exactly once and in order, even when it arrives right
+    /// at or just after the client-side poll timeout boundary.
+    ///
+    /// Note: this "response arrives late" scenario was already handled by the
+    /// pre-fix poll_cache fallback, so the test also passes on pre-fix code
+    /// (verified by transplanting it onto the pre-fix snapshot). Its value is
+    /// guarding the new mechanism — flume `recv_async` cancel-safety plus
+    /// FIFO ordering — against regressions (e.g. a flume behavior change or a
+    /// refactor of `poll`).
+    #[tokio::test]
+    async fn test_poll_response_survives_timeout_boundary() -> anyhow::Result<()> {
+        use futures::{SinkExt, StreamExt};
+        use serde_json::json;
+        use std::sync::Arc;
+        use taos_query::prelude::*;
+        use tokio::sync::Mutex as TokioMutex;
+        use warp::Filter;
+
+        let _polling_lost_guard = polling_lost_lock().lock().await;
+
+        const N: u64 = 20;
+        const TIMEOUT_MS: u64 = 100;
+
+        let (shutdown_tx, shutdown_rx) = flume::bounded::<()>(1);
+
+        let routes = warp::path!("rest" / "tmq")
+            .and(warp::ws())
+            .map(|ws: warp::ws::Ws| {
+                ws.on_upgrade(move |ws| async move {
+                    let (tx, mut rx) = ws.split();
+                    let tx = Arc::new(TokioMutex::new(tx));
+                    let mut cnt = 0u64;
+                    while let Some(Ok(msg)) = rx.next().await {
+                        if !msg.is_text() {
+                            continue;
+                        }
+                        let text = msg.to_str().unwrap();
+                        if text.contains("version") {
+                            let data = json!({
+                                "code": 0,
+                                "message": "version message",
+                                "action": "version",
+                                "req_id": 1001,
+                                "version": "3.0"
+                            });
+                            let _ = tx
+                                .lock()
+                                .await
+                                .send(warp::ws::Message::text(data.to_string()))
+                                .await;
+                        } else if text.contains("poll") {
+                            cnt += 1;
+                            let offset = cnt;
+                            let tx = tx.clone();
+                            tokio::spawn(async move {
+                                // Alternate the response delay around the client
+                                // timeout: just before vs. just after the boundary.
+                                let delay = if offset.is_multiple_of(2) {
+                                    TIMEOUT_MS - 20
+                                } else {
+                                    TIMEOUT_MS + 20
+                                };
+                                tokio::time::sleep(Duration::from_millis(delay)).await;
+                                let data = json!({
+                                    "code": 0,
+                                    "message": "",
+                                    "action": "poll",
+                                    "req_id": offset,
+                                    "timing": 1,
+                                    "have_message": true,
+                                    "topic": "topic_boundary",
+                                    "database": "db_boundary",
+                                    "vgroup_id": 2,
+                                    "message_type": 1,
+                                    "message_id": offset,
+                                    "offset": offset
+                                });
+                                let _ = tx
+                                    .lock()
+                                    .await
+                                    .send(warp::ws::Message::text(data.to_string()))
+                                    .await;
+                            });
+                        }
+                    }
+                })
+            });
+
+        let (addr, server) =
+            warp::serve(routes).bind_with_graceful_shutdown(([127, 0, 0, 1], 0), async move {
+                let _ = shutdown_rx.recv_async().await;
+            });
+        let server_handle = tokio::spawn(server);
+
+        let consumer = TmqBuilder::from_dsn(format!("ws://{addr}?group.id=10"))?
+            .build()
+            .await?;
+
+        let timeout = Duration::from_millis(TIMEOUT_MS);
+        let mut offsets = Vec::with_capacity(N as usize);
+        tokio::time::timeout(Duration::from_secs(60), async {
+            while offsets.len() < N as usize {
+                if let Some((offset, _message)) = consumer.poll_timeout(timeout).await? {
+                    offsets.push(offset.offset());
+                }
+            }
+            RawResult::Ok(())
+        })
+        .await??;
+
+        assert_eq!(offsets, (1..=N as i64).collect::<Vec<_>>());
+
+        drop(consumer);
+        let _ = shutdown_tx.send_async(()).await;
+        server_handle.await?;
+
+        Ok(())
+    }
+
+    /// `commit_all` must refuse while a poll response sits in the queue or a
+    /// poll request is in flight: committing then would include positions
+    /// whose messages have not been delivered to the application yet.
+    #[tokio::test]
+    async fn test_commit_all_rejects_undelivered_poll_state() -> anyhow::Result<()> {
+        use futures::{SinkExt, StreamExt};
+        use serde_json::json;
+        use std::sync::atomic::Ordering;
+        use std::sync::Arc;
+        use taos_query::prelude::*;
+        use tokio::sync::Mutex as TokioMutex;
+        use warp::Filter;
+
+        let _polling_lost_guard = polling_lost_lock().lock().await;
+
+        const RESPONSE_DELAY_MS: u64 = 300;
+
+        let (shutdown_tx, shutdown_rx) = flume::bounded::<()>(1);
+
+        let routes = warp::path!("rest" / "tmq")
+            .and(warp::ws())
+            .map(|ws: warp::ws::Ws| {
+                ws.on_upgrade(move |ws| async move {
+                    let (tx, mut rx) = ws.split();
+                    let tx = Arc::new(TokioMutex::new(tx));
+                    let mut cnt = 0u64;
+                    while let Some(Ok(msg)) = rx.next().await {
+                        if !msg.is_text() {
+                            continue;
+                        }
+                        let text = msg.to_str().unwrap();
+                        if text.contains("version") {
+                            let data = json!({
+                                "code": 0,
+                                "message": "version message",
+                                "action": "version",
+                                "req_id": 1001,
+                                "version": "3.0"
+                            });
+                            let _ = tx
+                                .lock()
+                                .await
+                                .send(warp::ws::Message::text(data.to_string()))
+                                .await;
+                        } else if text.contains("poll") {
+                            cnt += 1;
+                            let offset = cnt;
+                            let tx = tx.clone();
+                            tokio::spawn(async move {
+                                tokio::time::sleep(Duration::from_millis(RESPONSE_DELAY_MS)).await;
+                                let data = json!({
+                                    "code": 0,
+                                    "message": "",
+                                    "action": "poll",
+                                    "req_id": offset,
+                                    "timing": 1,
+                                    "have_message": true,
+                                    "topic": "topic_commit_all",
+                                    "database": "db_commit_all",
+                                    "vgroup_id": 2,
+                                    "message_type": 1,
+                                    "message_id": offset,
+                                    "offset": offset
+                                });
+                                let _ = tx
+                                    .lock()
+                                    .await
+                                    .send(warp::ws::Message::text(data.to_string()))
+                                    .await;
+                            });
+                        }
+                    }
+                })
+            });
+
+        let (addr, server) =
+            warp::serve(routes).bind_with_graceful_shutdown(([127, 0, 0, 1], 0), async move {
+                let _ = shutdown_rx.recv_async().await;
+            });
+        let server_handle = tokio::spawn(server);
+
+        let consumer = TmqBuilder::from_dsn(format!("ws://{addr}?group.id=10"))?
+            .build()
+            .await?;
+
+        // The take times out long before the response arrives; the response
+        // then lands in the poll-response queue.
+        assert!(consumer
+            .poll_timeout(Duration::from_millis(50))
+            .await?
+            .is_none());
+        tokio::time::sleep(Duration::from_millis(RESPONSE_DELAY_MS + 150)).await;
+
+        let err = consumer.commit_all().await.unwrap_err();
+        assert!(
+            err.to_string().contains("polling data is in queue"),
+            "queued response should block commit_all, got: {err}"
+        );
+
+        // Drain the queued response; the outstanding count returns to zero.
+        assert!(consumer
+            .poll_timeout(Duration::from_millis(50))
+            .await?
+            .is_some());
+
+        consumer.poll_outstanding.store(1, Ordering::Relaxed);
+        let err = consumer.commit_all().await.unwrap_err();
+        assert!(
+            err.to_string().contains("poll request in flight"),
+            "in-flight poll should block commit_all, got: {err}"
+        );
+        consumer.poll_outstanding.store(0, Ordering::Relaxed);
+
+        drop(consumer);
+        let _ = shutdown_tx.send_async(()).await;
+        server_handle.await?;
+
+        Ok(())
+    }
+
+    /// Regression guard: terminal cleanup pushes a CONN_CLOSED sentinel into
+    /// the poll-response queue even when no poll is in flight, so taking it
+    /// finds `poll_outstanding` at zero. The take must stay saturating and
+    /// surface the sentinel error instead of tripping the underflow assert.
+    #[tokio::test]
+    async fn test_poll_takes_queued_sentinel_with_zero_outstanding() -> anyhow::Result<()> {
+        use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+        use std::sync::Arc;
+        use std::time::Instant;
+
+        use dashmap::DashMap;
+        use taos_query::prelude::RawError;
+        use taos_query::tmq::Timeout;
+        use tokio::sync::{watch, RwLock};
+
+        use crate::consumer::messages::TmqInit;
+        use crate::consumer::{Consumer, WsTmqSender};
+        use crate::query::asyn::WS_ERROR_NO;
+        use crate::query::messages::WsConnReq;
+        use crate::TaosBuilder;
+
+        let (ws_sender, _ws_receiver) = flume::unbounded();
+        let (poll_res_sender, poll_res_reader) = flume::unbounded();
+        // No poll is in flight, as after a terminal disconnect while idle:
+        // the sentinel is queued with a zero outstanding count.
+        poll_res_sender
+            .send(Err(RawError::new(
+                WS_ERROR_NO::CONN_CLOSED.as_code(),
+                "WebSocket connection is closed",
+            )))
+            .unwrap();
+
+        let consumer = Consumer {
+            conn: WsConnReq::default(),
+            builder: TaosBuilder::from_dsn("ws://localhost:6041")?,
+            conn_id: 0,
+            tmq_conf: TmqInit::default(),
+            sender: WsTmqSender {
+                req_id: Arc::new(AtomicU64::new(1)),
+                sender: ws_sender,
+                queries: Arc::new(DashMap::new()),
+            },
+            close_signal: watch::channel(false).0,
+            timeout: Timeout::Duration(Duration::from_secs(1)),
+            topics: Arc::new(RwLock::new(Vec::new())),
+            support_fetch_raw: Arc::new(AtomicBool::new(false)),
+            auto_commit: false,
+            auto_commit_interval_ms: None,
+            auto_commit_offset: (None, Instant::now()),
+            message_id: AtomicU64::new(0),
+            poll_res_reader,
+            poll_outstanding: AtomicUsize::new(0),
+            last_poll_time: AtomicU64::new(0),
+            tz: None,
+        };
+
+        let res = consumer.poll_timeout(Duration::from_millis(100)).await;
+        let err = res
+            .err()
+            .expect("poll must surface the queued CONN_CLOSED sentinel");
+        assert!(
+            err.to_string().contains("WebSocket connection is closed"),
+            "expected the sentinel error, got: {err}"
+        );
+        assert_eq!(
+            consumer.poll_outstanding.load(Ordering::Relaxed),
+            0,
+            "sentinel take must leave the counter saturated at zero"
+        );
+
+        Ok(())
+    }
+
+    /// Mechanism guard: with `TEST_POLLING_LOST` delaying every poll response
+    /// 500ms past the take deadline, every response must still be delivered
+    /// exactly once and in order — a timed-out take only abandons the take,
+    /// never the queued response.
+    ///
+    /// Note: the pre-fix poll_cache fallback also survived this scenario, so
+    /// the test is green on pre-fix code too; like
+    /// `test_poll_response_survives_timeout_boundary` it guards the shared
+    /// queue mechanism rather than reproducing the original bug.
+    #[tokio::test]
+    async fn test_poll_response_survives_injected_delivery_delay() -> anyhow::Result<()> {
+        use futures::{SinkExt, StreamExt};
+        use serde_json::json;
+        use std::sync::Arc;
+        use taos_query::prelude::*;
+        use tokio::sync::Mutex as TokioMutex;
+        use warp::Filter;
+
+        let _polling_lost_guard = polling_lost_lock().lock().await;
+
+        const N: u64 = 8;
+
+        let (shutdown_tx, shutdown_rx) = flume::bounded::<()>(1);
+
+        let routes = warp::path!("rest" / "tmq")
+            .and(warp::ws())
+            .map(|ws: warp::ws::Ws| {
+                ws.on_upgrade(move |ws| async move {
+                    let (tx, mut rx) = ws.split();
+                    let tx = Arc::new(TokioMutex::new(tx));
+                    let mut cnt = 0u64;
+                    while let Some(Ok(msg)) = rx.next().await {
+                        if !msg.is_text() {
+                            continue;
+                        }
+                        let text = msg.to_str().unwrap();
+                        if text.contains("version") {
+                            let data = json!({
+                                "code": 0,
+                                "message": "version message",
+                                "action": "version",
+                                "req_id": 1001,
+                                "version": "3.0"
+                            });
+                            let _ = tx
+                                .lock()
+                                .await
+                                .send(warp::ws::Message::text(data.to_string()))
+                                .await;
+                        } else if text.contains("poll") {
+                            cnt += 1;
+                            let offset = cnt;
+                            let tx = tx.clone();
+                            tokio::spawn(async move {
+                                let data = json!({
+                                    "code": 0,
+                                    "message": "",
+                                    "action": "poll",
+                                    "req_id": offset,
+                                    "timing": 1,
+                                    "have_message": true,
+                                    "topic": "topic_delay",
+                                    "database": "db_delay",
+                                    "vgroup_id": 2,
+                                    "message_type": 1,
+                                    "message_id": offset,
+                                    "offset": offset
+                                });
+                                let _ = tx
+                                    .lock()
+                                    .await
+                                    .send(warp::ws::Message::text(data.to_string()))
+                                    .await;
+                            });
+                        }
+                    }
+                })
+            });
+
+        let (addr, server) =
+            warp::serve(routes).bind_with_graceful_shutdown(([127, 0, 0, 1], 0), async move {
+                let _ = shutdown_rx.recv_async().await;
+            });
+        let server_handle = tokio::spawn(server);
+
+        let consumer = TmqBuilder::from_dsn(format!("ws://{addr}?group.id=10"))?
+            .build()
+            .await?;
+
+        // Every poll response is held back for 500ms inside conn.rs before it
+        // reaches the queue, while each take gives up after 150ms.
+        let _polling_lost_env = PollingLostGuard::set();
+
+        let timeout = Duration::from_millis(150);
+        let mut offsets = Vec::with_capacity(N as usize);
+        let collected = tokio::time::timeout(Duration::from_secs(30), async {
+            while offsets.len() < N as usize {
+                if let Some((offset, _message)) = consumer.poll_timeout(timeout).await? {
+                    offsets.push(offset.offset());
+                }
+            }
+            RawResult::Ok(())
+        })
+        .await;
+
+        collected??;
+
+        assert_eq!(offsets, (1..=N as i64).collect::<Vec<_>>());
+
+        drop(consumer);
+        let _ = shutdown_tx.send_async(()).await;
+        server_handle.await?;
+
+        Ok(())
+    }
+
     #[cfg(feature = "test-new-feat")]
     #[tokio::test]
     async fn test_poll_blob() -> anyhow::Result<()> {
@@ -3336,7 +3908,6 @@ mod tests {
     #[tokio::test]
     async fn test_connect_with_td_connect_token() -> anyhow::Result<()> {
         use taos_query::prelude::*;
-        use taos_query::util::test_utils::test_username;
 
         let taos = TaosBuilder::from_dsn("ws://localhost:6041")?
             .build()
@@ -3344,20 +3915,22 @@ mod tests {
 
         taos.exec_many([
             "drop token if exists token_1772264645",
+            "drop user if exists user_1772264645",
             "drop topic if exists topic_1772264645",
             "drop database if exists test_1772264645",
             "create database test_1772264645",
             "create topic topic_1772264645 as database test_1772264645",
+            "create user user_1772264645 pass 'token_pass_1'",
+            "grant all on test_1772264645.* to user_1772264645",
+            "grant use on database test_1772264645 to user_1772264645",
+            "grant subscribe on topic test_1772264645.topic_1772264645 to user_1772264645",
             "use test_1772264645",
             "create table t0 (ts timestamp, c1 int)",
         ])
         .await?;
 
         let mut rs = taos
-            .query(format!(
-                "create token token_1772264645 from user {}",
-                test_username()
-            ))
+            .query("create token token_1772264645 from user user_1772264645")
             .await?;
         let mut rows: Vec<String> = rs.deserialize().try_collect().await?;
         assert_eq!(rows.len(), 1);
@@ -3430,6 +4003,7 @@ mod tests {
 
         taos.exec_many([
             "drop token if exists token_1772264645",
+            "drop user if exists user_1772264645",
             "drop topic if exists topic_1772264645",
             "drop database if exists test_1772264645",
         ])
@@ -3442,7 +4016,6 @@ mod tests {
     #[tokio::test]
     async fn test_connect_with_bearer_token() -> anyhow::Result<()> {
         use taos_query::prelude::*;
-        use taos_query::util::test_utils::test_username;
 
         let taos = TaosBuilder::from_dsn("ws://localhost:6041")?
             .build()
@@ -3450,20 +4023,22 @@ mod tests {
 
         taos.exec_many([
             "drop token if exists token_1772505637",
+            "drop user if exists user_1772505637",
             "drop topic if exists topic_1772505637",
             "drop database if exists test_1772505637",
             "create database test_1772505637",
             "create topic topic_1772505637 as database test_1772505637",
+            "create user user_1772505637 pass 'token_pass_1'",
+            "grant all on test_1772505637.* to user_1772505637",
+            "grant use on database test_1772505637 to user_1772505637",
+            "grant subscribe on topic test_1772505637.topic_1772505637 to user_1772505637",
             "use test_1772505637",
             "create table t0 (ts timestamp, c1 int)",
         ])
         .await?;
 
         let mut rs = taos
-            .query(format!(
-                "create token token_1772505637 from user {}",
-                test_username()
-            ))
+            .query("create token token_1772505637 from user user_1772505637")
             .await?;
         let mut rows: Vec<String> = rs.deserialize().try_collect().await?;
         assert_eq!(rows.len(), 1);
@@ -3536,6 +4111,7 @@ mod tests {
 
         taos.exec_many([
             "drop token if exists token_1772505637",
+            "drop user if exists user_1772505637",
             "drop topic if exists topic_1772505637",
             "drop database if exists test_1772505637",
         ])
@@ -3599,7 +4175,6 @@ mod tests {
     #[tokio::test]
     async fn test_token_priority() -> anyhow::Result<()> {
         use taos_query::prelude::*;
-        use taos_query::util::test_utils::test_username;
 
         let taos = TaosBuilder::from_dsn("ws://localhost:6041")?
             .build()
@@ -3607,20 +4182,22 @@ mod tests {
 
         taos.exec_many([
             "drop token if exists token_1772595214",
+            "drop user if exists user_1772595214",
             "drop topic if exists topic_1772595214",
             "drop database if exists test_1772595214",
             "create database test_1772595214",
             "create topic topic_1772595214 as database test_1772595214",
+            "create user user_1772595214 pass 'token_pass_1'",
+            "grant all on test_1772595214.* to user_1772595214",
+            "grant use on database test_1772595214 to user_1772595214",
+            "grant subscribe on topic test_1772595214.topic_1772595214 to user_1772595214",
             "use test_1772595214",
             "create table t0 (ts timestamp, c1 int)",
         ])
         .await?;
 
         let mut rs = taos
-            .query(format!(
-                "create token token_1772595214 from user {}",
-                test_username()
-            ))
+            .query("create token token_1772595214 from user user_1772595214")
             .await?;
         let mut rows: Vec<String> = rs.deserialize().try_collect().await?;
         assert_eq!(rows.len(), 1);
@@ -3651,6 +4228,7 @@ mod tests {
 
         taos.exec_many([
             "drop token if exists token_1772595214",
+            "drop user if exists user_1772595214",
             "drop topic if exists topic_1772595214",
             "drop database if exists test_1772595214",
         ])

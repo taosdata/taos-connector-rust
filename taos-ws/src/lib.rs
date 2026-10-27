@@ -1,5 +1,27 @@
 #![recursion_limit = "256"]
 
+// Copyright (c) 2022 TAOS Data, Inc.
+//
+// SPDX-License-Identifier: MIT
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 use std::cmp;
 use std::collections::HashSet;
 use std::fmt::{Debug, Display};
@@ -72,6 +94,10 @@ const CONNECTOR_INFO: &str = concat!(
     "-",
     env!("GIT_COMMIT_ID")
 );
+const WS_PATH: &str = "ws";
+const QUERY_PATH: &str = "rest/ws";
+const STMT_PATH: &str = "rest/stmt";
+const TMQ_PATH: &str = "rest/tmq";
 
 #[derive(Debug, Clone)]
 pub enum WsAuth {
@@ -138,6 +164,7 @@ pub struct TaosBuilder {
     https: Arc<AtomicBool>,
     addrs: Arc<RwLock<Vec<String>>>,
     adapter_ha: bool,
+    registry_version: Arc<AtomicUsize>,
     instances_fetched: Arc<AtomicBool>,
     current_addr_index: Arc<AtomicUsize>,
     auth: WsAuth,
@@ -510,10 +537,14 @@ impl TaosBuilder {
             addrs.push("localhost:6041".to_string());
         }
 
-        if adapter_ha {
+        let registry_version = if adapter_ha {
             let registry = cluster::ClusterRegistry::global();
-            addrs = registry.expand_endpoints(&addrs);
-        }
+            let (version, expanded) = registry.expand_endpoints_with_version(&addrs);
+            addrs = expanded;
+            version
+        } else {
+            0
+        };
 
         addrs.shuffle(&mut rand::rng());
         let addrs = Arc::new(RwLock::new(addrs));
@@ -641,6 +672,7 @@ impl TaosBuilder {
             https,
             addrs,
             adapter_ha,
+            registry_version: Arc::new(AtomicUsize::new(registry_version)),
             instances_fetched: Arc::new(AtomicBool::new(false)),
             auth,
             database: dsn.subject,
@@ -662,6 +694,48 @@ impl TaosBuilder {
             totp_code,
             bearer_token,
         })
+    }
+
+    fn ha_connect_addrs(&self) -> Option<Vec<String>> {
+        if !self.adapter_ha {
+            return None;
+        }
+
+        let registry = cluster::ClusterRegistry::global();
+        let known_version = self.registry_version.load(Ordering::Acquire);
+        if registry.version() != known_version {
+            let current_addrs = self.addrs.read().unwrap().clone();
+            if let Some((version, expanded)) =
+                registry.expand_endpoints_if_changed(&current_addrs, known_version)
+            {
+                self.merge_addrs(&expanded);
+                self.registry_version.store(version, Ordering::Release);
+                return Some(expanded);
+            }
+        }
+
+        Some(self.addrs.read().unwrap().clone())
+    }
+
+    fn refresh_ha_state(
+        &self,
+        ha_state: &mut Option<(Vec<String>, usize)>,
+        addrs_len: &mut usize,
+        known_registry_version: &mut usize,
+    ) {
+        let registry = cluster::ClusterRegistry::global();
+        let current_version = registry.version();
+        if *known_registry_version == current_version {
+            return;
+        }
+
+        if let Some(addrs) = self.ha_connect_addrs() {
+            *addrs_len = addrs.len();
+            if let Some((state_addrs, _)) = ha_state {
+                *state_addrs = addrs;
+            }
+        }
+        *known_registry_version = current_version;
     }
 
     pub(crate) async fn connect(&self) -> RawResult<(WsStream, Version)> {
@@ -696,6 +770,22 @@ impl TaosBuilder {
     where
         F: for<'a> Fn(&'a mut WsStream) -> WsConnectCallbackFuture<'a>,
     {
+        let mut ha_registry_version = cluster::ClusterRegistry::global().version();
+        let mut ha_state = self.ha_connect_addrs().map(|addrs| {
+            let addrs_len = addrs.len();
+            let random_idx = random_addr_index(&mut rand::rng(), addrs_len);
+            tracing::trace!(
+                "adapter HA load balancing: starting with index {} of {} addresses",
+                random_idx,
+                addrs_len
+            );
+            (addrs, random_idx)
+        });
+        let mut addrs_len = ha_state.as_ref().map_or_else(
+            || self.addrs.read().unwrap().len(),
+            |(addrs, _)| addrs.len(),
+        );
+
         let mut config = WebSocketConfig::default();
         config.max_frame_size = None;
         config.max_message_size = None;
@@ -713,9 +803,15 @@ impl TaosBuilder {
         let mut last_err = None;
         let connector = self.build_tls_connector()?;
 
-        let addrs_len = self.addrs.read().unwrap().len();
-        for _ in 0..addrs_len {
-            let mut url = self.to_url(ty);
+        // HA deliberately applies the full retry budget to every endpoint learned for this
+        // process-wide cluster, prioritizing availability over a fixed worst-case failover time.
+        let mut attempted_addrs = 0;
+        while attempted_addrs < addrs_len {
+            let connect_addr = ha_state
+                .as_ref()
+                .map(|(addrs, addr_index)| addrs[*addr_index].as_str());
+            let format_connect_url = |path| self.format_url(path, connect_addr);
+            let mut url = format_connect_url(endpoint_path(ty));
             for i in 0..=self.retry_policy.retries {
                 tracing::trace!("connecting to TDengine WebSocket server, url: {url}");
                 match connect_async_tls_with_config(
@@ -792,11 +888,7 @@ impl TaosBuilder {
                             continue;
                         } else if matches!(&err, WsError::Http(resp) if resp.status() == 400 || resp.status() == 404)
                         {
-                            url = match ty {
-                                EndpointType::Ws => self.to_query_url(),
-                                EndpointType::Stmt => self.to_stmt_url(),
-                                EndpointType::Tmq => self.to_tmq_url(),
-                            };
+                            url = format_connect_url(fallback_path(ty));
                             last_err = Some(QueryError::from(err).into());
                             continue;
                         } else if matches!(&err, WsError::Http(resp) if resp.status() == 401) {
@@ -820,9 +912,18 @@ impl TaosBuilder {
                 tokio::time::sleep(Duration::from_millis(delay)).await;
             }
 
-            let cur_idx = self.current_addr_index.load(Ordering::Relaxed);
-            let next_idx = (cur_idx + 1) % addrs_len;
-            self.current_addr_index.store(next_idx, Ordering::Relaxed);
+            attempted_addrs += 1;
+            if ha_state.is_some() {
+                self.refresh_ha_state(&mut ha_state, &mut addrs_len, &mut ha_registry_version);
+
+                if let Some((_, addr_index)) = &mut ha_state {
+                    *addr_index = (*addr_index + 1) % addrs_len;
+                }
+            } else {
+                let cur_idx = self.current_addr_index.load(Ordering::Relaxed);
+                let next_idx = (cur_idx + 1) % addrs_len;
+                self.current_addr_index.store(next_idx, Ordering::Relaxed);
+            }
         }
 
         tracing::error!(
@@ -1034,15 +1135,20 @@ impl TaosBuilder {
             return;
         }
 
-        cluster::ClusterRegistry::global().update_cluster(&valid);
+        let version = cluster::ClusterRegistry::global().update_cluster(&valid);
+        if self.merge_addrs(&valid) {
+            self.registry_version.store(version, Ordering::Release);
+        }
+    }
 
+    fn merge_addrs(&self, candidates: &[String]) -> bool {
         let mut addrs = self.addrs.write().unwrap();
         let new_instances: Vec<String> = {
-            let existing: HashSet<&str> = addrs.iter().map(String::as_str).collect();
-            let mut seen = HashSet::new();
-            valid
-                .into_iter()
-                .filter(|s| !existing.contains(s.as_str()) && seen.insert(s.clone()))
+            let mut seen: HashSet<&str> = addrs.iter().map(String::as_str).collect();
+            candidates
+                .iter()
+                .filter(|addr| seen.insert(addr.as_str()))
+                .cloned()
                 .collect()
         };
 
@@ -1053,6 +1159,9 @@ impl TaosBuilder {
                 new_instances
             );
             addrs.extend(new_instances);
+            true
+        } else {
+            false
         }
     }
 
@@ -1081,36 +1190,17 @@ impl TaosBuilder {
         }
     }
 
-    #[inline]
-    pub(crate) fn to_url(&self, ty: EndpointType) -> String {
-        match ty {
-            EndpointType::Tmq => self.to_tmq_url(),
-            _ => self.to_ws_url(),
+    fn format_url(&self, path: &str, addr: Option<&str>) -> String {
+        match addr {
+            Some(addr) => self.format_url_with_addr(path, addr),
+            None => {
+                let addr = self.active_addr();
+                self.format_url_with_addr(path, &addr)
+            }
         }
     }
 
-    #[inline]
-    pub(crate) fn to_ws_url(&self) -> String {
-        self.format_url("ws")
-    }
-
-    #[inline]
-    pub(crate) fn to_query_url(&self) -> String {
-        self.format_url("rest/ws")
-    }
-
-    #[inline]
-    pub(crate) fn to_stmt_url(&self) -> String {
-        self.format_url("rest/stmt")
-    }
-
-    #[inline]
-    pub(crate) fn to_tmq_url(&self) -> String {
-        self.format_url("rest/tmq")
-    }
-
-    fn format_url(&self, path: &str) -> String {
-        let addr = self.active_addr();
+    fn format_url_with_addr(&self, path: &str, addr: &str) -> String {
         match &self.auth {
             WsAuth::Token(token) => {
                 format!("{}://{}/{}?token={}", self.scheme(), addr, path, token)
@@ -1126,6 +1216,29 @@ impl TaosBuilder {
         let addrs = self.addrs.read().unwrap();
         let cur_addr_idx = self.current_addr_index.load(Ordering::Relaxed) % addrs.len();
         addrs[cur_addr_idx].clone()
+    }
+}
+
+fn endpoint_path(ty: EndpointType) -> &'static str {
+    match ty {
+        EndpointType::Tmq => TMQ_PATH,
+        _ => WS_PATH,
+    }
+}
+
+fn fallback_path(ty: EndpointType) -> &'static str {
+    match ty {
+        EndpointType::Ws => QUERY_PATH,
+        EndpointType::Stmt => STMT_PATH,
+        EndpointType::Tmq => TMQ_PATH,
+    }
+}
+
+fn random_addr_index<R: Rng + ?Sized>(rng: &mut R, addrs_len: usize) -> usize {
+    if addrs_len > 1 {
+        rng.random_range(0..addrs_len)
+    } else {
+        0
     }
 }
 
@@ -1527,6 +1640,25 @@ mod tests {
     }
 
     #[test]
+    fn test_adapter_ha_merge_instances_updates_cached_registry_version() -> Result<(), anyhow::Error>
+    {
+        let registry = ClusterRegistry::global();
+        let builder =
+            TaosBuilder::from_dsn("ws://ha-builder-version-a.example:6041?adapter_ha=true")?;
+        let initial_version = builder.registry_version.load(Ordering::Acquire);
+
+        builder.merge_instances(vec![
+            "ha-builder-version-a.example:6041".to_string(),
+            "ha-builder-version-b.example:6041".to_string(),
+        ]);
+
+        assert!(builder.registry_version.load(Ordering::Acquire) > initial_version);
+        assert!(registry.version() >= builder.registry_version.load(Ordering::Acquire));
+
+        Ok(())
+    }
+
+    #[test]
     fn test_adapter_ha_merge_instances_uses_discovered_instances_without_active_addr_anchor(
     ) -> Result<(), anyhow::Error> {
         let builder =
@@ -1576,10 +1708,12 @@ mod tests {
         assert!(addrs.contains(&"ha-builder-degrade-real-a.example:6041".to_string()));
         assert!(addrs.contains(&"ha-builder-degrade-real-b.example:6041".to_string()));
         assert_eq!(
-            registry.expand_endpoints(&[
-                "ha-builder-degrade-dead.example:6041".to_string(),
-                "ha-builder-degrade-real-a.example:6041".to_string()
-            ]),
+            registry
+                .expand_endpoints_with_version(&[
+                    "ha-builder-degrade-dead.example:6041".to_string(),
+                    "ha-builder-degrade-real-a.example:6041".to_string()
+                ])
+                .1,
             [
                 "ha-builder-degrade-dead.example:6041".to_string(),
                 "ha-builder-degrade-real-a.example:6041".to_string(),
@@ -1683,8 +1817,9 @@ mod tests {
             discovered_addrs
         };
         let registry_seed = registry_expected[0].clone();
-        let registry_addrs =
-            ClusterRegistry::global().expand_endpoints(std::slice::from_ref(&registry_seed));
+        let registry_addrs = ClusterRegistry::global()
+            .expand_endpoints_with_version(std::slice::from_ref(&registry_seed))
+            .1;
         for addr in &registry_expected {
             assert!(registry_addrs.contains(addr));
         }
@@ -1701,6 +1836,94 @@ mod tests {
         assert_eq!(addrs_after_second, addrs_after_first);
 
         Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_adapter_ha_connect_refreshes_addresses_without_mutating_shared_index(
+    ) -> Result<(), anyhow::Error> {
+        let builder = TaosBuilder::from_dsn(
+            "ws://192.0.2.1:6041?adapter_ha=true&conn_retries=0&retry_backoff_ms=0&retry_backoff_max_ms=0",
+        )?;
+        let registry = ClusterRegistry::global();
+        registry.update_cluster(&[
+            "192.0.2.1:6041".to_string(),
+            "192.0.2.2:6041".to_string(),
+            "192.0.2.3:6041".to_string(),
+        ]);
+        builder
+            .current_addr_index
+            .store(usize::MAX, Ordering::Relaxed);
+
+        let _ = tokio::time::timeout(
+            Duration::from_millis(50),
+            builder.connect_with_ty(EndpointType::Stmt),
+        )
+        .await;
+
+        let addrs = builder.addrs.read().unwrap().clone();
+        assert_eq!(addrs.len(), 3);
+        assert!(addrs.contains(&"192.0.2.1:6041".to_string()));
+        assert!(addrs.contains(&"192.0.2.2:6041".to_string()));
+        assert!(addrs.contains(&"192.0.2.3:6041".to_string()));
+        assert_eq!(
+            builder.current_addr_index.load(Ordering::Relaxed),
+            usize::MAX
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_adapter_ha_refreshes_failover_snapshot_after_registry_update(
+    ) -> Result<(), anyhow::Error> {
+        let dead_addr = "ha-refresh-dead.example:6041".to_string();
+        let live_addr = "ha-refresh-live.example:6041".to_string();
+        let builder = TaosBuilder::from_dsn(format!(
+            "ws://{dead_addr}?adapter_ha=true&conn_retries=0&retry_backoff_ms=0&retry_backoff_max_ms=0"
+        ))?;
+        let registry = ClusterRegistry::global();
+        let mut ha_state = Some((vec![dead_addr.clone()], 0));
+        let mut addrs_len = 1;
+        let mut known_registry_version = registry.version();
+
+        registry.update_cluster(&[dead_addr, live_addr.clone()]);
+        builder.refresh_ha_state(&mut ha_state, &mut addrs_len, &mut known_registry_version);
+
+        assert_eq!(addrs_len, 2);
+        assert!(ha_state.unwrap().0.contains(&live_addr));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_adapter_ha_merge_does_not_hide_concurrent_registry_update() -> Result<(), anyhow::Error>
+    {
+        let registry = ClusterRegistry::global();
+        registry.update_cluster(&["ha-race-a.example:6041".to_string()]);
+        let builder = TaosBuilder::from_dsn("ws://ha-race-a.example:6041?adapter_ha=true")?;
+
+        registry.update_cluster(&[
+            "ha-race-a.example:6041".to_string(),
+            "ha-race-b.example:6041".to_string(),
+        ]);
+        builder.merge_instances(vec!["ha-race-a.example:6041".to_string()]);
+
+        let snapshot = builder.ha_connect_addrs().unwrap();
+        assert!(snapshot.contains(&"ha-race-b.example:6041".to_string()));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_adapter_ha_random_start_index_covers_full_address_snapshot() {
+        use rand::rngs::StdRng;
+        use rand::SeedableRng;
+
+        let mut rng = StdRng::seed_from_u64(0x1945);
+        let selected: HashSet<_> = (0..128).map(|_| random_addr_index(&mut rng, 4)).collect();
+
+        assert_eq!(selected, HashSet::from([0, 1, 2, 3]));
+        assert_eq!(random_addr_index(&mut rng, 1), 0);
     }
 
     #[test]
@@ -1864,7 +2087,7 @@ mod tests {
             .with_max_level(tracing::Level::ERROR)
             .try_init();
 
-        let routes = warp::path("ws")
+        let routes = warp::path(WS_PATH)
             .and(warp::ws())
             .map(move |ws: warp::ws::Ws| {
                 ws.on_upgrade(move |ws| async move {
@@ -1931,7 +2154,7 @@ mod tests {
             .with_max_level(tracing::Level::ERROR)
             .try_init();
 
-        let routes = warp::path("ws")
+        let routes = warp::path(WS_PATH)
             .and(warp::ws())
             .map(move |ws: warp::ws::Ws| {
                 ws.on_upgrade(move |ws| async move {
@@ -1996,7 +2219,7 @@ mod tests {
             .with_max_level(tracing::Level::ERROR)
             .try_init();
 
-        let routes = warp::path("ws")
+        let routes = warp::path(WS_PATH)
             .and(warp::ws())
             .map(move |ws: warp::ws::Ws| {
                 ws.on_upgrade(move |ws| async move {

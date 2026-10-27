@@ -1,3 +1,25 @@
+// Copyright (c) 2023 TAOS Data, Inc.
+//
+// SPDX-License-Identifier: MIT
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 /// Constant error string from both version 2.x and 3.x of libtaos
 #[allow(clippy::match_same_arms)]
 pub const fn error_str_of(code: u32) -> Option<&'static str> {
@@ -27,7 +49,7 @@ pub const fn error_str_of(code: u32) -> Option<&'static str> {
         0x0017 => Some("Shortcut (port already in use)"),
         0x0018 => Some("Conn is broken"),
         0x0019 => Some("Conn read timeout"),
-        0x0020 => Some("some vnode/qnode/mnode(s) out of service"),
+        0x0020 => Some("Some vnode/qnode/mnode(s) are out of service"),
         0x0022 => Some("rpc open too many session"),
         0x0100 => Some("Operation not supported"),
         0x0101 => Some("Memory corrupted"),
@@ -35,7 +57,7 @@ pub const fn error_str_of(code: u32) -> Option<&'static str> {
         0x0103 => Some("Invalid config message"),
         0x0104 => Some("Data file corrupted"),
         0x0105 => Some("Ref out of memory"),
-        0x0106 => Some("too many Ref Objs"),
+        0x0106 => Some("Too many reference objects"),
         0x0107 => Some("Ref ID is removed"),
         0x0108 => Some("Invalid Ref ID"),
         0x0109 => Some("Ref is already there"),
@@ -44,7 +66,7 @@ pub const fn error_str_of(code: u32) -> Option<&'static str> {
         0x0111 => Some("Action in progress"),
         0x0112 => Some("Out of range"),
         0x0115 => Some("Invalid message"),
-        0x0116 => Some("Invalid message len"),
+        0x0116 => Some("Invalid message length"),
         0x0117 => Some("Invalid pointer"),
         0x0118 => Some("Invalid parameters"),
         0x0119 => Some("Invalid config option"),
@@ -54,7 +76,7 @@ pub const fn error_str_of(code: u32) -> Option<&'static str> {
         0x011D => Some("Invalid version string"),
         0x011E => Some("Version not compatible"),
         0x011F => Some("Checksum error"),
-        0x0120 => Some("Failed to compress msg"),
+        0x0120 => Some("Failed to compress message"),
         0x0121 => Some("Message not processed"),
         0x0122 => Some("Config not found"),
         0x0123 => Some("Repeat initialization"),
@@ -62,12 +84,12 @@ pub const fn error_str_of(code: u32) -> Option<&'static str> {
         0x0125 => Some("Retry needed"),
         0x0126 => Some("Out of memory in rpc queue"),
         0x0127 => Some("Invalid timestamp format"),
-        0x0128 => Some("Msg decode error"),
+        0x0128 => Some("Message decode error"),
         0x0129 => Some("No available disk"),
         0x012A => Some("Not found"),
         0x012B => Some("Out of disk space"),
         0x012C => Some("Operation timeout"),
-        0x012D => Some("Msg encode error"),
+        0x012D => Some("Message encode error"),
         0x012E => Some("No enough disk space"),
         0x0130 => Some("Database is starting up"),
         0x0131 => Some("Database is closing down"),
@@ -116,7 +138,7 @@ pub const fn error_str_of(code: u32) -> Option<&'static str> {
         0x0229 => Some("Too many lines in batch (invalid tsc input)"),
         0x022A => Some("Stmt API usage error"),
         0x022B => Some("Stmt table name not set"),
-        0x022C => Some("not supported stmt clause"),
+        0x022C => Some("Unsupported statement clause"),
         0x022D => Some("Query killed"),
         0x022E => Some("No available execution node in current query policy configuration"),
         0x022F => Some("Table is not a super table"),
@@ -151,7 +173,7 @@ pub const fn error_str_of(code: u32) -> Option<&'static str> {
         0x0325 => Some("Invalid key type"),
         0x0326 => Some("Invalid action type"),
         0x0328 => Some("Invalid raw data version"),
-        0x0329 => Some("Invalid raw data len"),
+        0x0329 => Some("Invalid raw data length"),
         0x032A => Some("Invalid raw data content"),
         0x032C => Some("Object is creating"),
         0x032D => Some("Object is dropping"),
@@ -166,7 +188,7 @@ pub const fn error_str_of(code: u32) -> Option<&'static str> {
         0x0338 => Some("Vgroup not in dnode"),
         0x0339 => Some("Vgroup already in dnode"),
         0x033A => Some("Dnode not avaliable"),
-        0x033B => Some("Cluster id not match"),
+        0x033B => Some("Cluster id does not match"),
         0x033C => Some("Cluster not ready"),
         0x033D => Some("Dnode Id not configured"),
         0x033E => Some("Dnode Ep not configured"),
@@ -180,7 +202,7 @@ pub const fn error_str_of(code: u32) -> Option<&'static str> {
         0x0351 => Some("Invalid user"),
         0x0352 => Some("Invalid user format"),
         0x0353 => Some("Invalid password format"),
-        0x0354 => Some("Can not get user from conn"),
+        0x0354 => Some("Cannot get user from connection"),
         0x0355 => Some("Too many users"),
         0x0356 => Some("Invalid alter operation"),
         0x0357 => Some("Authentication failure"),
@@ -211,7 +233,7 @@ pub const fn error_str_of(code: u32) -> Option<&'static str> {
         0x0376 => Some("invalid tag length"),
         0x0377 => Some("invalid column length"),
         0x0378 => Some("Invalid func comment"),
-        0x0379 => Some("Invalid func retrieve msg"),
+        0x0379 => Some("Invalid func retrieve message"),
         0x0380 => Some("Database not specified or available"),
         0x0381 => Some("Database already exists"),
         0x0382 => Some("Invalid database options"),
@@ -220,10 +242,10 @@ pub const fn error_str_of(code: u32) -> Option<&'static str> {
         0x0385 => Some("Too many databases for account"),
         0x0386 => Some("Database not available (database in dropping status)"),
         0x0387 => Some("Database unsynced"),
-        0x0388 => Some("Database not exist"),
+        0x0388 => Some("Database does not exist"),
         0x0389 => Some("Invalid database account"),
         0x038A => Some("Database options not changed"),
-        0x038B => Some("Index not exist"),
+        0x038B => Some("Index does not exist"),
         0x038C => Some("WAL retention period is zero"),
         0x0390 => Some("Invalid database option: days out of range"),
         0x0391 => Some("Invalid database option: keep2 >= keep1 >= keep0 >= days"),
@@ -261,7 +283,7 @@ pub const fn error_str_of(code: u32) -> Option<&'static str> {
         0x03C7 => Some("Invalid stable uid while alter stb"),
         0x03C8 => Some("Field used by tsma"),
         0x03D0 => Some("Transaction already exists"),
-        0x03D1 => Some("Transaction not exists"),
+        0x03D1 => Some("Transaction does not exist"),
         0x03D2 => Some("Invalid stage to kill"),
         0x03D3 => Some("Conflict transaction not completed"),
         0x03D4 => Some("Transaction commitlog is null"),
@@ -270,15 +292,15 @@ pub const fn error_str_of(code: u32) -> Option<&'static str> {
         0x03D7 => Some("Sync timeout While execute transaction and will continue in the background"),
         0x03DF => Some("Unknown transaction error"),
         0x03E0 => Some("Topic already exists"),
-        0x03E1 => Some("Topic not exist"),
+        0x03E1 => Some("Topic does not exist"),
         0x03E2 => Some("Too many Topics"),
         0x03E3 => Some("Invalid topic"),
         0x03E4 => Some("Topic with invalid query"),
         0x03E5 => Some("Topic with invalid option"),
-        0x03E6 => Some("Consumer not exist"),
+        0x03E6 => Some("Consumer does not exist"),
         0x03E7 => Some("Topic unchanged"),
-        0x03E8 => Some("Subcribe not exist"),
-        0x03E9 => Some("Offset not exist"),
+        0x03E8 => Some("Subscribe does not exist"),
+        0x03E9 => Some("Offset does not exist"),
         0x03EA => Some("Consumer not ready"),
         0x03EB => Some("Topic subscribed cannot be dropped"),
         0x03EC => Some("Consumer group being used by some consumer"),
@@ -286,7 +308,7 @@ pub const fn error_str_of(code: u32) -> Option<&'static str> {
         0x03EE => Some("Invalid subscribe option"),
         0x03EF => Some("Topic being rebalanced"),
         0x03F0 => Some("Stream already exists"),
-        0x03F1 => Some("Stream not exist"),
+        0x03F1 => Some("Stream does not exist"),
         0x03F2 => Some("Invalid stream option"),
         0x03F3 => Some("Stream must be dropped first"),
         0x03F5 => Some("Stream temporarily does not support source db having replica > 1"),
@@ -310,16 +332,16 @@ pub const fn error_str_of(code: u32) -> Option<&'static str> {
         0x040F => Some("Snode already deployed"),
         0x0410 => Some("Snode not found"),
         0x0411 => Some("Snode not deployed"),
-        0x0412 => Some("Mnode didn't catch the leader"),
+        0x0412 => Some("Mnode has not caught up with the leader"),
         0x0413 => Some("Mnode already is a leader"),
         0x0414 => Some("Only two mnodes exist"),
         0x0415 => Some("No need to restore on this dnode"),
         0x0416 => Some("Please use this command when the dnode is offline"),
         0x0480 => Some("index already exists"),
-        0x0481 => Some("index not exist"),
+        0x0481 => Some("Index does not exist"),
         0x0482 => Some("Invalid sma index option"),
         0x0483 => Some("index already exists"),
-        0x0484 => Some("index not exist"),
+        0x0484 => Some("Index does not exist"),
         0x0500 => Some("Action in progress"),
         0x0501 => Some("Message not processed"),
         0x0502 => Some("Action need to be reprocessed"),
@@ -341,18 +363,18 @@ pub const fn error_str_of(code: u32) -> Option<&'static str> {
         0x0513 => Some("Database is syncing"),
         0x0514 => Some("Invalid tsdb state"),
         0x0515 => Some("Wait threads too many"),
-        0x0520 => Some("Vnode not exist"),
+        0x0520 => Some("Vnode does not exist"),
         0x0521 => Some("Vnode already exist"),
         0x0522 => Some("Vnode hash mismatch"),
         0x0524 => Some("Invalid table action"),
         0x0525 => Some("Table column already exists"),
-        0x0526 => Some("Table column not exists"),
+        0x0526 => Some("Table column does not exist"),
         0x0527 => Some("Table column is subscribed"),
         0x0528 => Some("No available buffer pool"),
         0x0529 => Some("Vnode stopped"),
         0x0530 => Some("Duplicate write request"),
         0x0531 => Some("Query busy"),
-        0x0532 => Some("Vnode didn't catch up its leader"),
+        0x0532 => Some("Vnode has not caught up with its leader"),
         0x0533 => Some("Vnode already is a voter"),
         0x0534 => Some("Vnode directory already exist"),
         0x0535 => Some("Single replica vnode data will lost permanently after this operation, if you make sure this, please use drop dnode <id> unsafe to execute"),
@@ -380,9 +402,9 @@ pub const fn error_str_of(code: u32) -> Option<&'static str> {
         0x0615 => Some("TSDB invalid tag value"),
         0x0616 => Some("TSDB no cache last row data"),
         0x0617 => Some("Incomplete DFileSet"),
-        0x0618 => Some("Table not exists"),
+        0x0618 => Some("Table does not exist"),
         0x0619 => Some("Stable already exists"),
-        0x061A => Some("Stable not exists"),
+        0x061A => Some("Stable does not exist"),
         0x061B => Some("Table schema is old"),
         0x061C => Some("TDB env open error"),
         0x061D => Some("Table already exists in other stables"),
@@ -403,10 +425,10 @@ pub const fn error_str_of(code: u32) -> Option<&'static str> {
         0x070E => Some("One valid time range condition expected"),
         0x070F => Some("invalid input"),
         0x0711 => Some("result num is too large"),
-        0x0720 => Some("Scheduler not exist"),
-        0x0721 => Some("Task not exist"),
+        0x0720 => Some("Scheduler does not exist"),
+        0x0721 => Some("Task does not exist"),
         0x0722 => Some("Task already exist"),
-        0x0723 => Some("Task context not exist"),
+        0x0723 => Some("Task context does not exist"),
         0x0724 => Some("Task cancelled"),
         0x0725 => Some("Task dropped"),
         0x0726 => Some("Task cancelling"),
@@ -415,10 +437,10 @@ pub const fn error_str_of(code: u32) -> Option<&'static str> {
         0x0729 => Some("Task message error"),
         0x072A => Some("Job already freed"),
         0x072B => Some("Task status error"),
-        0x072C => Some("Json not support in in/notin operator"),
-        0x072D => Some("Json not support in this place"),
-        0x072E => Some("Json not support in group/partition by"),
-        0x072F => Some("Job not exist"),
+        0x072C => Some("JSON is not supported in the IN/NOT IN operator"),
+        0x072D => Some("JSON is not supported here"),
+        0x072E => Some("JSON is not supported in GROUP BY/PARTITION BY"),
+        0x072F => Some("Job does not exist"),
         0x0730 => Some("Vnode/Qnode is quitting"),
         0x0800 => Some("License expired"),
         0x0801 => Some("DNode creation limited by license"),
@@ -452,12 +474,12 @@ pub const fn error_str_of(code: u32) -> Option<&'static str> {
         0x0A08 => Some("TQ meta no such key"),
         0x0A09 => Some("TQ meta key not in txn"),
         0x0A0A => Some("TQ met key dup in txn"),
-        0x0A0B => Some("TQ group not exist"),
+        0x0A0B => Some("TQ group does not exist"),
         0x0A0C => Some("TQ table schema not found"),
         0x0A0D => Some("TQ no committed offset"),
         0x1001 => Some("WAL file is corrupted"),
         0x1003 => Some("WAL invalid version"),
-        0x1005 => Some("WAL log not exist"),
+        0x1005 => Some("WAL log does not exist"),
         0x1006 => Some("WAL checksum mismatch"),
         0x1007 => Some("WAL log incomplete"),
         0x2201 => Some("tfs invalid mount config"),
@@ -487,12 +509,12 @@ pub const fn error_str_of(code: u32) -> Option<&'static str> {
         0x2603 => Some("Table does not exist"),
         0x2604 => Some("Column ambiguously defined"),
         0x2605 => Some("Invalid value type"),
-        0x2608 => Some("There mustn't be aggregation"),
+        0x2608 => Some("Aggregation is not allowed here"),
         0x2609 => Some("ORDER BY item must be the number of a SELECT-list expression"),
         0x260A => Some("Not a GROUP BY expression"),
         0x260B => Some("Not SELECTed expression"),
         0x260C => Some("Not a single-group group function"),
-        0x260D => Some("Tags number not matched"),
+        0x260D => Some("Tag count does not match"),
         0x260E => Some("Invalid tag name"),
         0x2610 => Some("Name or password too long"),
         0x2611 => Some("Password can not be empty"),
@@ -505,24 +527,24 @@ pub const fn error_str_of(code: u32) -> Option<&'static str> {
         0x2618 => Some("Corresponding super table not in this db"),
         0x2619 => Some("Invalid database option"),
         0x261A => Some("Invalid table option"),
-        0x2624 => Some("GROUP BY and WINDOW-clause can't be used together"),
+        0x2624 => Some("GROUP BY and WINDOW-clause cannot be used together"),
         0x2627 => Some("Aggregate functions do not support nesting"),
-        0x2628 => Some("Only support STATE_WINDOW on integer/bool/varchar column"),
+        0x2628 => Some("STATE_WINDOW is only supported on integer/bool/varchar columns"),
         0x2629 => Some("Not support STATE_WINDOW on tag column"),
-        0x262A => Some("STATE_WINDOW not support for super table query"),
+        0x262A => Some("STATE_WINDOW is not supported for super table queries"),
         0x262B => Some("SESSION gap should be fixed time window, and greater than 0"),
-        0x262C => Some("Only support SESSION on primary timestamp column"),
+        0x262C => Some("SESSION is only supported on the primary timestamp column"),
         0x262D => Some("Interval offset cannot be negative"),
         0x262E => Some("Cannot use 'year' as offset when interval is 'month'"),
         0x262F => Some("Interval offset should be shorter than interval"),
-        0x2630 => Some("Does not support sliding when interval is natural month/year"),
-        0x2631 => Some("sliding value no larger than the interval value"),
-        0x2632 => Some("sliding value can not less than 1%% of interval value"),
+        0x2630 => Some("Sliding is not supported when the interval is a natural month/year"),
+        0x2631 => Some("Sliding value must not be larger than the interval value"),
+        0x2632 => Some("Sliding value cannot be less than 1% of interval value"),
         0x2633 => Some("Only one tag if there is a json tag"),
         0x2634 => Some("Query block has incorrect number of result columns"),
         0x2635 => Some("Incorrect TIMESTAMP value"),
-        0x2637 => Some("soffset/offset can not be less than 0"),
-        0x2638 => Some("slimit/soffset only available for PARTITION/GROUP BY query"),
+        0x2637 => Some("soffset/offset cannot be less than 0"),
+        0x2638 => Some("slimit/soffset are only available for PARTITION/GROUP BY query"),
         0x2639 => Some("Invalid topic query"),
         0x263A => Some("Cannot drop super table in batch"),
         0x263B => Some("Start(end) time of query range required or time range too large"),
@@ -548,36 +570,36 @@ pub const fn error_str_of(code: u32) -> Option<&'static str> {
         0x264F => Some("Some functions are allowed only in the SELECT list of a query. And, cannot be mixed with other non scalar functions or columns."),
         0x2650 => Some("Window query not supported, since the result of subquery not include valid timestamp column"),
         0x2651 => Some("No columns can be dropped"),
-        0x2652 => Some("Only tag can be json type"),
+        0x2652 => Some("Only tags can be of the JSON type"),
         0x2653 => Some("Value too long for column/tag"),
         0x2655 => Some("The DELETE statement must have a definite time window range"),
-        0x2656 => Some("The REDISTRIBUTE VGROUP statement only support 1 to 3 dnodes"),
-        0x2657 => Some("Fill now allowed"),
+        0x2656 => Some("The REDISTRIBUTE VGROUP statement only supports 1 to 3 dnodes"),
+        0x2657 => Some("Fill not allowed"),
         0x2658 => Some("Invalid windows pc"),
         0x2659 => Some("Window not allowed"),
         0x265A => Some("Stream not allowed"),
-        0x265B => Some("Group by not allowd"),
+        0x265B => Some("Group by is not allowed"),
         0x265D => Some("Invalid interp clause"),
-        0x265E => Some("Not valid function ion window"),
-        0x265F => Some("Only support single table"),
+        0x265E => Some("Not a valid function in window"),
+        0x265F => Some("Only a single table is supported"),
         0x2660 => Some("Invalid sma index"),
         0x2661 => Some("Invalid SELECTed expression"),
-        0x2662 => Some("Fail to get table info"),
+        0x2662 => Some("Failed to get table info"),
         0x2663 => Some("Not unique table/alias"),
         0x26FF => Some("Parser internal error"),
         0x2700 => Some("Planner internal error"),
         0x2701 => Some("Expect ts equal"),
-        0x2702 => Some("Cross join not support"),
+        0x2702 => Some("Cross join is not supported"),
         0x2800 => Some("Function internal error"),
         0x2801 => Some("Invalid function para number"),
         0x2802 => Some("Invalid function para type"),
         0x2803 => Some("Invalid function para value"),
-        0x2804 => Some("Not buildin function"),
+        0x2804 => Some("Not a built-in function"),
         0x2805 => Some("Duplicate timestamps not allowed in function"),
         0x2901 => Some("udf is stopping"),
         0x2902 => Some("udf pipe read error"),
         0x2903 => Some("udf pipe connect error"),
-        0x2904 => Some("udf pipe not exist"),
+        0x2904 => Some("UDF pipe does not exist"),
         0x2905 => Some("udf load failure"),
         0x2906 => Some("udf invalid function input"),
         0x2907 => Some("udf invalid bufsize"),
@@ -611,7 +633,7 @@ pub const fn error_str_of(code: u32) -> Option<&'static str> {
         0x4001 => Some("Consumer mismatch"),
         0x4002 => Some("Consumer closed"),
         0x4003 => Some("Consumer error, to see log"),
-        0x4100 => Some("Stream task not exist"),
+        0x4100 => Some("Stream task does not exist"),
         0x4101 => Some("Out of memory in stream queue"),
         0x5100 => Some("Invalid TDLite open flags"),
         0x5101 => Some("Invalid TDLite open directory"),
@@ -665,7 +687,7 @@ mod tests {
         assert_eq!(error_str_of(0x0019), Some("Conn read timeout"));
         assert_eq!(
             error_str_of(0x0020),
-            Some("some vnode/qnode/mnode(s) out of service")
+            Some("Some vnode/qnode/mnode(s) are out of service")
         );
         assert_eq!(error_str_of(0x0022), Some("rpc open too many session"));
         assert_eq!(error_str_of(0x0100), Some("Operation not supported"));
@@ -674,7 +696,7 @@ mod tests {
         assert_eq!(error_str_of(0x0103), Some("Invalid config message"));
         assert_eq!(error_str_of(0x0104), Some("Data file corrupted"));
         assert_eq!(error_str_of(0x0105), Some("Ref out of memory"));
-        assert_eq!(error_str_of(0x0106), Some("too many Ref Objs"));
+        assert_eq!(error_str_of(0x0106), Some("Too many reference objects"));
         assert_eq!(error_str_of(0x0107), Some("Ref ID is removed"));
         assert_eq!(error_str_of(0x0108), Some("Invalid Ref ID"));
         assert_eq!(error_str_of(0x0109), Some("Ref is already there"));
@@ -683,7 +705,7 @@ mod tests {
         assert_eq!(error_str_of(0x0111), Some("Action in progress"));
         assert_eq!(error_str_of(0x0112), Some("Out of range"));
         assert_eq!(error_str_of(0x0115), Some("Invalid message"));
-        assert_eq!(error_str_of(0x0116), Some("Invalid message len"));
+        assert_eq!(error_str_of(0x0116), Some("Invalid message length"));
         assert_eq!(error_str_of(0x0117), Some("Invalid pointer"));
         assert_eq!(error_str_of(0x0118), Some("Invalid parameters"));
         assert_eq!(error_str_of(0x0119), Some("Invalid config option"));
@@ -693,7 +715,7 @@ mod tests {
         assert_eq!(error_str_of(0x011D), Some("Invalid version string"));
         assert_eq!(error_str_of(0x011E), Some("Version not compatible"));
         assert_eq!(error_str_of(0x011F), Some("Checksum error"));
-        assert_eq!(error_str_of(0x0120), Some("Failed to compress msg"));
+        assert_eq!(error_str_of(0x0120), Some("Failed to compress message"));
         assert_eq!(error_str_of(0x0121), Some("Message not processed"));
         assert_eq!(error_str_of(0x0122), Some("Config not found"));
         assert_eq!(error_str_of(0x0123), Some("Repeat initialization"));
@@ -704,12 +726,12 @@ mod tests {
         assert_eq!(error_str_of(0x0125), Some("Retry needed"));
         assert_eq!(error_str_of(0x0126), Some("Out of memory in rpc queue"));
         assert_eq!(error_str_of(0x0127), Some("Invalid timestamp format"));
-        assert_eq!(error_str_of(0x0128), Some("Msg decode error"));
+        assert_eq!(error_str_of(0x0128), Some("Message decode error"));
         assert_eq!(error_str_of(0x0129), Some("No available disk"));
         assert_eq!(error_str_of(0x012A), Some("Not found"));
         assert_eq!(error_str_of(0x012B), Some("Out of disk space"));
         assert_eq!(error_str_of(0x012C), Some("Operation timeout"));
-        assert_eq!(error_str_of(0x012D), Some("Msg encode error"));
+        assert_eq!(error_str_of(0x012D), Some("Message encode error"));
         assert_eq!(error_str_of(0x012E), Some("No enough disk space"));
         assert_eq!(error_str_of(0x0130), Some("Database is starting up"));
         assert_eq!(error_str_of(0x0131), Some("Database is closing down"));
@@ -782,7 +804,7 @@ mod tests {
         );
         assert_eq!(error_str_of(0x022A), Some("Stmt API usage error"));
         assert_eq!(error_str_of(0x022B), Some("Stmt table name not set"));
-        assert_eq!(error_str_of(0x022C), Some("not supported stmt clause"));
+        assert_eq!(error_str_of(0x022C), Some("Unsupported statement clause"));
         assert_eq!(error_str_of(0x022D), Some("Query killed"));
         assert_eq!(
             error_str_of(0x022E),
@@ -832,7 +854,7 @@ mod tests {
         assert_eq!(error_str_of(0x0325), Some("Invalid key type"));
         assert_eq!(error_str_of(0x0326), Some("Invalid action type"));
         assert_eq!(error_str_of(0x0328), Some("Invalid raw data version"));
-        assert_eq!(error_str_of(0x0329), Some("Invalid raw data len"));
+        assert_eq!(error_str_of(0x0329), Some("Invalid raw data length"));
         assert_eq!(error_str_of(0x032A), Some("Invalid raw data content"));
         assert_eq!(error_str_of(0x032C), Some("Object is creating"));
         assert_eq!(error_str_of(0x032D), Some("Object is dropping"));
@@ -850,7 +872,7 @@ mod tests {
         assert_eq!(error_str_of(0x0338), Some("Vgroup not in dnode"));
         assert_eq!(error_str_of(0x0339), Some("Vgroup already in dnode"));
         assert_eq!(error_str_of(0x033A), Some("Dnode not avaliable"));
-        assert_eq!(error_str_of(0x033B), Some("Cluster id not match"));
+        assert_eq!(error_str_of(0x033B), Some("Cluster id does not match"));
         assert_eq!(error_str_of(0x033C), Some("Cluster not ready"));
         assert_eq!(error_str_of(0x033D), Some("Dnode Id not configured"));
         assert_eq!(error_str_of(0x033E), Some("Dnode Ep not configured"));
@@ -867,7 +889,10 @@ mod tests {
         assert_eq!(error_str_of(0x0351), Some("Invalid user"));
         assert_eq!(error_str_of(0x0352), Some("Invalid user format"));
         assert_eq!(error_str_of(0x0353), Some("Invalid password format"));
-        assert_eq!(error_str_of(0x0354), Some("Can not get user from conn"));
+        assert_eq!(
+            error_str_of(0x0354),
+            Some("Cannot get user from connection")
+        );
         assert_eq!(error_str_of(0x0355), Some("Too many users"));
         assert_eq!(error_str_of(0x0356), Some("Invalid alter operation"));
         assert_eq!(error_str_of(0x0357), Some("Authentication failure"));
@@ -919,7 +944,7 @@ mod tests {
         assert_eq!(error_str_of(0x0376), Some("invalid tag length"));
         assert_eq!(error_str_of(0x0377), Some("invalid column length"));
         assert_eq!(error_str_of(0x0378), Some("Invalid func comment"));
-        assert_eq!(error_str_of(0x0379), Some("Invalid func retrieve msg"));
+        assert_eq!(error_str_of(0x0379), Some("Invalid func retrieve message"));
         assert_eq!(
             error_str_of(0x0380),
             Some("Database not specified or available")
@@ -934,10 +959,10 @@ mod tests {
             Some("Database not available (database in dropping status)")
         );
         assert_eq!(error_str_of(0x0387), Some("Database unsynced"));
-        assert_eq!(error_str_of(0x0388), Some("Database not exist"));
+        assert_eq!(error_str_of(0x0388), Some("Database does not exist"));
         assert_eq!(error_str_of(0x0389), Some("Invalid database account"));
         assert_eq!(error_str_of(0x038A), Some("Database options not changed"));
-        assert_eq!(error_str_of(0x038B), Some("Index not exist"));
+        assert_eq!(error_str_of(0x038B), Some("Index does not exist"));
         assert_eq!(error_str_of(0x038C), Some("WAL retention period is zero"));
         assert_eq!(
             error_str_of(0x0390),
@@ -999,7 +1024,7 @@ mod tests {
         );
         assert_eq!(error_str_of(0x03C8), Some("Field used by tsma"));
         assert_eq!(error_str_of(0x03D0), Some("Transaction already exists"));
-        assert_eq!(error_str_of(0x03D1), Some("Transaction not exists"));
+        assert_eq!(error_str_of(0x03D1), Some("Transaction does not exist"));
         assert_eq!(error_str_of(0x03D2), Some("Invalid stage to kill"));
         assert_eq!(
             error_str_of(0x03D3),
@@ -1014,15 +1039,15 @@ mod tests {
         );
         assert_eq!(error_str_of(0x03DF), Some("Unknown transaction error"));
         assert_eq!(error_str_of(0x03E0), Some("Topic already exists"));
-        assert_eq!(error_str_of(0x03E1), Some("Topic not exist"));
+        assert_eq!(error_str_of(0x03E1), Some("Topic does not exist"));
         assert_eq!(error_str_of(0x03E2), Some("Too many Topics"));
         assert_eq!(error_str_of(0x03E3), Some("Invalid topic"));
         assert_eq!(error_str_of(0x03E4), Some("Topic with invalid query"));
         assert_eq!(error_str_of(0x03E5), Some("Topic with invalid option"));
-        assert_eq!(error_str_of(0x03E6), Some("Consumer not exist"));
+        assert_eq!(error_str_of(0x03E6), Some("Consumer does not exist"));
         assert_eq!(error_str_of(0x03E7), Some("Topic unchanged"));
-        assert_eq!(error_str_of(0x03E8), Some("Subcribe not exist"));
-        assert_eq!(error_str_of(0x03E9), Some("Offset not exist"));
+        assert_eq!(error_str_of(0x03E8), Some("Subscribe does not exist"));
+        assert_eq!(error_str_of(0x03E9), Some("Offset does not exist"));
         assert_eq!(error_str_of(0x03EA), Some("Consumer not ready"));
         assert_eq!(
             error_str_of(0x03EB),
@@ -1036,7 +1061,7 @@ mod tests {
         assert_eq!(error_str_of(0x03EE), Some("Invalid subscribe option"));
         assert_eq!(error_str_of(0x03EF), Some("Topic being rebalanced"));
         assert_eq!(error_str_of(0x03F0), Some("Stream already exists"));
-        assert_eq!(error_str_of(0x03F1), Some("Stream not exist"));
+        assert_eq!(error_str_of(0x03F1), Some("Stream does not exist"));
         assert_eq!(error_str_of(0x03F2), Some("Invalid stream option"));
         assert_eq!(error_str_of(0x03F3), Some("Stream must be dropped first"));
         assert_eq!(
@@ -1069,7 +1094,10 @@ mod tests {
         assert_eq!(error_str_of(0x040F), Some("Snode already deployed"));
         assert_eq!(error_str_of(0x0410), Some("Snode not found"));
         assert_eq!(error_str_of(0x0411), Some("Snode not deployed"));
-        assert_eq!(error_str_of(0x0412), Some("Mnode didn't catch the leader"));
+        assert_eq!(
+            error_str_of(0x0412),
+            Some("Mnode has not caught up with the leader")
+        );
         assert_eq!(error_str_of(0x0413), Some("Mnode already is a leader"));
         assert_eq!(error_str_of(0x0414), Some("Only two mnodes exist"));
         assert_eq!(
@@ -1081,10 +1109,10 @@ mod tests {
             Some("Please use this command when the dnode is offline")
         );
         assert_eq!(error_str_of(0x0480), Some("index already exists"));
-        assert_eq!(error_str_of(0x0481), Some("index not exist"));
+        assert_eq!(error_str_of(0x0481), Some("Index does not exist"));
         assert_eq!(error_str_of(0x0482), Some("Invalid sma index option"));
         assert_eq!(error_str_of(0x0483), Some("index already exists"));
-        assert_eq!(error_str_of(0x0484), Some("index not exist"));
+        assert_eq!(error_str_of(0x0484), Some("Index does not exist"));
         assert_eq!(error_str_of(0x0500), Some("Action in progress"));
         assert_eq!(error_str_of(0x0501), Some("Message not processed"));
         assert_eq!(error_str_of(0x0502), Some("Action need to be reprocessed"));
@@ -1124,12 +1152,12 @@ mod tests {
         assert_eq!(error_str_of(0x0513), Some("Database is syncing"));
         assert_eq!(error_str_of(0x0514), Some("Invalid tsdb state"));
         assert_eq!(error_str_of(0x0515), Some("Wait threads too many"));
-        assert_eq!(error_str_of(0x0520), Some("Vnode not exist"));
+        assert_eq!(error_str_of(0x0520), Some("Vnode does not exist"));
         assert_eq!(error_str_of(0x0521), Some("Vnode already exist"));
         assert_eq!(error_str_of(0x0522), Some("Vnode hash mismatch"));
         assert_eq!(error_str_of(0x0524), Some("Invalid table action"));
         assert_eq!(error_str_of(0x0525), Some("Table column already exists"));
-        assert_eq!(error_str_of(0x0526), Some("Table column not exists"));
+        assert_eq!(error_str_of(0x0526), Some("Table column does not exist"));
         assert_eq!(error_str_of(0x0527), Some("Table column is subscribed"));
         assert_eq!(error_str_of(0x0528), Some("No available buffer pool"));
         assert_eq!(error_str_of(0x0529), Some("Vnode stopped"));
@@ -1137,7 +1165,7 @@ mod tests {
         assert_eq!(error_str_of(0x0531), Some("Query busy"));
         assert_eq!(
             error_str_of(0x0532),
-            Some("Vnode didn't catch up its leader")
+            Some("Vnode has not caught up with its leader")
         );
         assert_eq!(error_str_of(0x0533), Some("Vnode already is a voter"));
         assert_eq!(error_str_of(0x0534), Some("Vnode directory already exist"));
@@ -1175,9 +1203,9 @@ mod tests {
         assert_eq!(error_str_of(0x0615), Some("TSDB invalid tag value"));
         assert_eq!(error_str_of(0x0616), Some("TSDB no cache last row data"));
         assert_eq!(error_str_of(0x0617), Some("Incomplete DFileSet"));
-        assert_eq!(error_str_of(0x0618), Some("Table not exists"));
+        assert_eq!(error_str_of(0x0618), Some("Table does not exist"));
         assert_eq!(error_str_of(0x0619), Some("Stable already exists"));
-        assert_eq!(error_str_of(0x061A), Some("Stable not exists"));
+        assert_eq!(error_str_of(0x061A), Some("Stable does not exist"));
         assert_eq!(error_str_of(0x061B), Some("Table schema is old"));
         assert_eq!(error_str_of(0x061C), Some("TDB env open error"));
         assert_eq!(
@@ -1213,10 +1241,10 @@ mod tests {
         );
         assert_eq!(error_str_of(0x070F), Some("invalid input"));
         assert_eq!(error_str_of(0x0711), Some("result num is too large"));
-        assert_eq!(error_str_of(0x0720), Some("Scheduler not exist"));
-        assert_eq!(error_str_of(0x0721), Some("Task not exist"));
+        assert_eq!(error_str_of(0x0720), Some("Scheduler does not exist"));
+        assert_eq!(error_str_of(0x0721), Some("Task does not exist"));
         assert_eq!(error_str_of(0x0722), Some("Task already exist"));
-        assert_eq!(error_str_of(0x0723), Some("Task context not exist"));
+        assert_eq!(error_str_of(0x0723), Some("Task context does not exist"));
         assert_eq!(error_str_of(0x0724), Some("Task cancelled"));
         assert_eq!(error_str_of(0x0725), Some("Task dropped"));
         assert_eq!(error_str_of(0x0726), Some("Task cancelling"));
@@ -1227,14 +1255,14 @@ mod tests {
         assert_eq!(error_str_of(0x072B), Some("Task status error"));
         assert_eq!(
             error_str_of(0x072C),
-            Some("Json not support in in/notin operator")
+            Some("JSON is not supported in the IN/NOT IN operator")
         );
-        assert_eq!(error_str_of(0x072D), Some("Json not support in this place"));
+        assert_eq!(error_str_of(0x072D), Some("JSON is not supported here"));
         assert_eq!(
             error_str_of(0x072E),
-            Some("Json not support in group/partition by")
+            Some("JSON is not supported in GROUP BY/PARTITION BY")
         );
-        assert_eq!(error_str_of(0x072F), Some("Job not exist"));
+        assert_eq!(error_str_of(0x072F), Some("Job does not exist"));
         assert_eq!(error_str_of(0x0730), Some("Vnode/Qnode is quitting"));
         assert_eq!(error_str_of(0x0800), Some("License expired"));
         assert_eq!(
@@ -1292,12 +1320,12 @@ mod tests {
         assert_eq!(error_str_of(0x0A08), Some("TQ meta no such key"));
         assert_eq!(error_str_of(0x0A09), Some("TQ meta key not in txn"));
         assert_eq!(error_str_of(0x0A0A), Some("TQ met key dup in txn"));
-        assert_eq!(error_str_of(0x0A0B), Some("TQ group not exist"));
+        assert_eq!(error_str_of(0x0A0B), Some("TQ group does not exist"));
         assert_eq!(error_str_of(0x0A0C), Some("TQ table schema not found"));
         assert_eq!(error_str_of(0x0A0D), Some("TQ no committed offset"));
         assert_eq!(error_str_of(0x1001), Some("WAL file is corrupted"));
         assert_eq!(error_str_of(0x1003), Some("WAL invalid version"));
-        assert_eq!(error_str_of(0x1005), Some("WAL log not exist"));
+        assert_eq!(error_str_of(0x1005), Some("WAL log does not exist"));
         assert_eq!(error_str_of(0x1006), Some("WAL checksum mismatch"));
         assert_eq!(error_str_of(0x1007), Some("WAL log incomplete"));
         assert_eq!(error_str_of(0x2201), Some("tfs invalid mount config"));
@@ -1330,7 +1358,10 @@ mod tests {
         assert_eq!(error_str_of(0x2603), Some("Table does not exist"));
         assert_eq!(error_str_of(0x2604), Some("Column ambiguously defined"));
         assert_eq!(error_str_of(0x2605), Some("Invalid value type"));
-        assert_eq!(error_str_of(0x2608), Some("There mustn't be aggregation"));
+        assert_eq!(
+            error_str_of(0x2608),
+            Some("Aggregation is not allowed here")
+        );
         assert_eq!(
             error_str_of(0x2609),
             Some("ORDER BY item must be the number of a SELECT-list expression")
@@ -1341,7 +1372,7 @@ mod tests {
             error_str_of(0x260C),
             Some("Not a single-group group function")
         );
-        assert_eq!(error_str_of(0x260D), Some("Tags number not matched"));
+        assert_eq!(error_str_of(0x260D), Some("Tag count does not match"));
         assert_eq!(error_str_of(0x260E), Some("Invalid tag name"));
         assert_eq!(error_str_of(0x2610), Some("Name or password too long"));
         assert_eq!(error_str_of(0x2611), Some("Password can not be empty"));
@@ -1368,7 +1399,7 @@ mod tests {
         assert_eq!(error_str_of(0x261A), Some("Invalid table option"));
         assert_eq!(
             error_str_of(0x2624),
-            Some("GROUP BY and WINDOW-clause can't be used together")
+            Some("GROUP BY and WINDOW-clause cannot be used together")
         );
         assert_eq!(
             error_str_of(0x2627),
@@ -1376,7 +1407,7 @@ mod tests {
         );
         assert_eq!(
             error_str_of(0x2628),
-            Some("Only support STATE_WINDOW on integer/bool/varchar column")
+            Some("STATE_WINDOW is only supported on integer/bool/varchar columns")
         );
         assert_eq!(
             error_str_of(0x2629),
@@ -1384,7 +1415,7 @@ mod tests {
         );
         assert_eq!(
             error_str_of(0x262A),
-            Some("STATE_WINDOW not support for super table query")
+            Some("STATE_WINDOW is not supported for super table queries")
         );
         assert_eq!(
             error_str_of(0x262B),
@@ -1392,7 +1423,7 @@ mod tests {
         );
         assert_eq!(
             error_str_of(0x262C),
-            Some("Only support SESSION on primary timestamp column")
+            Some("SESSION is only supported on the primary timestamp column")
         );
         assert_eq!(
             error_str_of(0x262D),
@@ -1408,15 +1439,15 @@ mod tests {
         );
         assert_eq!(
             error_str_of(0x2630),
-            Some("Does not support sliding when interval is natural month/year")
+            Some("Sliding is not supported when the interval is a natural month/year")
         );
         assert_eq!(
             error_str_of(0x2631),
-            Some("sliding value no larger than the interval value")
+            Some("Sliding value must not be larger than the interval value")
         );
         assert_eq!(
             error_str_of(0x2632),
-            Some("sliding value can not less than 1%% of interval value")
+            Some("Sliding value cannot be less than 1% of interval value")
         );
         assert_eq!(
             error_str_of(0x2633),
@@ -1429,11 +1460,11 @@ mod tests {
         assert_eq!(error_str_of(0x2635), Some("Incorrect TIMESTAMP value"));
         assert_eq!(
             error_str_of(0x2637),
-            Some("soffset/offset can not be less than 0")
+            Some("soffset/offset cannot be less than 0")
         );
         assert_eq!(
             error_str_of(0x2638),
-            Some("slimit/soffset only available for PARTITION/GROUP BY query")
+            Some("slimit/soffset are only available for PARTITION/GROUP BY query")
         );
         assert_eq!(error_str_of(0x2639), Some("Invalid topic query"));
         assert_eq!(
@@ -1475,7 +1506,10 @@ mod tests {
         assert_eq!(error_str_of(0x264F), Some("Some functions are allowed only in the SELECT list of a query. And, cannot be mixed with other non scalar functions or columns."));
         assert_eq!(error_str_of(0x2650), Some("Window query not supported, since the result of subquery not include valid timestamp column"));
         assert_eq!(error_str_of(0x2651), Some("No columns can be dropped"));
-        assert_eq!(error_str_of(0x2652), Some("Only tag can be json type"));
+        assert_eq!(
+            error_str_of(0x2652),
+            Some("Only tags can be of the JSON type")
+        );
         assert_eq!(error_str_of(0x2653), Some("Value too long for column/tag"));
         assert_eq!(
             error_str_of(0x2655),
@@ -1483,29 +1517,32 @@ mod tests {
         );
         assert_eq!(
             error_str_of(0x2656),
-            Some("The REDISTRIBUTE VGROUP statement only support 1 to 3 dnodes")
+            Some("The REDISTRIBUTE VGROUP statement only supports 1 to 3 dnodes")
         );
-        assert_eq!(error_str_of(0x2657), Some("Fill now allowed"));
+        assert_eq!(error_str_of(0x2657), Some("Fill not allowed"));
         assert_eq!(error_str_of(0x2658), Some("Invalid windows pc"));
         assert_eq!(error_str_of(0x2659), Some("Window not allowed"));
         assert_eq!(error_str_of(0x265A), Some("Stream not allowed"));
-        assert_eq!(error_str_of(0x265B), Some("Group by not allowd"));
+        assert_eq!(error_str_of(0x265B), Some("Group by is not allowed"));
         assert_eq!(error_str_of(0x265D), Some("Invalid interp clause"));
-        assert_eq!(error_str_of(0x265E), Some("Not valid function ion window"));
-        assert_eq!(error_str_of(0x265F), Some("Only support single table"));
+        assert_eq!(error_str_of(0x265E), Some("Not a valid function in window"));
+        assert_eq!(
+            error_str_of(0x265F),
+            Some("Only a single table is supported")
+        );
         assert_eq!(error_str_of(0x2660), Some("Invalid sma index"));
         assert_eq!(error_str_of(0x2661), Some("Invalid SELECTed expression"));
-        assert_eq!(error_str_of(0x2662), Some("Fail to get table info"));
+        assert_eq!(error_str_of(0x2662), Some("Failed to get table info"));
         assert_eq!(error_str_of(0x2663), Some("Not unique table/alias"));
         assert_eq!(error_str_of(0x26FF), Some("Parser internal error"));
         assert_eq!(error_str_of(0x2700), Some("Planner internal error"));
         assert_eq!(error_str_of(0x2701), Some("Expect ts equal"));
-        assert_eq!(error_str_of(0x2702), Some("Cross join not support"));
+        assert_eq!(error_str_of(0x2702), Some("Cross join is not supported"));
         assert_eq!(error_str_of(0x2800), Some("Function internal error"));
         assert_eq!(error_str_of(0x2801), Some("Invalid function para number"));
         assert_eq!(error_str_of(0x2802), Some("Invalid function para type"));
         assert_eq!(error_str_of(0x2803), Some("Invalid function para value"));
-        assert_eq!(error_str_of(0x2804), Some("Not buildin function"));
+        assert_eq!(error_str_of(0x2804), Some("Not a built-in function"));
         assert_eq!(
             error_str_of(0x2805),
             Some("Duplicate timestamps not allowed in function")
@@ -1513,7 +1550,7 @@ mod tests {
         assert_eq!(error_str_of(0x2901), Some("udf is stopping"));
         assert_eq!(error_str_of(0x2902), Some("udf pipe read error"));
         assert_eq!(error_str_of(0x2903), Some("udf pipe connect error"));
-        assert_eq!(error_str_of(0x2904), Some("udf pipe not exist"));
+        assert_eq!(error_str_of(0x2904), Some("UDF pipe does not exist"));
         assert_eq!(error_str_of(0x2905), Some("udf load failure"));
         assert_eq!(error_str_of(0x2906), Some("udf invalid function input"));
         assert_eq!(error_str_of(0x2907), Some("udf invalid bufsize"));
@@ -1553,7 +1590,7 @@ mod tests {
         assert_eq!(error_str_of(0x4001), Some("Consumer mismatch"));
         assert_eq!(error_str_of(0x4002), Some("Consumer closed"));
         assert_eq!(error_str_of(0x4003), Some("Consumer error, to see log"));
-        assert_eq!(error_str_of(0x4100), Some("Stream task not exist"));
+        assert_eq!(error_str_of(0x4100), Some("Stream task does not exist"));
         assert_eq!(error_str_of(0x4101), Some("Out of memory in stream queue"));
         assert_eq!(error_str_of(0x5100), Some("Invalid TDLite open flags"));
         assert_eq!(error_str_of(0x5101), Some("Invalid TDLite open directory"));
