@@ -1,4 +1,27 @@
-use std::collections::HashMap;
+// Copyright (c) 2026 TAOS Data, Inc.
+//
+// SPDX-License-Identifier: MIT
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
+use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use once_cell::sync::Lazy;
@@ -11,14 +34,8 @@ pub struct Cluster {
 
 impl Cluster {
     fn new(seeds: &[String]) -> Self {
-        let mut addrs = Vec::new();
-        for seed in seeds {
-            if is_valid_host_port(seed) && !addrs.contains(seed) {
-                addrs.push(seed.clone());
-            }
-        }
         Self {
-            addrs: Mutex::new(addrs),
+            addrs: Mutex::new(seeds.to_vec()),
         }
     }
 
@@ -26,18 +43,25 @@ impl Cluster {
         self.addrs.lock().unwrap().clone()
     }
 
-    fn add_addresses(&self, addrs: &[String]) {
+    fn add_addresses(&self, addrs: &[String]) -> bool {
         let mut cluster_addrs = self.addrs.lock().unwrap();
-        for addr in addrs {
-            if is_valid_host_port(addr) && !cluster_addrs.contains(addr) {
-                cluster_addrs.push(addr.clone());
-            }
-        }
+        let new_addrs: Vec<String> = {
+            let mut seen: HashSet<&str> = cluster_addrs.iter().map(String::as_str).collect();
+            addrs
+                .iter()
+                .filter(|addr| seen.insert(addr.as_str()))
+                .cloned()
+                .collect()
+        };
+        let changed = !new_addrs.is_empty();
+        cluster_addrs.extend(new_addrs);
+        changed
     }
 }
 
 pub struct ClusterRegistry {
     endpoint_to_cluster: Mutex<HashMap<String, Arc<Cluster>>>,
+    version: AtomicUsize,
 }
 
 static REGISTRY: Lazy<ClusterRegistry> = Lazy::new(ClusterRegistry::new);
@@ -50,79 +74,104 @@ impl ClusterRegistry {
     pub fn new() -> Self {
         Self {
             endpoint_to_cluster: Mutex::new(HashMap::new()),
+            version: AtomicUsize::new(0),
         }
     }
 
-    pub fn update_cluster(&self, discovered: &[String]) {
+    pub fn version(&self) -> usize {
+        self.version.load(Ordering::Acquire)
+    }
+
+    pub fn update_cluster(&self, discovered: &[String]) -> usize {
         let valid = valid_unique(discovered);
         if valid.is_empty() {
-            return;
+            return self.version();
         }
 
         let mut endpoint_to_cluster = self.endpoint_to_cluster.lock().unwrap();
         let clusters = find_clusters(&endpoint_to_cluster, &valid);
-        let cluster = match clusters.as_slice() {
-            [] => Arc::new(Cluster::new(&valid)),
-            [cluster] => Arc::clone(cluster),
+        let (cluster, changed) = match clusters.as_slice() {
+            [] => (Arc::new(Cluster::new(&valid)), true),
+            [cluster] => {
+                let cluster = Arc::clone(cluster);
+                let changed = cluster.add_addresses(&valid);
+                (cluster, changed)
+            }
             _ => {
                 tracing::warn!(
                     "adapter HA: discovered endpoints touch multiple known clusters, skip update: {:?}",
                     valid
                 );
-                return;
+                return self.version();
             }
         };
 
-        cluster.add_addresses(&valid);
         for addr in &valid {
             endpoint_to_cluster.insert(addr.clone(), Arc::clone(&cluster));
         }
+
+        if changed {
+            self.version.fetch_add(1, Ordering::AcqRel) + 1
+        } else {
+            self.version()
+        }
     }
 
-    pub fn expand_endpoints(&self, seeds: &[String]) -> Vec<String> {
+    pub fn expand_endpoints_if_changed(
+        &self,
+        seeds: &[String],
+        known_version: usize,
+    ) -> Option<(usize, Vec<String>)> {
+        let expanded = self.expand_endpoints_with_version(seeds);
+        (expanded.0 != known_version).then_some(expanded)
+    }
+
+    pub fn expand_endpoints_with_version(&self, seeds: &[String]) -> (usize, Vec<String>) {
         let valid = valid_unique(seeds);
         if valid.is_empty() {
-            return seeds.to_vec();
+            return (self.version(), seeds.to_vec());
         }
 
         let endpoint_to_cluster = self.endpoint_to_cluster.lock().unwrap();
+        let version = self.version();
         let clusters = find_clusters(&endpoint_to_cluster, &valid);
         let cluster = match clusters.as_slice() {
             [cluster] => Arc::clone(cluster),
-            [] => return seeds.to_vec(),
+            [] => return (version, seeds.to_vec()),
             _ => {
                 tracing::warn!(
                     "adapter HA: seeds touch multiple known clusters, skip endpoint expansion: {:?}",
                     valid
                 );
-                return seeds.to_vec();
+                return (version, seeds.to_vec());
             }
         };
         drop(endpoint_to_cluster);
 
-        let mut expanded = Vec::new();
+        let cluster_addrs = cluster.addresses();
+        let mut expanded = Vec::with_capacity(seeds.len() + cluster_addrs.len());
+        let mut seen = HashSet::with_capacity(seeds.len() + cluster_addrs.len());
         for seed in seeds {
-            if !expanded.contains(seed) {
+            if seen.insert(seed.as_str()) {
                 expanded.push(seed.clone());
             }
         }
-        for addr in cluster.addresses() {
-            if !expanded.contains(&addr) {
-                expanded.push(addr);
+        for addr in &cluster_addrs {
+            if seen.insert(addr.as_str()) {
+                expanded.push(addr.clone());
             }
         }
-        expanded
+        (version, expanded)
     }
 }
 
 fn valid_unique(addrs: &[String]) -> Vec<String> {
-    let mut valid = Vec::new();
-    for addr in addrs {
-        if is_valid_host_port(addr) && !valid.contains(addr) {
-            valid.push(addr.clone());
-        }
-    }
-    valid
+    let mut seen = HashSet::new();
+    addrs
+        .iter()
+        .filter(|addr| is_valid_host_port(addr) && seen.insert(addr.as_str()))
+        .cloned()
+        .collect()
 }
 
 fn find_clusters(
@@ -165,12 +214,48 @@ mod tests {
         ]));
 
         assert_eq!(
-            registry.expand_endpoints(&strings(&["ha-create-b.example:6041"])),
+            registry
+                .expand_endpoints_with_version(&strings(&["ha-create-b.example:6041"]))
+                .1,
             strings(&["ha-create-b.example:6041", "ha-create-a.example:6041",])
         );
         assert_eq!(
-            registry.expand_endpoints(&strings(&["ha-create-invalid"])),
+            registry
+                .expand_endpoints_with_version(&strings(&["ha-create-invalid"]))
+                .1,
             strings(&["ha-create-invalid"])
+        );
+    }
+
+    #[test]
+    fn test_registry_version_changes_only_when_topology_changes() {
+        let registry = ClusterRegistry::new();
+        let seed = strings(&["ha-version-a.example:6041"]);
+
+        assert_eq!(registry.version(), 0);
+
+        let first_version = registry.update_cluster(&seed);
+        assert!(first_version > 0);
+        assert_eq!(registry.version(), first_version);
+        assert!(registry
+            .expand_endpoints_if_changed(&seed, first_version)
+            .is_none());
+
+        assert_eq!(registry.update_cluster(&seed), first_version);
+
+        let second_version = registry.update_cluster(&strings(&[
+            "ha-version-a.example:6041",
+            "ha-version-b.example:6041",
+        ]));
+        assert!(second_version > first_version);
+
+        let (expanded_version, expanded) = registry
+            .expand_endpoints_if_changed(&seed, first_version)
+            .expect("new topology version should trigger endpoint expansion");
+        assert_eq!(expanded_version, second_version);
+        assert_eq!(
+            expanded,
+            strings(&["ha-version-a.example:6041", "ha-version-b.example:6041",])
         );
     }
 
@@ -184,10 +269,12 @@ mod tests {
         ]));
 
         assert_eq!(
-            registry.expand_endpoints(&strings(&[
-                "ha-expand-b.example:6041",
-                "ha-expand-d.example:6041",
-            ])),
+            registry
+                .expand_endpoints_with_version(&strings(&[
+                    "ha-expand-b.example:6041",
+                    "ha-expand-d.example:6041",
+                ]))
+                .1,
             strings(&[
                 "ha-expand-b.example:6041",
                 "ha-expand-d.example:6041",
@@ -197,16 +284,20 @@ mod tests {
         );
 
         assert_eq!(
-            registry.expand_endpoints(&strings(&["ha-expand-unknown.example:6041"])),
+            registry
+                .expand_endpoints_with_version(&strings(&["ha-expand-unknown.example:6041"]))
+                .1,
             strings(&["ha-expand-unknown.example:6041"])
         );
 
         registry.update_cluster(&strings(&["ha-expand-other.example:6041"]));
         assert_eq!(
-            registry.expand_endpoints(&strings(&[
-                "ha-expand-a.example:6041",
-                "ha-expand-other.example:6041",
-            ])),
+            registry
+                .expand_endpoints_with_version(&strings(&[
+                    "ha-expand-a.example:6041",
+                    "ha-expand-other.example:6041",
+                ]))
+                .1,
             strings(&["ha-expand-a.example:6041", "ha-expand-other.example:6041",])
         );
     }
@@ -225,12 +316,16 @@ mod tests {
         ]));
 
         assert_eq!(
-            registry.expand_endpoints(&strings(&["ha-update-b.example:6041"])),
+            registry
+                .expand_endpoints_with_version(&strings(&["ha-update-b.example:6041"]))
+                .1,
             strings(&["ha-update-b.example:6041", "ha-update-a.example:6041"])
         );
 
         assert_eq!(
-            registry.expand_endpoints(&strings(&["ha-update-invalid"])),
+            registry
+                .expand_endpoints_with_version(&strings(&["ha-update-invalid"]))
+                .1,
             strings(&["ha-update-invalid"])
         );
     }
@@ -248,7 +343,9 @@ mod tests {
         ]));
 
         assert_eq!(
-            registry.expand_endpoints(&strings(&["ha-multi-c.example:6041"])),
+            registry
+                .expand_endpoints_with_version(&strings(&["ha-multi-c.example:6041"]))
+                .1,
             strings(&["ha-multi-c.example:6041"])
         );
     }
@@ -267,7 +364,9 @@ mod tests {
         ]));
 
         assert_eq!(
-            registry.expand_endpoints(&strings(&["ha-transitive-c.example:6041"])),
+            registry
+                .expand_endpoints_with_version(&strings(&["ha-transitive-c.example:6041"]))
+                .1,
             strings(&[
                 "ha-transitive-c.example:6041",
                 "ha-transitive-a.example:6041",
@@ -297,7 +396,9 @@ mod tests {
             handle.join().unwrap();
         }
 
-        let expanded = registry.expand_endpoints(&strings(&["ha-concurrent-seed.example:6041"]));
+        let expanded = registry
+            .expand_endpoints_with_version(&strings(&["ha-concurrent-seed.example:6041"]))
+            .1;
         assert_eq!(expanded.len(), 9);
         assert_eq!(expanded[0], "ha-concurrent-seed.example:6041");
         for idx in 0..8 {
@@ -332,7 +433,9 @@ mod tests {
             handle.join().unwrap();
         }
 
-        let expanded = registry.expand_endpoints(&strings(&["ha-concurrent-first-b.example:6041"]));
+        let expanded = registry
+            .expand_endpoints_with_version(&strings(&["ha-concurrent-first-b.example:6041"]))
+            .1;
         assert_eq!(
             expanded,
             strings(&[

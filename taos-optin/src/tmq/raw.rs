@@ -1,15 +1,36 @@
+// Copyright (c) 2022 TAOS Data, Inc.
+//
+// SPDX-License-Identifier: MIT
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 pub(super) use conf::Conf;
 pub(super) use list::Topics;
 pub(super) use tmq::RawTmq;
 
 pub(super) mod tmq {
     use std::ffi::CStr;
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::Arc;
 
     use taos_query::tmq::{Assignment, VGroupId};
     use taos_query::RawError;
-    use tokio::sync::oneshot;
     use tracing::trace;
 
     use super::Topics;
@@ -18,14 +39,54 @@ pub(super) mod tmq {
     use crate::types::{tmq_resp_err_t, tmq_t, SafeTmqT};
     use crate::{RawRes, RawResult};
 
+    /// Demand signal shared between the async take path and the poll thread.
+    ///
+    /// The thread calls into libtaos only while at least one take is waiting
+    /// and the message queue has room, so a subscribed-but-idle consumer
+    /// produces no RPC traffic at all.
+    #[derive(Debug)]
+    struct DemandShared {
+        waiters: AtomicUsize,
+        kick: flume::Sender<()>,
+    }
+
+    /// Keeps one waiting take registered with the poll thread.
+    ///
+    /// Created by the async receive path before taking from the message
+    /// queue; dropping it (message taken or take timed out) lets the poll
+    /// thread park again. Each transition kicks the thread so it re-evaluates
+    /// whether to poll.
+    pub struct DemandGuard {
+        shared: Arc<DemandShared>,
+    }
+
+    impl DemandGuard {
+        fn new(shared: &Arc<DemandShared>) -> Self {
+            shared.waiters.fetch_add(1, Ordering::Relaxed);
+            let _ = shared.kick.try_send(());
+            Self {
+                shared: shared.clone(),
+            }
+        }
+    }
+
+    impl Drop for DemandGuard {
+        fn drop(&mut self) {
+            self.shared.waiters.fetch_sub(1, Ordering::Relaxed);
+            let _ = self.shared.kick.try_send(());
+        }
+    }
+
     #[derive(Debug)]
     pub struct RawTmq {
         api: Arc<ApiEntry>,
         tmq_api: Arc<TmqApi>,
         tmq_ptr: *mut tmq_t,
         timeout: i64,
-        sender: flume::Sender<oneshot::Sender<RawResult<Option<RawRes>>>>,
-        receiver: Option<flume::Receiver<oneshot::Sender<RawResult<Option<RawRes>>>>>,
+        msg_sender: flume::Sender<RawResult<RawRes>>,
+        msg_receiver: flume::Receiver<RawResult<RawRes>>,
+        demand: Arc<DemandShared>,
+        kick_receiver: Option<flume::Receiver<()>>,
         thread_handle: Option<std::thread::JoinHandle<()>>,
         stop_signal: Arc<AtomicBool>,
         supports_poll_null_check: bool,
@@ -41,15 +102,21 @@ pub(super) mod tmq {
             tmq_ptr: *mut tmq_t,
             timeout: i64,
         ) -> Self {
-            let (sender, receiver) = flume::bounded(1);
+            let (msg_sender, msg_receiver) = flume::bounded(1);
+            let (kick_sender, kick_receiver) = flume::bounded(1);
             let supports_poll_null_check = api.ge_v3358();
             Self {
                 api,
                 tmq_api,
                 tmq_ptr,
                 timeout,
-                sender,
-                receiver: Some(receiver),
+                msg_sender,
+                msg_receiver,
+                demand: Arc::new(DemandShared {
+                    waiters: AtomicUsize::new(0),
+                    kick: kick_sender,
+                }),
+                kick_receiver: Some(kick_receiver),
                 thread_handle: None,
                 stop_signal: Arc::new(AtomicBool::new(false)),
                 supports_poll_null_check,
@@ -199,6 +266,8 @@ pub(super) mod tmq {
             }
 
             self.stop_signal.store(true, Ordering::Relaxed);
+            // Wake the poll thread if it is parked waiting for demand.
+            let _ = self.demand.kick.try_send(());
 
             if let Some(handle) = self.thread_handle.take() {
                 let tmq_api = self.tmq_api.clone();
@@ -341,13 +410,19 @@ pub(super) mod tmq {
         }
 
         pub(crate) fn spawn_thread(&mut self) {
-            if self.receiver.is_none() {
+            if self.thread_handle.is_some() {
                 return;
             }
 
+            let Some(kick_receiver) = self.kick_receiver.take() else {
+                // Already spawned once (e.g. re-subscribe after unsubscribe).
+                return;
+            };
+
             trace!("Spawning worker thread to call C func `tmq_consumer_poll`");
 
-            let receiver = self.receiver.take().unwrap();
+            let msg_sender = self.msg_sender.clone();
+            let demand = self.demand.clone();
             let safe_tmq = SafeTmqT(self.as_ptr());
             let tmq_api = self.tmq_api.clone();
             let api = self.api.clone();
@@ -357,72 +432,59 @@ pub(super) mod tmq {
 
             let handle = std::thread::spawn(move || {
                 let safe_tmq = safe_tmq;
-                let mut cache = None;
 
                 while !stop_signal.load(Ordering::Relaxed) {
-                    match receiver.recv() {
-                        Ok(sender) => {
-                            if let Some(res) = cache.take() {
-                                if let Err(res) = sender.send(Ok(Some(res))) {
-                                    trace!("Receiver has been closed, cached res: {res:?}");
-                                    cache = res.unwrap();
-                                }
-                                trace!("Using cache, poll next message.");
-                                continue;
-                            }
-
-                            let mut timeout = timeout;
-                            let mut poll_res = std::ptr::null_mut();
-                            let mut val = Ok(None);
-
-                            while timeout > 0 {
-                                let time = timeout.min(2000);
-                                timeout -= time;
-
-                                trace!(
-                                    "Calling C func `tmq_consumer_poll` with ptr: {:?}, timeout: {}",
-                                    safe_tmq.0,
-                                    time
-                                );
-                                let now = std::time::Instant::now();
-                                let res = unsafe { (tmq_api.tmq_consumer_poll)(safe_tmq.0, time) };
-                                let elapsed = now.elapsed();
-                                trace!(
-                                    tmq.poll.elapsed.ms = elapsed.as_millis(),
-                                    "C func `tmq_consumer_poll` returned a ptr: {res:?}"
-                                );
-
-                                if !res.is_null() {
-                                    poll_res = res;
-                                    break;
-                                }
-
-                                if supports_poll_null_check {
-                                    if let Err(err) = api.check(res) {
-                                        val = Err(err);
-                                        break;
-                                    }
-                                }
-                            }
-
-                            if poll_res.is_null() {
-                                if sender.send(val).is_err() {
-                                    trace!("Receiver has been closed");
-                                }
-                                continue;
-                            }
-
-                            let res = unsafe { RawRes::from_ptr_unchecked(api.clone(), poll_res) };
-                            if let Err(res) = sender.send(Ok(Some(res))) {
-                                trace!("Receiver has been closed, cached res: {res:?}");
-                                cache = res.unwrap();
-                            }
-                        }
-                        Err(_) => {
-                            trace!("Sender has been closed, exit thread.");
+                    // On-demand polling: call into libtaos only while a take
+                    // is waiting and the queue has room. Otherwise park until
+                    // kicked (a take starts waiting, a queue slot frees, or
+                    // `unsubscribe` sets the stop signal), so a
+                    // subscribed-but-idle consumer issues no RPCs.
+                    if demand.waiters.load(Ordering::Relaxed) == 0 || msg_sender.is_full() {
+                        if kick_receiver.recv().is_err() {
+                            trace!("Demand channel closed, exit thread.");
                             break;
                         }
-                    };
+                        continue;
+                    }
+
+                    // Poll in chunks of at most 2s to stay responsive to the
+                    // stop signal. The raw timeout only sizes the chunk; take
+                    // timeouts are handled by the async side.
+                    let time = if timeout > 0 { timeout.min(2000) } else { 2000 };
+
+                    trace!(
+                        "Calling C func `tmq_consumer_poll` with ptr: {:?}, timeout: {}",
+                        safe_tmq.0,
+                        time
+                    );
+                    let now = std::time::Instant::now();
+                    let res = unsafe { (tmq_api.tmq_consumer_poll)(safe_tmq.0, time) };
+                    let elapsed = now.elapsed();
+                    trace!(
+                        tmq.poll.elapsed.ms = elapsed.as_millis(),
+                        "C func `tmq_consumer_poll` returned a ptr: {res:?}"
+                    );
+
+                    if res.is_null() {
+                        if supports_poll_null_check {
+                            if let Err(err) = api.check(res) {
+                                if msg_sender.send(Err(err)).is_err() {
+                                    trace!("Receiver has been closed, exit thread.");
+                                    break;
+                                }
+                            }
+                        }
+                        continue;
+                    }
+
+                    let raw = unsafe { RawRes::from_ptr_unchecked(api.clone(), res) };
+                    // Bounded queue: block under backpressure instead of ever
+                    // dropping a polled message. `send` only fails when the
+                    // consumer is gone.
+                    if msg_sender.send(Ok(raw)).is_err() {
+                        trace!("Receiver has been closed, exit thread.");
+                        break;
+                    }
                 }
 
                 trace!("Worker thread stopped.");
@@ -435,14 +497,94 @@ pub(super) mod tmq {
             self.tmq_api.clone()
         }
 
-        pub(crate) fn sender(&self) -> &flume::Sender<oneshot::Sender<RawResult<Option<RawRes>>>> {
-            &self.sender
+        pub(crate) fn msg_receiver(&self) -> &flume::Receiver<RawResult<RawRes>> {
+            &self.msg_receiver
+        }
+
+        /// Register a waiting take: the poll thread calls into libtaos only
+        /// while at least one guard is alive. See `DemandGuard`.
+        pub(crate) fn demand_guard(&self) -> DemandGuard {
+            DemandGuard::new(&self.demand)
         }
     }
 
     impl Drop for RawTmq {
         fn drop(&mut self) {
             self.unsubscribe();
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+        use std::time::Duration;
+
+        use super::{DemandGuard, DemandShared};
+
+        fn demand_pair() -> (Arc<DemandShared>, flume::Receiver<()>) {
+            let (kick, kick_rx) = flume::bounded(1);
+            (
+                Arc::new(DemandShared {
+                    waiters: AtomicUsize::new(0),
+                    kick,
+                }),
+                kick_rx,
+            )
+        }
+
+        #[test]
+        fn test_demand_guard_accounting() {
+            let (shared, kick_rx) = demand_pair();
+            assert_eq!(shared.waiters.load(Ordering::Relaxed), 0);
+            {
+                let _g1 = DemandGuard::new(&shared);
+                let _g2 = DemandGuard::new(&shared);
+                assert_eq!(shared.waiters.load(Ordering::Relaxed), 2);
+                assert!(
+                    kick_rx.try_recv().is_ok(),
+                    "guard creation must kick the poll thread"
+                );
+            }
+            assert_eq!(shared.waiters.load(Ordering::Relaxed), 0);
+        }
+
+        /// Mechanism guard for the poll thread's backpressure assumption: a
+        /// bounded(1) queue blocks the producer while it is full, which is
+        /// what stops the thread from fetching (and dropping) further
+        /// messages.
+        #[test]
+        fn test_bounded_queue_backpressure() {
+            let (tx, rx) = flume::bounded(1);
+            tx.send(1u32).unwrap();
+            let (done_tx, done_rx) = std::sync::mpsc::channel();
+            let handle = std::thread::spawn(move || {
+                tx.send(2u32).expect("receiver alive");
+                done_tx.send(()).unwrap();
+            });
+            assert!(
+                done_rx.recv_timeout(Duration::from_millis(200)).is_err(),
+                "producer must block while the queue is full"
+            );
+            assert_eq!(rx.recv().unwrap(), 1);
+            done_rx
+                .recv_timeout(Duration::from_secs(2))
+                .expect("send completes once a slot frees");
+            handle.join().unwrap();
+            assert_eq!(rx.recv().unwrap(), 2);
+        }
+
+        /// Mechanism guard for the poll thread's exit path: a producer
+        /// blocked on a full queue is released with an error when the
+        /// receiver is dropped — how the thread notices the consumer is gone.
+        #[test]
+        fn test_blocked_sender_fails_when_receiver_dropped() {
+            let (tx, rx) = flume::bounded(1);
+            tx.send(1u32).unwrap();
+            let handle = std::thread::spawn(move || tx.send(2u32));
+            std::thread::sleep(Duration::from_millis(100));
+            drop(rx);
+            assert!(handle.join().expect("producer thread panicked").is_err());
         }
     }
 }

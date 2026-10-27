@@ -1,3 +1,25 @@
+// Copyright (c) 2022 TAOS Data, Inc.
+//
+// SPDX-License-Identifier: MIT
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 use std::fmt::Debug;
 use std::future::Future;
 use std::io::Write;
@@ -22,7 +44,7 @@ use taos_query::{
 };
 use thiserror::Error;
 use tokio::select;
-use tokio::sync::{mpsc, oneshot, watch, Mutex, Notify, RwLock};
+use tokio::sync::{mpsc, oneshot, Mutex, Notify, RwLock};
 use tokio::task::JoinHandle;
 use tokio::time::{self, timeout};
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
@@ -50,7 +72,7 @@ pub enum ConnState {
 pub struct WsTaos {
     conn_id: u64,
     sender: WsQuerySender,
-    close_signal: watch::Sender<bool>,
+    close_token: CancellationToken,
     tz: Option<Tz>,
     builder: Arc<TaosBuilder>,
     stmt2s: Arc<DashMap<u64, Weak<Stmt2Inner>>>,
@@ -79,7 +101,7 @@ impl WsTaos {
         let (ws_stream, version) = builder.connect().instrument(span.clone()).await?;
 
         let (message_tx, message_rx) = flume::bounded(64);
-        let (close_tx, close_rx) = watch::channel(false);
+        let close_token = CancellationToken::new();
 
         let query_sender = WsQuerySender {
             version_info: VersionInfo::new(version),
@@ -88,12 +110,13 @@ impl WsTaos {
             queries: Arc::default(),
             results: Arc::default(),
             read_timeout: builder.read_timeout,
+            close_token: close_token.clone(),
         };
 
         let builder = Arc::new(builder.clone());
         let ws_taos = Arc::new(WsTaos {
             conn_id,
-            close_signal: close_tx,
+            close_token: close_token.clone(),
             sender: query_sender.clone(),
             tz: builder.tz,
             builder: builder.clone(),
@@ -111,7 +134,7 @@ impl WsTaos {
                 ws_stream,
                 query_sender,
                 message_rx,
-                close_rx,
+                close_token,
             )
             .instrument(span),
         );
@@ -424,10 +447,10 @@ impl WsTaos {
         }
     }
 
-    pub(crate) async fn recover_stmt2(self: Arc<Self>) {
+    pub(crate) async fn recover_stmt2(self: Arc<Self>) -> bool {
         if self.stmt2s.is_empty() {
             tracing::trace!("no stmt2 instances to recover");
-            return;
+            return false;
         }
 
         let ws_taos = self.clone();
@@ -437,11 +460,14 @@ impl WsTaos {
         let recover_handle = tokio::spawn(
             async move {
                 tokio::select! {
+                    biased;
                     _ = token.cancelled() => {
                         tracing::trace!("stmt2 recover cancelled");
                     }
                     _ = ws_taos._recover_stmt2() => {
-                        ws_taos.set_state(ConnState::Connected);
+                        if !ws_taos.close_token.is_cancelled() {
+                            ws_taos.set_state(ConnState::Connected);
+                        }
                         *ws_taos.recover_token.lock().await = None;
                         *ws_taos.recover_handle.lock().await = None;
                         tracing::trace!("stmt2 recover finished");
@@ -453,6 +479,7 @@ impl WsTaos {
 
         *self.recover_token.lock().await = Some(recover_token);
         *self.recover_handle.lock().await = Some(recover_handle);
+        true
     }
 
     async fn _recover_stmt2(&self) {
@@ -489,21 +516,50 @@ impl WsTaos {
 
     pub(crate) async fn wait_for_reconnect(&self) -> RawResult<()> {
         loop {
+            let notified = self.notify.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+
+            if self.close_token.is_cancelled() {
+                return Err(connection_closed_error("wait"));
+            }
+
             match self.state() {
                 ConnState::Connected => return Ok(()),
-                ConnState::Reconnecting => self.notify.notified().await,
-                ConnState::Disconnected => {
-                    return Err(RawError::from_code(WS_ERROR_NO::CONN_CLOSED.as_code())
-                        .context("WebSocket connection is closed (wait)"));
+                ConnState::Disconnected => return Err(connection_closed_error("wait")),
+                ConnState::Reconnecting => {}
+            }
+
+            tokio::select! {
+                biased;
+                _ = self.close_token.cancelled() => {
+                    return Err(connection_closed_error("wait"));
                 }
+                _ = &mut notified => {}
             }
         }
     }
 
     pub(crate) fn set_state(&self, state: ConnState) {
-        tracing::trace!("set connection state to: {state:?}");
-        self.state.store(state as usize, Ordering::Release);
-        self.notify.notify_waiters();
+        tracing::trace!("attempting to set connection state to: {state:?}");
+        let updated = if state == ConnState::Connected {
+            !self.close_token.is_cancelled()
+                && self
+                    .state
+                    .compare_exchange(
+                        ConnState::Reconnecting as usize,
+                        ConnState::Connected as usize,
+                        Ordering::AcqRel,
+                        Ordering::Acquire,
+                    )
+                    .is_ok()
+        } else {
+            self.state.store(state as usize, Ordering::Release);
+            true
+        };
+        if updated {
+            self.notify.notify_waiters();
+        }
     }
 
     pub(crate) fn state(&self) -> ConnState {
@@ -640,9 +696,21 @@ impl AsyncQueryable for WsTaos {
 impl Drop for WsTaos {
     fn drop(&mut self) {
         tracing::trace!("dropping ws connection, conn_id: {}", self.conn_id);
+        self.close_token.cancel();
         self.set_state(ConnState::Disconnected);
-        // Send close signal to reader/writer spawned tasks.
-        let _ = self.close_signal.send(true);
+        self.sender.fail_all_queries("drop");
+    }
+}
+
+async fn send_fetch_result(
+    close_token: &CancellationToken,
+    raw_block_sender: &mpsc::Sender<Result<(RawBlock, Duration), RawError>>,
+    result: Result<(RawBlock, Duration), RawError>,
+) -> bool {
+    tokio::select! {
+        biased;
+        _ = close_token.cancelled() => false,
+        result = raw_block_sender.send(result) => result.is_ok(),
     }
 }
 
@@ -686,7 +754,12 @@ pub(crate) async fn fetch_binary(
                         if block_code != 0 {
                             let err = RawError::new(block_code, block_message);
                             tracing::debug!("fetch binary failed, result id: {res_id}, err: {err:?}");
-                            let _ = raw_block_sender.send(Err(err)).await;
+                            send_fetch_result(
+                                &query_sender.close_token,
+                                &raw_block_sender,
+                                Err(err),
+                            )
+                            .await;
                             break;
                         }
 
@@ -700,10 +773,12 @@ pub(crate) async fn fetch_binary(
                         raw_block.with_field_names(&field_names);
                         metrics.time_cost_in_block_parse += parse_start.elapsed();
 
-                        if raw_block_sender
-                            .send(Ok((raw_block, timing)))
-                            .await
-                            .is_err()
+                        if !send_fetch_result(
+                            &query_sender.close_token,
+                            &raw_block_sender,
+                            Ok((raw_block, timing)),
+                        )
+                        .await
                         {
                             tracing::debug!("fetch binary, failed to send raw block to receiver, result id: {res_id}");
                             break;
@@ -711,7 +786,22 @@ pub(crate) async fn fetch_binary(
                     }
                     Ok(_) => unreachable!("unexpected response for result: {res_id}"),
                     Err(err) => {
-                        if raw_block_sender.send(Err(err)).await.is_err() {
+                        if err.code() == WS_ERROR_NO::CONN_CLOSED.as_code() {
+                            send_fetch_result(
+                                &query_sender.close_token,
+                                &raw_block_sender,
+                                Err(err),
+                            )
+                            .await;
+                            break;
+                        }
+                        if !send_fetch_result(
+                            &query_sender.close_token,
+                            &raw_block_sender,
+                            Err(err),
+                        )
+                        .await
+                        {
                             tracing::warn!("fetch binary, failed to send error to receiver, result id: {res_id}");
                             break;
                         }
@@ -754,7 +844,8 @@ async fn fetch(
                     Ok(WsRecvData::Fetch(fetch)) => fetch,
                     Ok(_) => unreachable!("unexpected response for result: {res_id}"),
                     Err(err) => {
-                        let _ = raw_block_sender.send(Err(err)).await;
+                        send_fetch_result(&query_sender.close_token, &raw_block_sender, Err(err))
+                            .await;
                         break;
                     }
                 };
@@ -777,10 +868,12 @@ async fn fetch(
                         raw.with_field_names(&field_names);
                         metrics.time_cost_in_block_parse += parse_start.elapsed();
 
-                        if raw_block_sender
-                            .send(Ok((raw, timing)))
-                            .await
-                            .is_err()
+                        if !send_fetch_result(
+                            &query_sender.close_token,
+                            &raw_block_sender,
+                            Ok((raw, timing)),
+                        )
+                        .await
                         {
                             tracing::warn!(
                                 "fetch block, failed to send raw block to receiver, result id: {res_id}"
@@ -803,10 +896,12 @@ async fn fetch(
 
                         metrics.time_cost_in_block_parse += parse_start.elapsed();
 
-                        if raw_block_sender
-                            .send(Ok((raw, timing)))
-                            .await
-                            .is_err()
+                        if !send_fetch_result(
+                            &query_sender.close_token,
+                            &raw_block_sender,
+                            Ok((raw, timing)),
+                        )
+                        .await
                         {
                             tracing::warn!(
                                 "fetch block v2, failed to send raw block to receiver, result id: {res_id}"
@@ -816,7 +911,22 @@ async fn fetch(
                     }
                     Ok(_) => unreachable!("unexpected response for result: {res_id}"),
                     Err(err) => {
-                        if raw_block_sender.send(Err(err)).await.is_err() {
+                        if err.code() == WS_ERROR_NO::CONN_CLOSED.as_code() {
+                            send_fetch_result(
+                                &query_sender.close_token,
+                                &raw_block_sender,
+                                Err(err),
+                            )
+                            .await;
+                            break;
+                        }
+                        if !send_fetch_result(
+                            &query_sender.close_token,
+                            &raw_block_sender,
+                            Err(err),
+                        )
+                        .await
+                        {
                             tracing::warn!("fetch, failed to send error to receiver, result id: {res_id}");
                             break;
                         }
@@ -918,6 +1028,7 @@ pub(crate) struct WsQuerySender {
     pub(super) sender: flume::Sender<WsMessage>,
     pub(super) queries: QueryAgent,
     read_timeout: Duration,
+    pub(super) close_token: CancellationToken,
 }
 
 const WRITE_TIMEOUT: Duration = Duration::from_secs(1);
@@ -931,10 +1042,16 @@ impl WsQuerySender {
     async fn send_recv(&self, message: WsSend) -> RawResult<WsRecvData> {
         let req_id = message.req_id();
         let (data_tx, data_rx) = oneshot::channel();
-        let _ = self.queries.insert_async(req_id, data_tx).await;
+        tokio::select! {
+            biased;
+            _ = self.close_token.cancelled() => {
+                return Err(connection_closed_error("send_recv while registering waiter"));
+            }
+            _ = self.queries.insert_async(req_id, data_tx) => {}
+        }
 
         let cleanup = || {
-            let res = self.queries.remove(&req_id);
+            let res = self.queries.remove_sync(&req_id);
             tracing::trace!("send_recv, clean up queries, req_id: 0x{req_id:x}, res: {res:?}");
         };
         let _cleanup_queries = CleanUp { f: Some(cleanup) };
@@ -943,15 +1060,21 @@ impl WsQuerySender {
 
         if let WsSend::FetchBlock(args) = message {
             let id = args.id;
-            if self.results.contains_async(&id).await {
+            let result = tokio::select! {
+                biased;
+                _ = self.close_token.cancelled() => {
+                    return Err(connection_closed_error("send_recv while registering result"));
+                }
+                result = self.results.insert_async(id, args.req_id) => result
+            };
+            if result.is_err() {
                 Err(RawError::from_string(format!(
                     "FetchBlock: result id: {id} already exists"
                 )))?;
             }
-            let _ = self.results.insert_async(id, args.req_id).await;
 
             let cleanup = move || {
-                let res = self.results.remove(&id);
+                let res = self.results.remove_sync(&id);
                 tracing::trace!("send_recv, clean up results, res_id: {id}, res: {res:?}");
             };
             cleanup_results = Some(CleanUp { f: Some(cleanup) });
@@ -961,36 +1084,50 @@ impl WsQuerySender {
 
         tracing::trace!("sending message with req_id 0x{req_id:x}: {message:?}");
 
-        timeout(
-            WRITE_TIMEOUT,
-            self.sender.send_async(WsMessage::Command(message)),
-        )
-        .await
-        .map_err(|e| {
-            tracing::error!("send request timeout, req_id: 0x{req_id:x}, err: {e}");
-            Error::from(e)
-        })?
-        .map_err(Error::from)?;
+        tokio::select! {
+            biased;
+            _ = self.close_token.cancelled() => {
+                return Err(connection_closed_error("send_recv while sending request"));
+            }
+            result = timeout(
+                WRITE_TIMEOUT,
+                self.sender.send_async(WsMessage::Command(message)),
+            ) => {
+                result
+                    .map_err(|e| {
+                        tracing::error!("send request timeout, req_id: 0x{req_id:x}, err: {e}");
+                        Error::from(e)
+                    })?
+                    .map_err(Error::from)?;
+            }
+        }
 
         tracing::trace!("message sent, waiting for response, req_id: 0x{req_id:x}");
 
-        let data = timeout(self.read_timeout, data_rx)
-            .await
-            .map_err(|e| {
-                tracing::error!(
-                    "receive response timeout, req_id: 0x{req_id:x}, timeout: {:?}, error: {e:#}",
-                    self.read_timeout
-                );
-                RawError::new(
-                    WS_ERROR_NO::RECV_MESSAGE_TIMEOUT.as_code(),
-                    format!(
-                        "Receive data via websocket timeout after {:?}",
-                        self.read_timeout
-                    ),
-                )
-            })?
-            .map_err(|_| RawError::from_string(format!("0x{req_id:x} request cancelled")))?
-            .map_err(Error::from)?;
+        let data = tokio::select! {
+            biased;
+            _ = self.close_token.cancelled() => {
+                return Err(connection_closed_error("send_recv while waiting for response"));
+            }
+            result = timeout(self.read_timeout, data_rx) => {
+                result
+                    .map_err(|e| {
+                        tracing::error!(
+                            "receive response timeout, req_id: 0x{req_id:x}, timeout: {:?}, error: {e:#}",
+                            self.read_timeout
+                        );
+                        RawError::new(
+                            WS_ERROR_NO::RECV_MESSAGE_TIMEOUT.as_code(),
+                            format!(
+                                "Receive data via websocket timeout after {:?}",
+                                self.read_timeout
+                            ),
+                        )
+                    })?
+                    .map_err(|_| RawError::from_string(format!("0x{req_id:x} request cancelled")))?
+                    .map_err(Error::from)?
+            }
+        };
 
         tracing::trace!("send_recv, req_id: 0x{req_id:x}, received data: {data:?}");
 
@@ -1000,24 +1137,70 @@ impl WsQuerySender {
     async fn send_only(&self, message: WsSend) -> RawResult<()> {
         let req_id = message.req_id();
         tracing::trace!("send_only, req_id: 0x{req_id:x}, message: {message:?}");
-        timeout(
-            WRITE_TIMEOUT,
-            self.sender.send_async(WsMessage::Command(message)),
-        )
-        .await
-        .map_err(|e| {
-            tracing::error!("send_only, send request timeout, req_id: 0x{req_id:x}, err: {e}");
-            Error::from(e)
-        })?
-        .map_err(Error::from)?;
+        tokio::select! {
+            biased;
+            _ = self.close_token.cancelled() => {
+                return Err(connection_closed_error("send_only while sending request"));
+            }
+            result = timeout(
+                WRITE_TIMEOUT,
+                self.sender.send_async(WsMessage::Command(message)),
+            ) => {
+                result
+                    .map_err(|e| {
+                        tracing::error!("send_only, send request timeout, req_id: 0x{req_id:x}, err: {e}");
+                        Error::from(e)
+                    })?
+                    .map_err(Error::from)?;
+            }
+        }
         Ok(())
     }
 
+    pub(super) fn close(&self, context: &'static str) {
+        self.close_token.cancel();
+        self.fail_all_queries(context);
+    }
+
+    fn fail_all_queries(&self, context: &'static str) {
+        self.results.clear_sync();
+
+        let mut req_ids = Vec::with_capacity(self.queries.len());
+        self.queries.iter_sync(|req_id, _| {
+            req_ids.push(*req_id);
+            true
+        });
+
+        for req_id in req_ids {
+            if let Some((_, sender)) = self.queries.remove_sync(&req_id) {
+                let _ = sender.send(Err(connection_closed_error(context)));
+            }
+        }
+    }
+
     fn send_blocking(&self, message: WsSend) -> RawResult<()> {
-        self.sender
-            .send(WsMessage::Command(message))
-            .map_err(Error::from)?;
-        Ok(())
+        let sender = self.sender.clone();
+        let close_token = self.close_token.clone();
+        taos_query::block_in_place_or_global(async move {
+            tokio::select! {
+                biased;
+                _ = close_token.cancelled() => {
+                    Err(connection_closed_error("send_blocking"))
+                }
+                result = timeout(
+                    WRITE_TIMEOUT,
+                    sender.send_async(WsMessage::Command(message)),
+                ) => {
+                    result
+                        .map_err(|e| {
+                            tracing::error!("send_blocking request timeout, err: {e}");
+                            Error::from(e)
+                        })?
+                        .map_err(Error::from)?;
+                    Ok(())
+                }
+            }
+        })
     }
 }
 
@@ -1081,6 +1264,11 @@ impl WS_ERROR_NO {
     pub const fn as_code(&self) -> Code {
         Code::new(*self as _)
     }
+}
+
+pub(super) fn connection_closed_error(context: &'static str) -> RawError {
+    RawError::from_code(WS_ERROR_NO::CONN_CLOSED.as_code())
+        .context(format!("WebSocket connection is closed ({context})"))
 }
 
 impl Error {
@@ -1152,19 +1340,23 @@ impl ResultSet {
             return Ok(None);
         }
         let now = Instant::now();
-        self.blocks_buffer
-            .as_mut()
-            .unwrap()
-            .recv()
-            .await
-            .map(|res| {
-                res.map(|(raw, timing)| {
-                    self.metrics.time_cost_in_flume += now.elapsed();
-                    self.timing = timing;
-                    raw
-                })
-            })
-            .transpose()
+        tokio::select! {
+            biased;
+            _ = self.sender.close_token.cancelled() => {
+                Err(connection_closed_error("fetch result"))
+            }
+            result = self.blocks_buffer.as_mut().unwrap().recv() => {
+                result
+                    .map(|res| {
+                        res.map(|(raw, timing)| {
+                            self.metrics.time_cost_in_flume += now.elapsed();
+                            self.timing = timing;
+                            raw
+                        })
+                    })
+                    .transpose()
+            }
+        }
     }
 
     pub fn take_timing(&self) -> Duration {
@@ -1172,11 +1364,10 @@ impl ResultSet {
     }
 
     pub async fn stop(&self) {
-        println!("Stop result set: {}", self.args.id);
+        tracing::debug!(result_id = %self.args.id, "Stop result set");
         if let Some((_, req_id)) = self.sender.results.remove_async(&self.args.id).await {
-            self.sender.queries.remove_async(&req_id).await;
+            let _ = self.sender.queries.remove_async(&req_id).await;
         }
-
         let _ = self.sender.send_only(WsSend::FreeResult(self.args)).await;
     }
 
@@ -1298,8 +1489,8 @@ impl Drop for ResultSet {
         let fetch_done_rx = self.fetch_done_reader.take();
 
         let clean = move || {
-            if let Some((_, req_id)) = query_sender.results.remove(&args.id) {
-                query_sender.queries.remove(&req_id);
+            if let Some((_, req_id)) = query_sender.results.remove_sync(&args.id) {
+                query_sender.queries.remove_sync(&req_id);
             }
             if let Some(blocks_rx) = blocks_rx {
                 drop(blocks_rx);
@@ -1794,15 +1985,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_read_timeout() {
-        let (tx, _rx) = flume::bounded(1);
-
+        let (sender, _receiver) = flume::bounded(1);
         let qs = WsQuerySender {
             version_info: VersionInfo::new("3.3.8.0"),
             req_id: Arc::new(AtomicU64::new(1)),
             results: Arc::new(QueryResMapper::new()),
-            sender: tx,
+            sender,
             queries: Arc::new(QueryInner::new()),
             read_timeout: Duration::from_millis(50),
+            close_token: CancellationToken::new(),
         };
 
         let req = WsSend::Query {
@@ -1811,6 +2002,608 @@ mod tests {
         };
         let err = qs.send_recv(req).await.unwrap_err();
         assert_eq!(err.code(), WS_ERROR_NO::RECV_MESSAGE_TIMEOUT.as_code());
+    }
+
+    #[tokio::test]
+    async fn test_send_recv_cancels_waiter_registration_lock_wait_on_close() {
+        let (message_sender, _message_reader) = flume::bounded(1);
+        let query_sender = WsQuerySender {
+            version_info: VersionInfo::new("3.3.8.0"),
+            req_id: Arc::default(),
+            results: Arc::default(),
+            sender: message_sender,
+            queries: Arc::default(),
+            read_timeout: Duration::from_secs(30),
+            close_token: CancellationToken::new(),
+        };
+        let (locked_sender, _locked_receiver) = oneshot::channel();
+        query_sender.queries.insert_sync(0, locked_sender).unwrap();
+        let locked_entry = query_sender.queries.entry_sync(0);
+
+        let pending_sender = query_sender.clone();
+        let request_handle = tokio::spawn(async move {
+            pending_sender
+                .send_recv(WsSend::Query {
+                    req_id: 10,
+                    sql: "select 10".to_string(),
+                })
+                .await
+        });
+
+        tokio::task::yield_now().await;
+        query_sender.close_token.cancel();
+
+        let result = tokio::time::timeout(Duration::from_millis(200), request_handle)
+            .await
+            .expect("waiter registration lock wait must stop when the connection closes")
+            .expect("request task must not panic");
+        let error = result.expect_err("waiter registration must fail on close");
+        assert_eq!(error.code(), WS_ERROR_NO::CONN_CLOSED.as_code());
+        drop(locked_entry);
+    }
+
+    #[tokio::test]
+    async fn test_send_only_cancels_pending_channel_send_on_close() {
+        let (message_sender, message_reader) = flume::bounded(1);
+        let query_sender = WsQuerySender {
+            version_info: VersionInfo::new("3.3.8.0"),
+            req_id: Arc::default(),
+            results: Arc::default(),
+            sender: message_sender,
+            queries: Arc::default(),
+            read_timeout: Duration::from_secs(30),
+            close_token: CancellationToken::new(),
+        };
+
+        query_sender
+            .sender
+            .send(WsMessage::Command(WsSend::Query {
+                req_id: 1,
+                sql: "select 1".to_string(),
+            }))
+            .unwrap();
+
+        let pending_sender = query_sender.clone();
+        let send_handle = tokio::spawn(async move {
+            pending_sender
+                .send_only(WsSend::Query {
+                    req_id: 2,
+                    sql: "select 2".to_string(),
+                })
+                .await
+        });
+
+        tokio::task::yield_now().await;
+        query_sender.close_token.cancel();
+
+        let result = tokio::time::timeout(Duration::from_millis(200), send_handle)
+            .await
+            .expect("pending channel send must stop when the connection closes")
+            .expect("send task must not panic");
+        let error = result.expect_err("pending channel send must fail on close");
+        assert_eq!(error.code(), WS_ERROR_NO::CONN_CLOSED.as_code());
+
+        assert!(message_reader.try_recv().is_ok());
+        assert!(message_reader.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn test_send_recv_cancels_response_wait_on_close() {
+        let (message_sender, message_reader) = flume::bounded(1);
+        let query_sender = WsQuerySender {
+            version_info: VersionInfo::new("3.3.8.0"),
+            req_id: Arc::default(),
+            results: Arc::default(),
+            sender: message_sender,
+            queries: Arc::default(),
+            read_timeout: Duration::from_secs(30),
+            close_token: CancellationToken::new(),
+        };
+        let pending_sender = query_sender.clone();
+        let request_handle = tokio::spawn(async move {
+            pending_sender
+                .send_recv(WsSend::Query {
+                    req_id: 3,
+                    sql: "select 3".to_string(),
+                })
+                .await
+        });
+
+        message_reader
+            .recv_async()
+            .await
+            .expect("request should be queued before waiting for its response");
+        query_sender.close_token.cancel();
+
+        let result = tokio::time::timeout(Duration::from_millis(200), request_handle)
+            .await
+            .expect("response wait must stop when the connection closes")
+            .expect("request task must not panic");
+        let error = result.expect_err("response wait must fail on close");
+        assert_eq!(error.code(), WS_ERROR_NO::CONN_CLOSED.as_code());
+        assert!(!query_sender.queries.contains_sync(&3));
+    }
+
+    #[tokio::test]
+    async fn test_wait_for_reconnect_returns_when_close_token_is_cancelled() {
+        let (message_sender, _message_reader) = flume::bounded(1);
+        let sender = WsQuerySender {
+            version_info: VersionInfo::new("3.3.8.0"),
+            req_id: Arc::default(),
+            results: Arc::default(),
+            sender: message_sender,
+            queries: Arc::default(),
+            read_timeout: Duration::from_secs(30),
+            close_token: CancellationToken::new(),
+        };
+        let builder = Arc::new(TaosBuilder::from_dsn("ws://127.0.0.1:6041").unwrap());
+        let client = WsTaos {
+            conn_id: 0,
+            close_token: sender.close_token.clone(),
+            sender,
+            tz: builder.tz,
+            builder,
+            stmt2s: Arc::default(),
+            state: Arc::new(AtomicUsize::new(ConnState::Reconnecting as usize)),
+            notify: Arc::default(),
+            recover_token: Arc::default(),
+            recover_handle: Arc::default(),
+        };
+
+        client.close_token.cancel();
+        let result = tokio::time::timeout(Duration::from_millis(200), client.wait_for_reconnect())
+            .await
+            .expect("reconnect wait must stop when the connection closes");
+        let error = result.expect_err("closed connection must fail reconnect wait");
+        assert_eq!(error.code(), WS_ERROR_NO::CONN_CLOSED.as_code());
+    }
+
+    #[tokio::test]
+    async fn test_recover_stmt2_does_not_reconnect_after_permanent_close() {
+        let (message_sender, _message_reader) = flume::bounded(1);
+        let sender = WsQuerySender {
+            version_info: VersionInfo::new("3.3.8.0"),
+            req_id: Arc::default(),
+            results: Arc::default(),
+            sender: message_sender,
+            queries: Arc::default(),
+            read_timeout: Duration::from_secs(30),
+            close_token: CancellationToken::new(),
+        };
+        let builder = Arc::new(TaosBuilder::from_dsn("ws://127.0.0.1:6041").unwrap());
+        let client = Arc::new(WsTaos {
+            conn_id: 0,
+            close_token: sender.close_token.clone(),
+            sender,
+            tz: builder.tz,
+            builder,
+            stmt2s: Arc::default(),
+            state: Arc::new(AtomicUsize::new(ConnState::Reconnecting as usize)),
+            notify: Arc::default(),
+            recover_token: Arc::default(),
+            recover_handle: Arc::default(),
+        });
+
+        client.stmt2s.insert(1, Weak::new());
+        client.close_token.cancel();
+        client.set_state(ConnState::Disconnected);
+        client.clone().recover_stmt2().await;
+
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert_eq!(client.state(), ConnState::Disconnected);
+    }
+
+    #[tokio::test]
+    async fn test_recover_stmt2_does_not_publish_connected_without_registered_statements() {
+        let (message_sender, _message_reader) = flume::bounded(1);
+        let sender = WsQuerySender {
+            version_info: VersionInfo::new("3.3.8.0"),
+            req_id: Arc::default(),
+            results: Arc::default(),
+            sender: message_sender,
+            queries: Arc::default(),
+            read_timeout: Duration::from_secs(30),
+            close_token: CancellationToken::new(),
+        };
+        let builder = Arc::new(TaosBuilder::from_dsn("ws://127.0.0.1:6041").unwrap());
+        let client = Arc::new(WsTaos {
+            conn_id: 0,
+            close_token: sender.close_token.clone(),
+            sender,
+            tz: builder.tz,
+            builder,
+            stmt2s: Arc::default(),
+            state: Arc::new(AtomicUsize::new(ConnState::Reconnecting as usize)),
+            notify: Arc::default(),
+            recover_token: Arc::default(),
+            recover_handle: Arc::default(),
+        });
+
+        let recovery_started = client.clone().recover_stmt2().await;
+
+        assert!(!recovery_started);
+        assert_eq!(client.state(), ConnState::Reconnecting);
+    }
+
+    #[tokio::test]
+    async fn test_permanent_close_state_cannot_be_overwritten_by_recovery() {
+        let (message_sender, _message_reader) = flume::bounded(1);
+        let sender = WsQuerySender {
+            version_info: VersionInfo::new("3.3.8.0"),
+            req_id: Arc::default(),
+            results: Arc::default(),
+            sender: message_sender,
+            queries: Arc::default(),
+            read_timeout: Duration::from_secs(30),
+            close_token: CancellationToken::new(),
+        };
+        let builder = Arc::new(TaosBuilder::from_dsn("ws://127.0.0.1:6041").unwrap());
+        let client = WsTaos {
+            conn_id: 0,
+            close_token: sender.close_token.clone(),
+            sender,
+            tz: builder.tz,
+            builder,
+            stmt2s: Arc::default(),
+            state: Arc::new(AtomicUsize::new(ConnState::Reconnecting as usize)),
+            notify: Arc::default(),
+            recover_token: Arc::default(),
+            recover_handle: Arc::default(),
+        };
+
+        client.close_token.cancel();
+        client.set_state(ConnState::Disconnected);
+        client.set_state(ConnState::Connected);
+
+        assert_eq!(client.state(), ConnState::Disconnected);
+    }
+
+    #[tokio::test]
+    async fn test_send_blocking_remains_bounded_after_connection_closes() {
+        let (message_sender, message_reader) = flume::bounded(1);
+        let query_sender = WsQuerySender {
+            version_info: VersionInfo::new("3.3.8.0"),
+            req_id: Arc::default(),
+            results: Arc::default(),
+            sender: message_sender,
+            queries: Arc::default(),
+            read_timeout: Duration::from_secs(30),
+            close_token: CancellationToken::new(),
+        };
+        query_sender
+            .sender
+            .send(WsMessage::Command(WsSend::Query {
+                req_id: 4,
+                sql: "select 4".to_string(),
+            }))
+            .unwrap();
+
+        query_sender.close_token.cancel();
+        let started = Instant::now();
+        let blocking_sender = query_sender.clone();
+        let send_handle = tokio::task::spawn_blocking(move || {
+            blocking_sender.send_blocking(WsSend::Query {
+                req_id: 5,
+                sql: "select 5".to_string(),
+            })
+        });
+
+        let result = tokio::time::timeout(WRITE_TIMEOUT + Duration::from_secs(1), send_handle)
+            .await
+            .expect("blocking send must remain bounded by the write timeout")
+            .expect("blocking send task must not panic");
+        let error = result.expect_err("blocking send must fail after connection closes");
+        assert!(started.elapsed() < WRITE_TIMEOUT);
+        assert_eq!(error.code(), WS_ERROR_NO::CONN_CLOSED.as_code());
+        assert!(message_reader.try_recv().is_ok());
+        assert!(message_reader.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn test_fetch_delivers_connection_closed_after_full_result_channel_drains() {
+        let (message_sender, message_reader) = flume::bounded(1);
+        let query_sender = WsQuerySender {
+            version_info: VersionInfo::new("3.3.8.0"),
+            req_id: Arc::default(),
+            results: Arc::default(),
+            sender: message_sender,
+            queries: Arc::default(),
+            read_timeout: Duration::from_secs(30),
+            close_token: CancellationToken::new(),
+        };
+
+        let (raw_block_sender, mut raw_block_receiver) = mpsc::channel(1);
+        raw_block_sender
+            .send(Err(RawError::from_string("occupied")))
+            .await
+            .unwrap();
+        let (fetch_done_sender, mut fetch_done_receiver) = mpsc::channel(1);
+
+        fetch(
+            query_sender.clone(),
+            9,
+            raw_block_sender,
+            Precision::Millisecond,
+            Vec::new(),
+            Vec::new(),
+            fetch_done_sender,
+        )
+        .await;
+
+        let message = message_reader
+            .recv_async()
+            .await
+            .expect("fetch request must be queued");
+        let WsMessage::Command(WsSend::Fetch(args)) = message else {
+            panic!("unexpected fetch message");
+        };
+        let (_, response_sender) = query_sender
+            .queries
+            .remove_sync(&args.req_id)
+            .expect("fetch waiter must be registered");
+        response_sender
+            .send(Err(connection_closed_error("test")))
+            .expect("fetch response receiver must still be open");
+
+        tokio::time::timeout(Duration::from_millis(200), fetch_done_receiver.recv())
+            .await
+            .expect_err("fetch must wait for a full result channel to drain");
+
+        let occupied = raw_block_receiver
+            .recv()
+            .await
+            .expect("occupied result must remain buffered")
+            .expect_err("occupied result must be an error");
+        assert_eq!(occupied.message(), "occupied");
+
+        let error = raw_block_receiver
+            .recv()
+            .await
+            .expect("connection-closed error must be delivered")
+            .expect_err("closed fetch must not return a block");
+        assert_eq!(error.code(), WS_ERROR_NO::CONN_CLOSED.as_code());
+        tokio::time::timeout(Duration::from_millis(200), fetch_done_receiver.recv())
+            .await
+            .expect("fetch must signal completion")
+            .expect("fetch done sender must remain open");
+    }
+
+    #[tokio::test]
+    async fn test_fetch_binary_stops_after_connection_closed() {
+        let (message_sender, message_reader) = flume::bounded(1);
+        let query_sender = WsQuerySender {
+            version_info: VersionInfo::new("3.3.8.0"),
+            req_id: Arc::default(),
+            results: Arc::default(),
+            sender: message_sender,
+            queries: Arc::default(),
+            read_timeout: Duration::from_secs(30),
+            close_token: CancellationToken::new(),
+        };
+
+        let (raw_block_sender, mut raw_block_receiver) = mpsc::channel(1);
+        raw_block_sender
+            .send(Err(RawError::from_string("occupied")))
+            .await
+            .unwrap();
+        let (fetch_done_sender, mut fetch_done_receiver) = mpsc::channel(1);
+        let query_sender_for_response = query_sender.clone();
+        fetch_binary(
+            query_sender,
+            6,
+            raw_block_sender,
+            Precision::Millisecond,
+            Vec::new(),
+            fetch_done_sender,
+        )
+        .await;
+
+        let message = message_reader
+            .recv_async()
+            .await
+            .expect("fetch request must be queued");
+        let WsMessage::Command(WsSend::Binary(bytes)) = message else {
+            panic!("unexpected fetch message");
+        };
+        let req_id = LittleEndian::read_u64(&bytes[..8]);
+        let (_, response_sender) = query_sender_for_response
+            .queries
+            .remove_sync(&req_id)
+            .expect("fetch waiter must be registered");
+        response_sender
+            .send(Err(connection_closed_error("test")))
+            .expect("fetch response receiver must still be open");
+
+        tokio::time::timeout(Duration::from_millis(200), fetch_done_receiver.recv())
+            .await
+            .expect_err("fetch must wait for a full result channel to drain");
+
+        let occupied = raw_block_receiver
+            .recv()
+            .await
+            .expect("occupied result must remain buffered")
+            .expect_err("occupied result must be an error");
+        assert_eq!(occupied.message(), "occupied");
+
+        let error = raw_block_receiver
+            .recv()
+            .await
+            .expect("connection-closed error must be delivered")
+            .expect_err("closed fetch must not return a block");
+        assert_eq!(error.code(), WS_ERROR_NO::CONN_CLOSED.as_code());
+        tokio::time::timeout(Duration::from_millis(200), fetch_done_receiver.recv())
+            .await
+            .expect("fetch must signal completion")
+            .expect("fetch done sender must remain open");
+    }
+
+    #[tokio::test]
+    async fn test_fetch_binary_does_not_block_done_on_full_result_channel() {
+        let (message_sender, _message_reader) = flume::bounded(1);
+        let query_sender = WsQuerySender {
+            version_info: VersionInfo::new("3.3.8.0"),
+            req_id: Arc::default(),
+            results: Arc::default(),
+            sender: message_sender,
+            queries: Arc::default(),
+            read_timeout: Duration::from_secs(30),
+            close_token: CancellationToken::new(),
+        };
+        query_sender.close_token.cancel();
+
+        let (raw_block_sender, mut raw_block_receiver) = mpsc::channel(1);
+        raw_block_sender
+            .send(Err(RawError::from_string("occupied")))
+            .await
+            .unwrap();
+        let (fetch_done_sender, mut fetch_done_receiver) = mpsc::channel(1);
+
+        fetch_binary(
+            query_sender,
+            7,
+            raw_block_sender,
+            Precision::Millisecond,
+            Vec::new(),
+            fetch_done_sender,
+        )
+        .await;
+
+        tokio::time::timeout(Duration::from_millis(200), fetch_done_receiver.recv())
+            .await
+            .expect("closed fetch must finish even when the result channel is full")
+            .expect("fetch done sender must remain open");
+        assert!(raw_block_receiver.recv().await.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_fetch_does_not_block_done_on_full_result_channel() {
+        let (message_sender, _message_reader) = flume::bounded(1);
+        let query_sender = WsQuerySender {
+            version_info: VersionInfo::new("3.3.8.0"),
+            req_id: Arc::default(),
+            results: Arc::default(),
+            sender: message_sender,
+            queries: Arc::default(),
+            read_timeout: Duration::from_secs(30),
+            close_token: CancellationToken::new(),
+        };
+        query_sender.close_token.cancel();
+
+        let (raw_block_sender, mut raw_block_receiver) = mpsc::channel(1);
+        raw_block_sender
+            .send(Err(RawError::from_string("occupied")))
+            .await
+            .unwrap();
+        let (fetch_done_sender, mut fetch_done_receiver) = mpsc::channel(1);
+
+        fetch(
+            query_sender,
+            8,
+            raw_block_sender,
+            Precision::Millisecond,
+            Vec::new(),
+            Vec::new(),
+            fetch_done_sender,
+        )
+        .await;
+
+        tokio::time::timeout(Duration::from_millis(200), fetch_done_receiver.recv())
+            .await
+            .expect("closed fetch must finish even when the result channel is full")
+            .expect("fetch done sender must remain open");
+        assert!(raw_block_receiver.recv().await.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_result_set_fetch_prefers_connection_closed_over_buffered_result() {
+        let (message_sender, _message_reader) = flume::bounded(1);
+        let query_sender = WsQuerySender {
+            version_info: VersionInfo::new("3.3.8.0"),
+            req_id: Arc::default(),
+            results: Arc::default(),
+            sender: message_sender,
+            queries: Arc::default(),
+            read_timeout: Duration::from_secs(30),
+            close_token: CancellationToken::new(),
+        };
+        let (raw_block_sender, raw_block_receiver) = mpsc::channel(1);
+        raw_block_sender
+            .send(Err(RawError::from_string("buffered")))
+            .await
+            .unwrap();
+
+        let mut result_set = ResultSet {
+            sender: query_sender.clone(),
+            args: WsResArgs { req_id: 9, id: 9 },
+            fields: None,
+            fields_count: 0,
+            affected_rows: 0,
+            precision: Precision::Millisecond,
+            summary: (0, 0),
+            timing: Duration::default(),
+            block_future: None,
+            closer: None,
+            metrics: QueryMetrics::default(),
+            blocks_buffer: Some(raw_block_receiver),
+            fields_precisions: None,
+            fields_scales: None,
+            fetch_done_reader: None,
+            tz: None,
+        };
+
+        query_sender.close_token.cancel();
+        let error = result_set
+            .fetch()
+            .await
+            .expect_err("closed result set must ignore stale buffered results");
+
+        assert_eq!(error.code(), WS_ERROR_NO::CONN_CLOSED.as_code());
+    }
+
+    #[tokio::test]
+    async fn test_result_set_stop_cleans_up_local_maps_after_connection_closes() {
+        let (message_sender, _message_reader) = flume::bounded(1);
+        let query_sender = WsQuerySender {
+            version_info: VersionInfo::new("3.3.8.0"),
+            req_id: Arc::default(),
+            results: Arc::default(),
+            sender: message_sender,
+            queries: Arc::default(),
+            read_timeout: Duration::from_secs(30),
+            close_token: CancellationToken::new(),
+        };
+        let (response_sender, _response_reader) = oneshot::channel();
+        query_sender.results.insert_sync(0, 7).unwrap();
+        query_sender
+            .queries
+            .insert_sync(7, response_sender)
+            .map_err(|_| ())
+            .unwrap();
+
+        let result_set = ResultSet {
+            sender: query_sender.clone(),
+            args: WsResArgs { req_id: 10, id: 0 },
+            fields: None,
+            fields_count: 0,
+            affected_rows: 0,
+            precision: Precision::Millisecond,
+            summary: (0, 0),
+            timing: Duration::default(),
+            block_future: None,
+            closer: None,
+            metrics: QueryMetrics::default(),
+            blocks_buffer: None,
+            fields_precisions: None,
+            fields_scales: None,
+            fetch_done_reader: None,
+            tz: None,
+        };
+
+        query_sender.close_token.cancel();
+        result_set.stop().await;
+
+        assert!(query_sender.results.is_empty());
+        assert!(query_sender.queries.is_empty());
     }
 
     #[test]

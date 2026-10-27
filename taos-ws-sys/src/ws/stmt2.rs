@@ -1,4 +1,27 @@
+// Copyright (c) 2025 TAOS Data, Inc.
+//
+// SPDX-License-Identifier: MIT
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 use std::ffi::{c_char, c_int, c_ulong, c_void, CStr};
+use std::sync::{Arc, Condvar, Mutex};
 use std::{ptr, slice, str};
 
 use byteorder::{ByteOrder, LittleEndian};
@@ -13,7 +36,9 @@ use tracing::{debug, error, trace, Instrument};
 
 use crate::ws::error::*;
 use crate::ws::query::QueryResultSet;
-use crate::ws::{ResultSet, SafePtr, TaosResult, __taos_async_fn_t, TAOS, TAOS_RES};
+use crate::ws::{
+    ResultSet, ResultSetOperations, SafePtr, TaosResult, __taos_async_fn_t, TAOS, TAOS_RES,
+};
 
 #[allow(non_camel_case_types)]
 pub type TAOS_STMT2 = c_void;
@@ -154,16 +179,24 @@ pub unsafe extern "C" fn taos_stmt2_prepare(
         None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null")),
     };
 
-    let stmt2 = match maybe_err.deref_mut() {
-        Some(taos_stmt2) => &mut taos_stmt2.stmt2,
+    let taos_stmt2 = match maybe_err.deref_mut() {
+        Some(taos_stmt2) => taos_stmt2,
         None => {
             maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "stmt is invalid")));
             return format_errno(Code::INVALID_PARA.into());
         }
     };
+    let lifecycle = taos_stmt2.lifecycle.clone();
+    lifecycle.wait_async_done_and_clear_result();
+    let generation = lifecycle.begin_operation();
+    let stmt2 = &mut taos_stmt2.stmt2;
 
     if sql.is_null() {
-        maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "sql is null")));
+        lifecycle.publish_error(
+            generation,
+            maybe_err,
+            Some(TaosError::new(Code::INVALID_PARA, "sql is null")),
+        );
         return format_errno(Code::INVALID_PARA.into());
     }
 
@@ -174,10 +207,11 @@ pub unsafe extern "C" fn taos_stmt2_prepare(
         match CStr::from_ptr(sql).to_str() {
             Ok(sql) => sql,
             Err(_) => {
-                maybe_err.with_err(Some(TaosError::new(
-                    Code::INVALID_PARA,
-                    "sql is invalid utf-8",
-                )));
+                lifecycle.publish_error(
+                    generation,
+                    maybe_err,
+                    Some(TaosError::new(Code::INVALID_PARA, "sql is invalid utf-8")),
+                );
                 return format_errno(Code::INVALID_PARA.into());
             }
         }
@@ -187,13 +221,32 @@ pub unsafe extern "C" fn taos_stmt2_prepare(
 
     match stmt2.prepare(sql) {
         Ok(_) => {
+            if stmt2.is_insert() == Some(true)
+                && stmt2.fields().is_none()
+                && stmt2.fields_count().unwrap_or(0) > 0
+            {
+                let msg = "stmt2 does not support insert statement with a table name placeholder, \
+                    e.g. `insert into ? ...` or `insert into db.? ...`";
+                error!("taos_stmt2_prepare failed, err: {msg}");
+                stmt2.mark_unprepared();
+                lifecycle.publish_error(
+                    generation,
+                    maybe_err,
+                    Some(TaosError::new(Code::INVALID_PARA, msg)),
+                );
+                return format_errno(Code::INVALID_PARA.into());
+            }
             debug!("taos_stmt2_prepare succ");
-            maybe_err.clear_err();
+            lifecycle.publish_error(generation, maybe_err, None);
             clear_err_and_ret_succ()
         }
         Err(err) => {
             error!("taos_stmt2_prepare failed, err: {err:?}");
-            maybe_err.with_err(Some(TaosError::new(err.code(), &err.to_string())));
+            lifecycle.publish_error(
+                generation,
+                maybe_err,
+                Some(TaosError::new(err.code(), &err.to_string())),
+            );
             format_errno(err.code().into())
         }
     }
@@ -212,34 +265,59 @@ pub unsafe extern "C" fn taos_stmt2_bind_param(
         None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null")),
     };
 
-    let stmt2 = match maybe_err.deref_mut() {
-        Some(taos_stmt2) => &mut taos_stmt2.stmt2,
+    let taos_stmt2 = match maybe_err.deref_mut() {
+        Some(taos_stmt2) => taos_stmt2,
         None => {
             maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "stmt is invalid")));
             return format_errno(Code::INVALID_PARA.into());
         }
     };
+    let lifecycle = taos_stmt2.lifecycle.clone();
+    lifecycle.wait_async_done_and_clear_result();
+    let generation = lifecycle.begin_operation();
+    let stmt2 = &mut taos_stmt2.stmt2;
 
     let bindv = match bindv.as_ref() {
         Some(bindv) => bindv,
         None => {
-            maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "bindv is null")));
+            lifecycle.publish_error(
+                generation,
+                maybe_err,
+                Some(TaosError::new(Code::INVALID_PARA, "bindv is null")),
+            );
             return format_errno(Code::INVALID_PARA.into());
+        }
+    };
+
+    let is_insert = match stmt2.is_insert() {
+        Some(is_insert) => is_insert,
+        None => {
+            lifecycle.publish_error(
+                generation,
+                maybe_err,
+                Some(TaosError::new(
+                    Code::FAILED,
+                    "taos_stmt2_prepare is not called",
+                )),
+            );
+            return format_errno(Code::FAILED.into());
         }
     };
 
     let mut tag_cnt = 0;
     let mut col_cnt = 0;
-    if stmt2.is_insert().unwrap() {
-        for field in stmt2.fields().unwrap() {
-            match field.bind_type {
-                BindType::Tag => tag_cnt += 1,
-                BindType::Column => col_cnt += 1,
-                BindType::TableName | BindType::Unknown(_) => {}
+    if is_insert {
+        if let Some(fields) = stmt2.fields() {
+            for field in fields {
+                match field.bind_type {
+                    BindType::Tag => tag_cnt += 1,
+                    BindType::Column => col_cnt += 1,
+                    BindType::TableName | BindType::Unknown(_) => {}
+                }
             }
         }
     } else {
-        col_cnt = stmt2.fields_count().unwrap();
+        col_cnt = stmt2.fields_count().unwrap_or(0);
     }
 
     let req_id = generate_req_id();
@@ -248,7 +326,7 @@ pub unsafe extern "C" fn taos_stmt2_bind_param(
         Err(err) => {
             error!("taos_stmt2_bind_param failed, err: {err:?}");
             let code = err.code();
-            maybe_err.with_err(Some(err));
+            lifecycle.publish_error(generation, maybe_err, Some(err));
             return format_errno(code.into());
         }
     };
@@ -258,12 +336,16 @@ pub unsafe extern "C" fn taos_stmt2_bind_param(
     match block_in_place_or_global(stmt2.bind_bytes(req_id, bytes)) {
         Ok(_) => {
             debug!("taos_stmt2_bind_param succ");
-            maybe_err.clear_err();
+            lifecycle.publish_error(generation, maybe_err, None);
             0
         }
         Err(err) => {
             error!("taos_stmt2_bind_param failed, err: {err:?}");
-            maybe_err.with_err(Some(TaosError::new(err.code(), &err.to_string())));
+            lifecycle.publish_error(
+                generation,
+                maybe_err,
+                Some(TaosError::new(err.code(), &err.to_string())),
+            );
             format_errno(err.code().into())
         }
     }
@@ -282,28 +364,42 @@ pub unsafe extern "C" fn taos_stmt2_bind_param_a(
 
 #[no_mangle]
 pub unsafe extern "C" fn taos_stmt2_bind_param_column(
-    _stmt: *mut TAOS_STMT2,
-    _bindv: *mut TAOS_STMT2_COLUMN_BINDV,
+    stmt: *mut TAOS_STMT2,
+    bindv: *mut TAOS_STMT2_COLUMN_BINDV,
 ) -> c_int {
-    stmt2_column_bind_not_implemented("taos_stmt2_bind_param_column")
+    stmt2_column_bind_not_implemented(stmt, "taos_stmt2_bind_param_column")
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn taos_stmt2_bind_param_column_a(
-    _stmt: *mut TAOS_STMT2,
-    _bindv: *mut TAOS_STMT2_COLUMN_BINDV,
+    stmt: *mut TAOS_STMT2,
+    bindv: *mut TAOS_STMT2_COLUMN_BINDV,
     fp: __taos_async_fn_t,
     param: *mut c_void,
 ) -> c_int {
-    let code = stmt2_column_bind_not_implemented("taos_stmt2_bind_param_column_a");
+    let code = stmt2_column_bind_not_implemented(stmt, "taos_stmt2_bind_param_column_a");
     fp(param, ptr::null_mut(), code);
     code
 }
 
-fn stmt2_column_bind_not_implemented(api: &str) -> c_int {
+fn stmt2_column_bind_not_implemented(stmt: *mut TAOS_STMT2, api: &str) -> c_int {
     let msg = format!("{api} is not implemented");
     error!("{msg}");
-    set_err_and_get_code(TaosError::new(Code::FAILED, &msg))
+    let error = TaosError::new(Code::FAILED, &msg);
+    let code = set_err_and_get_code(TaosError::from(&error));
+
+    if let Some(maybe_err) = unsafe { (stmt as *mut TaosMaybeError<TaosStmt2>).as_mut() } {
+        let lifecycle = maybe_err
+            .deref()
+            .map(|taos_stmt2| taos_stmt2.lifecycle.clone());
+        if let Some(lifecycle) = lifecycle {
+            let generation = lifecycle.begin_operation();
+            lifecycle.publish_error(generation, maybe_err, Some(error));
+            return code;
+        }
+    }
+
+    code
 }
 
 #[no_mangle]
@@ -325,13 +421,16 @@ pub unsafe extern "C" fn taos_stmt2_exec(
             return format_errno(Code::INVALID_PARA.into());
         }
     };
+    let lifecycle = taos_stmt2.lifecycle.clone();
 
     if taos_stmt2.async_exec_fn.is_none() {
+        let generation = lifecycle.begin_operation();
         if affected_rows.is_null() {
-            maybe_err.with_err(Some(TaosError::new(
-                Code::INVALID_PARA,
-                "affected_rows is null",
-            )));
+            lifecycle.publish_error(
+                generation,
+                maybe_err,
+                Some(TaosError::new(Code::INVALID_PARA, "affected_rows is null")),
+            );
             return format_errno(Code::INVALID_PARA.into());
         }
 
@@ -339,47 +438,110 @@ pub unsafe extern "C" fn taos_stmt2_exec(
             Ok(rows) => {
                 *affected_rows = rows as _;
                 debug!("taos_stmt2_exec succ, affected_rows: {rows}");
-                maybe_err.clear_err();
+                lifecycle.publish_error(generation, maybe_err, None);
                 return clear_err_and_ret_succ();
             }
             Err(err) => {
                 error!("taos_stmt2_exec failed, err: {err:?}");
-                maybe_err.with_err(Some(TaosError::new(err.code(), &err.to_string())));
+                lifecycle.publish_error(
+                    generation,
+                    maybe_err,
+                    Some(TaosError::new(err.code(), &err.to_string())),
+                );
                 return format_errno(err.code().into());
             }
         }
     }
 
+    let is_insert = match taos_stmt2.stmt2.is_insert() {
+        Some(is_insert) => is_insert,
+        None => {
+            let generation = lifecycle.begin_operation();
+            lifecycle.publish_error(
+                generation,
+                maybe_err,
+                Some(TaosError::new(
+                    Code::FAILED,
+                    "taos_stmt2_prepare is not called",
+                )),
+            );
+            return format_errno(Code::FAILED.into());
+        }
+    };
+
+    let (generation, started) = lifecycle.begin_async();
+    if !started {
+        lifecycle.publish_error(
+            generation,
+            maybe_err,
+            Some(TaosError::new(
+                Code::FAILED,
+                "another async stmt2 exec is still in flight",
+            )),
+        );
+        return format_errno(Code::FAILED.into());
+    }
+
+    let stmt2 = taos_stmt2.stmt2.clone();
+    let async_exec_fn = taos_stmt2.async_exec_fn.unwrap();
+    let userdata = SafePtr(taos_stmt2.userdata);
+
+    lifecycle.publish_error(generation, maybe_err, None);
+
+    let guard = AsyncInFlightGuard {
+        lifecycle: lifecycle.clone(),
+    };
+
     global_tokio_runtime().spawn(
         async move {
             use taos_query::stmt2::Stmt2AsyncBindable;
 
-            let taos_stmt2 = maybe_err.deref_mut().unwrap();
-            let stmt2 = &mut taos_stmt2.stmt2;
-            let async_exec_fn = taos_stmt2.async_exec_fn.unwrap();
-            let userdata = SafePtr(taos_stmt2.userdata);
+            let mut stmt2 = stmt2;
+            let userdata = userdata;
+            let _guard = guard;
 
-            // TODO: add lock
-            if let Err(err) = Stmt2AsyncBindable::exec(stmt2).await {
-                error!("async taos_stmt2_exec exec failed, err: {err:?}");
-                maybe_err.with_err(Some(TaosError::new(err.code(), &err.to_string())));
-                let code = format_errno(err.code().into());
-                async_exec_fn(userdata.0, ptr::null_mut(), code);
+            let affected = match Stmt2AsyncBindable::exec(&mut stmt2).await {
+                Ok(rows) => rows,
+                Err(err) => {
+                    error!("async taos_stmt2_exec exec failed, err: {err:?}");
+                    lifecycle.complete_async_error(
+                        generation,
+                        TaosError::new(err.code(), &err.to_string()),
+                    );
+                    let code = format_errno(err.code().into());
+                    async_exec_fn(userdata.0, ptr::null_mut(), code);
+                    return;
+                }
+            };
+
+            if is_insert {
+                debug!("async taos_stmt2_exec insert succ, affected_rows: {affected}");
+                let rs: TaosMaybeError<ResultSet> =
+                    ResultSet::Stmt2(Stmt2ResultSet::new(affected as _)).into();
+                let res =
+                    lifecycle.complete_async_success(generation, CachedStmt2ResultKind::Insert, rs);
+                async_exec_fn(userdata.0, res, 0);
                 return;
             }
 
-            match Stmt2AsyncBindable::result_set(stmt2).await {
+            match Stmt2AsyncBindable::result_set(&stmt2).await {
                 Ok(rs) => {
                     debug!("async taos_stmt2_exec callback, result_set: {rs:?}");
                     let rs: TaosMaybeError<ResultSet> =
                         ResultSet::Query(QueryResultSet::new(rs)).into();
-                    let res = Box::into_raw(Box::new(rs));
-                    maybe_err.clear_err();
-                    async_exec_fn(userdata.0, res as _, 0);
+                    let res = lifecycle.complete_async_success(
+                        generation,
+                        CachedStmt2ResultKind::Query,
+                        rs,
+                    );
+                    async_exec_fn(userdata.0, res, 0);
                 }
                 Err(err) => {
                     error!("async taos_stmt2_exec result failed, err: {err:?}");
-                    maybe_err.with_err(Some(TaosError::new(err.code(), &err.to_string())));
+                    lifecycle.complete_async_error(
+                        generation,
+                        TaosError::new(err.code(), &err.to_string()),
+                    );
                     let code = format_errno(err.code().into());
                     async_exec_fn(userdata.0, ptr::null_mut(), code as _);
                 }
@@ -398,7 +560,14 @@ pub unsafe extern "C" fn taos_stmt2_close(stmt: *mut TAOS_STMT2) -> c_int {
     if stmt.is_null() {
         return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null"));
     }
-    let _ = Box::from_raw(stmt as *mut TaosMaybeError<TaosStmt2>);
+
+    let maybe_err = Box::from_raw(stmt as *mut TaosMaybeError<TaosStmt2>);
+    if let Some(taos_stmt2) = maybe_err.deref() {
+        let lifecycle = taos_stmt2.lifecycle.clone();
+        lifecycle.wait_async_done();
+    }
+
+    drop(maybe_err);
     clear_err_and_ret_succ()
 }
 
@@ -411,31 +580,41 @@ pub unsafe extern "C" fn taos_stmt2_is_insert(stmt: *mut TAOS_STMT2, insert: *mu
         None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null")),
     };
 
-    let stmt2 = match maybe_err.deref_mut() {
-        Some(taos_stmt2) => &mut taos_stmt2.stmt2,
+    let taos_stmt2 = match maybe_err.deref_mut() {
+        Some(taos_stmt2) => taos_stmt2,
         None => {
             maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "stmt is invalid")));
             return format_errno(Code::INVALID_PARA.into());
         }
     };
+    let lifecycle = taos_stmt2.lifecycle.clone();
+    let generation = lifecycle.begin_operation();
 
     if insert.is_null() {
-        maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "insert is null")));
+        lifecycle.publish_error(
+            generation,
+            maybe_err,
+            Some(TaosError::new(Code::INVALID_PARA, "insert is null")),
+        );
         return format_errno(Code::INVALID_PARA.into());
     }
 
-    match stmt2.is_insert() {
+    match taos_stmt2.stmt2.is_insert() {
         Some(is_insert) => {
             *insert = is_insert as _;
             debug!("taos_stmt2_is_insert succ, is_insert: {is_insert}");
-            maybe_err.clear_err();
+            lifecycle.publish_error(generation, maybe_err, None);
             clear_err_and_ret_succ()
         }
         None => {
-            maybe_err.with_err(Some(TaosError::new(
-                Code::FAILED,
-                "taos_stmt2_prepare is not called",
-            )));
+            lifecycle.publish_error(
+                generation,
+                maybe_err,
+                Some(TaosError::new(
+                    Code::FAILED,
+                    "taos_stmt2_prepare is not called",
+                )),
+            );
             format_errno(Code::FAILED.into())
         }
     }
@@ -462,26 +641,43 @@ pub unsafe extern "C" fn taos_stmt2_get_fields(
         }
     };
 
+    let lifecycle = taos_stmt2.lifecycle.clone();
+    lifecycle.wait_async_done_and_clear_result();
+    let generation = lifecycle.begin_operation();
+
     if count.is_null() {
-        maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "count is null")));
+        lifecycle.publish_error(
+            generation,
+            maybe_err,
+            Some(TaosError::new(Code::INVALID_PARA, "count is null")),
+        );
         return format_errno(Code::INVALID_PARA.into());
     }
 
     let stmt2 = &mut taos_stmt2.stmt2;
     if stmt2.is_insert().is_none() {
-        maybe_err.with_err(Some(TaosError::new(
-            Code::FAILED,
-            "taos_stmt2_prepare is not called",
-        )));
+        lifecycle.publish_error(
+            generation,
+            maybe_err,
+            Some(TaosError::new(
+                Code::FAILED,
+                "taos_stmt2_prepare is not called",
+            )),
+        );
         return format_errno(Code::FAILED.into());
     }
 
     if stmt2.is_insert().unwrap() {
-        let stmt2_fields = stmt2.fields().unwrap();
-        let field_all: Vec<TAOS_FIELD_ALL> = stmt2_fields.iter().map(|f| f.into()).collect();
-        if !field_all.is_empty() && !fields.is_null() {
-            *fields = Box::into_raw(field_all.into_boxed_slice()) as _;
-            taos_stmt2.fields_len = Some(stmt2_fields.len());
+        let stmt2_fields = stmt2.fields().unwrap_or_default();
+        if !fields.is_null() {
+            if stmt2_fields.is_empty() {
+                *fields = ptr::null_mut();
+            } else {
+                let field_all: Vec<TAOS_FIELD_ALL> =
+                    stmt2_fields.iter().map(|f| f.into()).collect();
+                *fields = Box::into_raw(field_all.into_boxed_slice()) as _;
+                taos_stmt2.fields_len = Some(stmt2_fields.len());
+            }
         }
         *count = stmt2_fields.len() as _;
     } else {
@@ -490,7 +686,7 @@ pub unsafe extern "C" fn taos_stmt2_get_fields(
 
     debug!("taos_stmt2_get_fields succ, fields: {fields:?}, count: {count:?}");
 
-    maybe_err.clear_err();
+    lifecycle.publish_error(generation, maybe_err, None);
     clear_err_and_ret_succ()
 }
 
@@ -500,6 +696,10 @@ pub unsafe extern "C" fn taos_stmt2_free_fields(
     fields: *mut TAOS_FIELD_ALL,
 ) {
     debug!("taos_stmt2_free_fields start, stmt: {stmt:?}, fields: {fields:?}");
+
+    if fields.is_null() {
+        return;
+    }
 
     let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt2>).as_mut() {
         Some(maybe_err) => maybe_err,
@@ -516,12 +716,18 @@ pub unsafe extern "C" fn taos_stmt2_free_fields(
             return;
         }
     };
+    let lifecycle = taos_stmt2.lifecycle.clone();
+    let generation = lifecycle.begin_operation();
 
     if taos_stmt2.fields_len.is_none() {
-        maybe_err.with_err(Some(TaosError::new(
-            Code::FAILED,
-            "taos_stmt2_get_fields is not called",
-        )));
+        lifecycle.publish_error(
+            generation,
+            maybe_err,
+            Some(TaosError::new(
+                Code::FAILED,
+                "taos_stmt2_get_fields is not called",
+            )),
+        );
         return;
     }
 
@@ -530,7 +736,7 @@ pub unsafe extern "C" fn taos_stmt2_free_fields(
 
     debug!("taos_stmt2_free_fields succ, fields: {fields:?}");
 
-    maybe_err.clear_err();
+    lifecycle.publish_error(generation, maybe_err, None);
     clear_error_info();
 }
 
@@ -546,25 +752,80 @@ pub unsafe extern "C" fn taos_stmt2_result(stmt: *mut TAOS_STMT2) -> *mut TAOS_R
         }
     };
 
-    let stmt2 = match maybe_err.deref_mut() {
-        Some(taos_stmt2) => &mut taos_stmt2.stmt2,
+    let taos_stmt2 = match maybe_err.deref_mut() {
+        Some(taos_stmt2) => taos_stmt2,
         None => {
             maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "stmt is invalid")));
             return ptr::null_mut();
         }
     };
 
-    match stmt2.result_set() {
+    let lifecycle = taos_stmt2.lifecycle.clone();
+    let is_async = taos_stmt2.async_exec_fn.is_some();
+    let generation = lifecycle.begin_operation();
+
+    match taos_stmt2.stmt2.is_insert() {
+        Some(false) => {}
+        Some(true) => {
+            lifecycle.publish_error(
+                generation,
+                maybe_err,
+                Some(TaosError::new(
+                    Code::FAILED,
+                    "taos_stmt2_result is only valid for query statement",
+                )),
+            );
+            return ptr::null_mut();
+        }
+        None => {
+            lifecycle.publish_error(
+                generation,
+                maybe_err,
+                Some(TaosError::new(
+                    Code::FAILED,
+                    "taos_stmt2_prepare is not called",
+                )),
+            );
+            return ptr::null_mut();
+        }
+    }
+
+    if is_async {
+        match lifecycle.async_query_result(generation, maybe_err) {
+            AsyncQueryResultState::Ready(result) => {
+                debug!("taos_stmt2_result succ, cached result: {result:?}");
+                clear_error_info();
+                return result;
+            }
+            AsyncQueryResultState::Pending | AsyncQueryResultState::Failed => {
+                return ptr::null_mut();
+            }
+        }
+    }
+
+    if let Some(ptr) = lifecycle.cached_query_result_ptr() {
+        debug!("taos_stmt2_result succ, cached result: {ptr:?}");
+        lifecycle.publish_error(generation, maybe_err, None);
+        clear_error_info();
+        return ptr;
+    }
+
+    match taos_stmt2.stmt2.result_set() {
         Ok(rs) => {
             let rs: TaosMaybeError<ResultSet> = ResultSet::Query(QueryResultSet::new(rs)).into();
             debug!("taos_stmt2_result succ, result_set: {rs:?}");
-            maybe_err.clear_err();
-            clear_err_and_ret_succ();
-            Box::into_raw(Box::new(rs)) as _
+            let ptr = lifecycle.set_cached_result(CachedStmt2ResultKind::Query, rs);
+            lifecycle.publish_error(generation, maybe_err, None);
+            clear_error_info();
+            ptr
         }
         Err(err) => {
             error!("taos_stmt2_result failed, err: {err:?}");
-            maybe_err.with_err(Some(TaosError::new(err.code(), &err.to_string())));
+            lifecycle.publish_error(
+                generation,
+                maybe_err,
+                Some(TaosError::new(err.code(), &err.to_string())),
+            );
             ptr::null_mut()
         }
     }
@@ -572,6 +833,14 @@ pub unsafe extern "C" fn taos_stmt2_result(stmt: *mut TAOS_STMT2) -> *mut TAOS_R
 
 #[no_mangle]
 pub unsafe extern "C" fn taos_stmt2_error(stmt: *mut TAOS_STMT2) -> *mut c_char {
+    if let Some(maybe_err) = (stmt as *mut TaosMaybeError<TaosStmt2>).as_mut() {
+        let lifecycle = maybe_err
+            .deref()
+            .map(|taos_stmt2| taos_stmt2.lifecycle.clone());
+        if let Some(lifecycle) = lifecycle {
+            lifecycle.sync_outer_error(maybe_err);
+        }
+    }
     taos_errstr(stmt) as _
 }
 
@@ -581,6 +850,7 @@ struct TaosStmt2 {
     async_exec_fn: Option<__taos_async_fn_t>,
     userdata: *mut c_void,
     fields_len: Option<usize>,
+    lifecycle: Arc<Stmt2Lifecycle>,
 }
 
 impl TaosStmt2 {
@@ -590,7 +860,455 @@ impl TaosStmt2 {
             async_exec_fn,
             userdata,
             fields_len: None,
+            lifecycle: Arc::new(Stmt2Lifecycle::default()),
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CachedStmt2ResultKind {
+    Query,
+    Insert,
+}
+
+struct CachedStmt2Result {
+    kind: CachedStmt2ResultKind,
+    value: Box<TaosMaybeError<ResultSet>>,
+}
+
+impl CachedStmt2Result {
+    fn as_ptr(&self) -> *mut TAOS_RES {
+        self.value.as_ref() as *const TaosMaybeError<ResultSet> as *mut TAOS_RES
+    }
+}
+
+#[derive(Clone)]
+struct Stmt2ErrorSnapshot {
+    code: Code,
+    message: String,
+}
+
+impl Stmt2ErrorSnapshot {
+    fn to_error(&self) -> TaosError {
+        TaosError::new(self.code, &self.message)
+    }
+}
+
+impl From<&TaosError> for Stmt2ErrorSnapshot {
+    fn from(error: &TaosError) -> Self {
+        Self {
+            code: error.code(),
+            message: error.message().to_string(),
+        }
+    }
+}
+
+enum AsyncCompletion {
+    Idle,
+    Pending {
+        generation: u64,
+    },
+    Success {
+        generation: u64,
+    },
+    Failed {
+        generation: u64,
+        error: Stmt2ErrorSnapshot,
+    },
+}
+
+impl Default for AsyncCompletion {
+    fn default() -> Self {
+        Self::Idle
+    }
+}
+
+#[derive(Default)]
+struct Stmt2VisibleError {
+    generation: u64,
+    provisional_async_generation: Option<u64>,
+    error: Option<Stmt2ErrorSnapshot>,
+}
+
+#[derive(Default)]
+struct Stmt2LifecycleState {
+    async_in_flight: bool,
+    cached_result: Option<CachedStmt2Result>,
+    completion: AsyncCompletion,
+    next_generation: u64,
+    latest_operation_generation: u64,
+    visible_error: Stmt2VisibleError,
+}
+
+#[derive(Default)]
+struct Stmt2Lifecycle {
+    state: Mutex<Stmt2LifecycleState>,
+    done: Condvar,
+}
+
+enum AsyncQueryResultState {
+    Ready(*mut TAOS_RES),
+    Pending,
+    Failed,
+}
+
+impl std::fmt::Debug for Stmt2Lifecycle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Stmt2Lifecycle").finish_non_exhaustive()
+    }
+}
+
+impl Stmt2Lifecycle {
+    fn reserve_operation(state: &mut Stmt2LifecycleState) -> u64 {
+        state.next_generation = state.next_generation.wrapping_add(1);
+        if state.next_generation == 0 {
+            state.next_generation = 1;
+        }
+        state.latest_operation_generation = state.next_generation;
+        state.next_generation
+    }
+
+    fn begin_operation(&self) -> u64 {
+        let mut state = self.state.lock().unwrap();
+        Self::reserve_operation(&mut state)
+    }
+
+    fn publish_error<T>(
+        &self,
+        generation: u64,
+        outer: &mut TaosMaybeError<T>,
+        error: Option<TaosError>,
+    ) {
+        let mut state = self.state.lock().unwrap();
+        if state.latest_operation_generation != generation {
+            return;
+        }
+
+        state.visible_error = Stmt2VisibleError {
+            generation,
+            provisional_async_generation: None,
+            error: error.as_ref().map(Stmt2ErrorSnapshot::from),
+        };
+
+        match error {
+            Some(error) => outer.with_err(Some(error)),
+            None => outer.clear_err(),
+        }
+    }
+
+    fn sync_outer_error<T>(&self, outer: &mut TaosMaybeError<T>) {
+        let state = self.state.lock().unwrap();
+        match state.visible_error.error.as_ref() {
+            Some(error) => outer.with_err(Some(error.to_error())),
+            None => outer.clear_err(),
+        }
+    }
+
+    fn wait_async_done(&self) {
+        let mut state = self.state.lock().unwrap();
+        while state.async_in_flight {
+            state = self.done.wait(state).unwrap();
+        }
+    }
+
+    fn wait_async_done_and_clear_result(&self) {
+        let mut state = self.state.lock().unwrap();
+        while state.async_in_flight {
+            state = self.done.wait(state).unwrap();
+        }
+        state.cached_result = None;
+        state.completion = AsyncCompletion::Idle;
+    }
+
+    fn cached_query_result_ptr(&self) -> Option<*mut TAOS_RES> {
+        let state = self.state.lock().unwrap();
+        state
+            .cached_result
+            .as_ref()
+            .filter(|r| r.kind == CachedStmt2ResultKind::Query)
+            .map(|r| r.as_ptr())
+    }
+
+    fn set_cached_result(
+        &self,
+        kind: CachedStmt2ResultKind,
+        result: TaosMaybeError<ResultSet>,
+    ) -> *mut TAOS_RES {
+        let mut state = self.state.lock().unwrap();
+        state.cached_result = Some(CachedStmt2Result {
+            kind,
+            value: Box::new(result),
+        });
+        state.cached_result.as_ref().unwrap().as_ptr()
+    }
+
+    fn begin_async(&self) -> (u64, bool) {
+        let mut state = self.state.lock().unwrap();
+        let generation = Self::reserve_operation(&mut state);
+        if state.async_in_flight {
+            return (generation, false);
+        }
+        state.async_in_flight = true;
+        state.cached_result = None;
+        state.completion = AsyncCompletion::Pending { generation };
+        (generation, true)
+    }
+
+    fn should_publish_async_completion(state: &Stmt2LifecycleState, async_generation: u64) -> bool {
+        state.latest_operation_generation == async_generation
+            || (state.visible_error.generation == state.latest_operation_generation
+                && state.visible_error.provisional_async_generation == Some(async_generation))
+    }
+
+    fn complete_async_success(
+        &self,
+        generation: u64,
+        kind: CachedStmt2ResultKind,
+        result: TaosMaybeError<ResultSet>,
+    ) -> *mut TAOS_RES {
+        let mut state = self.state.lock().unwrap();
+        state.cached_result = Some(CachedStmt2Result {
+            kind,
+            value: Box::new(result),
+        });
+        let result = state.cached_result.as_ref().unwrap().as_ptr();
+        state.completion = AsyncCompletion::Success { generation };
+
+        if Self::should_publish_async_completion(&state, generation) {
+            let visible_generation = state.latest_operation_generation;
+            state.visible_error = Stmt2VisibleError {
+                generation: visible_generation,
+                provisional_async_generation: None,
+                error: None,
+            };
+        }
+
+        result
+    }
+
+    fn complete_async_error(&self, generation: u64, error: TaosError) {
+        let error = Stmt2ErrorSnapshot::from(&error);
+        let mut state = self.state.lock().unwrap();
+        state.cached_result = None;
+        state.completion = AsyncCompletion::Failed {
+            generation,
+            error: error.clone(),
+        };
+
+        if Self::should_publish_async_completion(&state, generation) {
+            let visible_generation = state.latest_operation_generation;
+            state.visible_error = Stmt2VisibleError {
+                generation: visible_generation,
+                provisional_async_generation: None,
+                error: Some(error),
+            };
+        }
+    }
+
+    fn async_query_result<T>(
+        &self,
+        operation_generation: u64,
+        outer: &mut TaosMaybeError<T>,
+    ) -> AsyncQueryResultState {
+        let mut state = self.state.lock().unwrap();
+        let should_publish = state.latest_operation_generation == operation_generation;
+
+        enum Snapshot {
+            Ready(*mut TAOS_RES),
+            Pending(Option<u64>),
+            Failed(Stmt2ErrorSnapshot),
+        }
+
+        let snapshot = match &state.completion {
+            AsyncCompletion::Idle => Snapshot::Pending(None),
+            AsyncCompletion::Pending { generation } => Snapshot::Pending(Some(*generation)),
+            AsyncCompletion::Success { generation } => {
+                debug_assert_ne!(*generation, 0);
+                match state
+                    .cached_result
+                    .as_ref()
+                    .filter(|result| result.kind == CachedStmt2ResultKind::Query)
+                {
+                    Some(result) => Snapshot::Ready(result.as_ptr()),
+                    None => Snapshot::Pending(None),
+                }
+            }
+            AsyncCompletion::Failed { generation, error } => {
+                debug_assert_ne!(*generation, 0);
+                Snapshot::Failed(error.clone())
+            }
+        };
+
+        match snapshot {
+            Snapshot::Ready(result) => {
+                if should_publish {
+                    state.visible_error = Stmt2VisibleError {
+                        generation: operation_generation,
+                        provisional_async_generation: None,
+                        error: None,
+                    };
+                    outer.clear_err();
+                }
+                AsyncQueryResultState::Ready(result)
+            }
+            Snapshot::Pending(async_generation) => {
+                if should_publish {
+                    let error =
+                        TaosError::new(Code::FAILED, "async stmt2 result is not available yet");
+                    state.visible_error = Stmt2VisibleError {
+                        generation: operation_generation,
+                        provisional_async_generation: async_generation,
+                        error: Some(Stmt2ErrorSnapshot::from(&error)),
+                    };
+                    outer.with_err(Some(error));
+                }
+                AsyncQueryResultState::Pending
+            }
+            Snapshot::Failed(error) => {
+                if should_publish {
+                    state.visible_error = Stmt2VisibleError {
+                        generation: operation_generation,
+                        provisional_async_generation: None,
+                        error: Some(error.clone()),
+                    };
+                    outer.with_err(Some(error.to_error()));
+                }
+                AsyncQueryResultState::Failed
+            }
+        }
+    }
+
+    fn finish_async(&self) {
+        let mut state = self.state.lock().unwrap();
+        state.async_in_flight = false;
+        drop(state);
+        self.done.notify_all();
+    }
+}
+
+struct AsyncInFlightGuard {
+    lifecycle: Arc<Stmt2Lifecycle>,
+}
+
+impl Drop for AsyncInFlightGuard {
+    fn drop(&mut self) {
+        self.lifecycle.finish_async();
+    }
+}
+
+#[derive(Debug)]
+pub struct Stmt2ResultSet {
+    affected_rows: i64,
+}
+
+impl Stmt2ResultSet {
+    fn new(affected_rows: i64) -> Self {
+        Self { affected_rows }
+    }
+}
+
+impl ResultSetOperations for Stmt2ResultSet {
+    fn tmq_get_topic_name(&self) -> *const c_char {
+        ptr::null()
+    }
+
+    fn tmq_get_db_name(&self) -> *const c_char {
+        ptr::null()
+    }
+
+    fn tmq_get_table_name(&self) -> *const c_char {
+        ptr::null()
+    }
+
+    fn tmq_get_vgroup_offset(&self) -> i64 {
+        0
+    }
+
+    fn tmq_get_vgroup_id(&self) -> i32 {
+        0
+    }
+
+    fn tmq_get_offset(&self) -> taos_ws::Offset {
+        panic!("tmq_get_offset is not supported for Stmt2ResultSet")
+    }
+
+    fn precision(&self) -> taos_query::common::Precision {
+        taos_query::common::Precision::Millisecond
+    }
+
+    fn affected_rows(&self) -> i32 {
+        self.affected_rows as _
+    }
+
+    fn affected_rows64(&self) -> i64 {
+        self.affected_rows
+    }
+
+    fn num_of_fields(&self) -> i32 {
+        0
+    }
+
+    fn get_fields(&mut self) -> *mut crate::ws::TAOS_FIELD {
+        ptr::null_mut()
+    }
+
+    fn get_fields_e(&mut self) -> *mut crate::ws::TAOS_FIELD_E {
+        ptr::null_mut()
+    }
+
+    unsafe fn fetch_raw_block(
+        &mut self,
+        _ptr: *mut *mut c_void,
+        _rows: *mut i32,
+    ) -> Result<(), taos_ws::query::Error> {
+        Err(taos_ws::query::Error::CommonError(
+            "stmt2 result set does not support fetch raw block".to_string(),
+        ))
+    }
+
+    unsafe fn fetch_block(
+        &mut self,
+        _rows: *mut crate::ws::TAOS_ROW,
+        _num: *mut c_int,
+    ) -> Result<(), taos_ws::query::Error> {
+        Err(taos_ws::query::Error::CommonError(
+            "stmt2 result set does not support fetch block".to_string(),
+        ))
+    }
+
+    unsafe fn fetch_row(&mut self) -> Result<crate::ws::TAOS_ROW, taos_ws::query::Error> {
+        Err(taos_ws::query::Error::CommonError(
+            "stmt2 result set does not support fetch row".to_string(),
+        ))
+    }
+
+    unsafe fn get_raw_value(&mut self, _row: usize, _col: usize) -> (Ty, u32, *const c_void) {
+        (Ty::Null, 0, ptr::null())
+    }
+
+    fn take_timing(&mut self) -> std::time::Duration {
+        std::time::Duration::ZERO
+    }
+
+    fn stop_query(&mut self) {}
+
+    unsafe fn is_null_by_column(
+        &mut self,
+        _column_index: usize,
+        _result: *mut bool,
+        _rows: *mut c_int,
+    ) -> Result<(), TaosError> {
+        Err(TaosError::new(
+            Code::FAILED,
+            "stmt2 result set does not support is_null_by_column",
+        ))
+    }
+
+    fn get_column_data_offset(&mut self, _column_index: usize) -> Result<*mut c_int, TaosError> {
+        Err(TaosError::new(
+            Code::FAILED,
+            "stmt2 result set does not support get_column_data_offset",
+        ))
     }
 }
 
@@ -921,7 +1639,8 @@ impl From<&Stmt2Field> for TAOS_FIELD_ALL {
 mod tests {
     use std::ffi::CString;
     use std::ptr;
-    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, AtomicI64, AtomicPtr, Ordering};
+    use std::sync::{Arc, Barrier};
 
     use futures::future::try_join_all;
     use rand::Rng;
@@ -975,6 +1694,110 @@ mod tests {
             __taos_async_fn_t,
             *mut c_void,
         ) -> c_int = taos_stmt2_bind_param_column_a;
+    }
+
+    #[test]
+    fn test_stmt2_lifecycle_async_success_supersedes_pending_result_error() {
+        let lifecycle = Arc::new(Stmt2Lifecycle::default());
+        let mut outer: TaosMaybeError<()> = ().into();
+
+        let (async_generation, started) = lifecycle.begin_async();
+        assert!(started);
+        lifecycle.publish_error(async_generation, &mut outer, None);
+
+        let poll_generation = lifecycle.begin_operation();
+        assert!(matches!(
+            lifecycle.async_query_result(poll_generation, &mut outer),
+            AsyncQueryResultState::Pending
+        ));
+        let err = unsafe { CStr::from_ptr(outer.errstr().unwrap()) }
+            .to_str()
+            .unwrap();
+        assert!(err.contains("not available yet"), "{err}");
+
+        let lifecycle2 = lifecycle.clone();
+        std::thread::spawn(move || {
+            let result: TaosMaybeError<ResultSet> = ResultSet::Stmt2(Stmt2ResultSet::new(0)).into();
+            lifecycle2.complete_async_success(
+                async_generation,
+                CachedStmt2ResultKind::Query,
+                result,
+            );
+        })
+        .join()
+        .unwrap();
+
+        lifecycle.sync_outer_error(&mut outer);
+        assert!(outer.errno().is_none());
+
+        let result_generation = lifecycle.begin_operation();
+        assert!(matches!(
+            lifecycle.async_query_result(result_generation, &mut outer),
+            AsyncQueryResultState::Ready(_)
+        ));
+    }
+
+    #[test]
+    fn test_stmt2_lifecycle_older_async_completion_preserves_newer_error() {
+        let lifecycle = Arc::new(Stmt2Lifecycle::default());
+        let mut outer: TaosMaybeError<()> = ().into();
+
+        let (async_generation, started) = lifecycle.begin_async();
+        assert!(started);
+        lifecycle.publish_error(async_generation, &mut outer, None);
+
+        let sync_generation = lifecycle.begin_operation();
+        lifecycle.publish_error(
+            sync_generation,
+            &mut outer,
+            Some(TaosError::new(Code::INVALID_PARA, "newer sync error")),
+        );
+
+        let lifecycle2 = lifecycle.clone();
+        std::thread::spawn(move || {
+            lifecycle2.complete_async_error(
+                async_generation,
+                TaosError::new(Code::FAILED, "older async error"),
+            );
+        })
+        .join()
+        .unwrap();
+
+        lifecycle.sync_outer_error(&mut outer);
+        let err = unsafe { CStr::from_ptr(outer.errstr().unwrap()) }
+            .to_str()
+            .unwrap();
+        assert_eq!(err, "newer sync error");
+    }
+
+    #[test]
+    fn test_stmt2_lifecycle_stale_result_operation_still_reads_ready_completion() {
+        let lifecycle = Stmt2Lifecycle::default();
+        let (async_generation, started) = lifecycle.begin_async();
+        assert!(started);
+        let result: TaosMaybeError<ResultSet> = ResultSet::Stmt2(Stmt2ResultSet::new(0)).into();
+        lifecycle.complete_async_success(async_generation, CachedStmt2ResultKind::Query, result);
+
+        let result_generation = lifecycle.begin_operation();
+        let newer_generation = lifecycle.begin_operation();
+        let mut newer_outer: TaosMaybeError<()> = ().into();
+        lifecycle.publish_error(
+            newer_generation,
+            &mut newer_outer,
+            Some(TaosError::new(Code::INVALID_PARA, "newer sync error")),
+        );
+
+        let mut result_outer: TaosMaybeError<()> = ().into();
+        assert!(matches!(
+            lifecycle.async_query_result(result_generation, &mut result_outer),
+            AsyncQueryResultState::Ready(_)
+        ));
+
+        lifecycle.sync_outer_error(&mut newer_outer);
+        let err = unsafe { CStr::from_ptr(newer_outer.errstr().unwrap()) }
+            .to_str()
+            .unwrap();
+        assert_eq!(err, "newer sync error");
     }
 
     static STMT2_COLUMN_BIND_CALLBACK_CODE: std::sync::atomic::AtomicI32 =
@@ -1566,8 +2389,6 @@ mod tests {
             assert!(len > 0);
             println!("str: {:?}, len: {}", CStr::from_ptr(str.as_ptr()), len);
 
-            taos_free_result(res);
-
             let code = taos_stmt2_close(stmt2);
             assert_eq!(code, 0);
 
@@ -1833,7 +2654,6 @@ mod tests {
                 assert!(row_text.contains("NULL"));
             }
 
-            taos_free_result(res);
             assert_eq!(taos_stmt2_close(stmt2), 0);
 
             test_exec(taos, "drop database if exists test_1778045960");
@@ -1865,8 +2685,6 @@ mod tests {
                     let len = taos_print_row(str.as_mut_ptr(), row, fields, num_fields);
                     assert!(len > 0);
                     println!("str: {:?}, len: {}", CStr::from_ptr(str.as_ptr()), len);
-
-                    taos_free_result(res);
                 }
             }
 
@@ -1923,6 +2741,575 @@ mod tests {
             assert_eq!(code, 0);
 
             test_exec(taos, "drop database test_1739864837");
+            taos_close(taos);
+        }
+    }
+
+    #[test]
+    fn test_taos_stmt2_async_insert_success() {
+        static ASYNC_INSERT_AFFECTED: AtomicI64 = AtomicI64::new(-1);
+        static ASYNC_INSERT_CODE: AtomicI64 = AtomicI64::new(-1);
+        static ASYNC_INSERT_RES_NULL: AtomicI64 = AtomicI64::new(-1);
+
+        unsafe {
+            extern "C" fn fp(_userdata: *mut c_void, res: *mut TAOS_RES, code: c_int) {
+                unsafe {
+                    ASYNC_INSERT_CODE.store(code as i64, Ordering::SeqCst);
+                    ASYNC_INSERT_RES_NULL.store(res.is_null() as i64, Ordering::SeqCst);
+                    if !res.is_null() {
+                        let affected = taos_affected_rows(res);
+                        ASYNC_INSERT_AFFECTED.store(affected as i64, Ordering::SeqCst);
+                    }
+                }
+            }
+
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    "drop database if exists test_1783575980",
+                    "create database test_1783575980",
+                    "use test_1783575980",
+                    "create table t0 (ts timestamp, c1 int)",
+                ],
+            );
+
+            let mut option = TAOS_STMT2_OPTION {
+                reqid: 2001,
+                singleStbInsert: false,
+                singleTableBindOnce: false,
+                asyncExecFn: fp,
+                userdata: ptr::null_mut(),
+            };
+            let stmt2 = taos_stmt2_init(taos, &mut option);
+            assert!(!stmt2.is_null());
+
+            let sql = c"insert into t0 values(?, ?)";
+            let code = taos_stmt2_prepare(stmt2, sql.as_ptr(), 0);
+            assert_eq!(code, 0);
+
+            let mut buffer = vec![1739521477831i64, 1739521477832, 1739521477833];
+            let mut length = vec![8, 8, 8];
+            let mut is_null = vec![0, 0, 0];
+            let ts = new_bind!(Ty::Timestamp, buffer, length, is_null);
+
+            let mut buffer = vec![10i32, 20, 30];
+            let mut length = vec![4, 4, 4];
+            let mut is_null = vec![0, 0, 0];
+            let c1 = new_bind!(Ty::Int, buffer, length, is_null);
+
+            let mut col = vec![ts, c1];
+            let mut cols = vec![col.as_mut_ptr()];
+            let mut bindv = TAOS_STMT2_BINDV {
+                count: 1,
+                tbnames: ptr::null_mut(),
+                tags: ptr::null_mut(),
+                bind_cols: cols.as_mut_ptr(),
+            };
+
+            let code = taos_stmt2_bind_param(stmt2, &mut bindv, -1);
+            assert_eq!(code, 0);
+
+            let code = taos_stmt2_exec(stmt2, ptr::null_mut());
+            assert_eq!(code, 0);
+
+            std::thread::sleep(std::time::Duration::from_secs(1));
+
+            assert_eq!(ASYNC_INSERT_CODE.load(Ordering::SeqCst), 0);
+            assert_eq!(ASYNC_INSERT_RES_NULL.load(Ordering::SeqCst), 0);
+            assert_eq!(ASYNC_INSERT_AFFECTED.load(Ordering::SeqCst), 3);
+
+            let code = taos_stmt2_close(stmt2);
+            assert_eq!(code, 0);
+
+            test_exec(taos, "drop database if exists test_1783575980");
+            taos_close(taos);
+        }
+    }
+
+    struct SyncPoints {
+        entered: Barrier,
+        release: Barrier,
+        res_ptr: AtomicPtr<c_void>,
+        stmt_ptr: AtomicPtr<c_void>,
+        result_from_callback: AtomicPtr<c_void>,
+        code: AtomicI64,
+        cb_done: AtomicI64,
+    }
+
+    fn new_sync_points() -> Box<SyncPoints> {
+        Box::new(SyncPoints {
+            entered: Barrier::new(2),
+            release: Barrier::new(2),
+            res_ptr: AtomicPtr::new(ptr::null_mut()),
+            stmt_ptr: AtomicPtr::new(ptr::null_mut()),
+            result_from_callback: AtomicPtr::new(ptr::null_mut()),
+            code: AtomicI64::new(-1),
+            cb_done: AtomicI64::new(0),
+        })
+    }
+
+    extern "C" fn blocking_cb(userdata: *mut c_void, res: *mut TAOS_RES, code: c_int) {
+        unsafe {
+            let sp = &*(userdata as *const SyncPoints);
+            sp.res_ptr.store(res, Ordering::SeqCst);
+            sp.code.store(code as i64, Ordering::SeqCst);
+            sp.entered.wait();
+            sp.release.wait();
+            let stmt = sp.stmt_ptr.load(Ordering::SeqCst);
+            if !stmt.is_null() {
+                sp.result_from_callback
+                    .store(taos_stmt2_result(stmt), Ordering::SeqCst);
+            }
+            sp.cb_done.store(1, Ordering::SeqCst);
+        }
+    }
+
+    unsafe fn prep_async_query_stmt(taos: *mut TAOS, sp: &SyncPoints) -> *mut TAOS_STMT2 {
+        let mut option = TAOS_STMT2_OPTION {
+            reqid: 3001,
+            singleStbInsert: false,
+            singleTableBindOnce: false,
+            asyncExecFn: blocking_cb,
+            userdata: sp as *const SyncPoints as *mut c_void,
+        };
+        let stmt2 = taos_stmt2_init(taos, &mut option);
+        assert!(!stmt2.is_null());
+
+        let sql = c"select * from t0 where c1 > ?";
+        assert_eq!(taos_stmt2_prepare(stmt2, sql.as_ptr(), 0), 0);
+
+        let mut buffer = vec![0];
+        let mut length = vec![4];
+        let mut is_null = vec![0];
+        let c1 = new_bind!(Ty::Int, buffer, length, is_null);
+        let mut col = vec![c1];
+        let mut cols = vec![col.as_mut_ptr()];
+        let mut bindv = TAOS_STMT2_BINDV {
+            count: 1,
+            tbnames: ptr::null_mut(),
+            tags: ptr::null_mut(),
+            bind_cols: cols.as_mut_ptr(),
+        };
+        assert_eq!(taos_stmt2_bind_param(stmt2, &mut bindv, -1), 0);
+        stmt2
+    }
+
+    #[test]
+    fn test_taos_stmt2_async_result_available_while_callback_runs() {
+        unsafe {
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    "drop database if exists test_1783576629",
+                    "create database test_1783576629",
+                    "use test_1783576629",
+                    "create table t0 (ts timestamp, c1 int)",
+                    "insert into t0 values(1739762261437, 5)",
+                ],
+            );
+
+            let sp = new_sync_points();
+            let stmt2 = prep_async_query_stmt(taos, &sp);
+
+            assert_eq!(taos_stmt2_exec(stmt2, ptr::null_mut()), 0);
+
+            sp.entered.wait();
+
+            let res_during_callback = taos_stmt2_result(stmt2);
+            assert!(
+                !res_during_callback.is_null(),
+                "result must be available while the async callback runs"
+            );
+            assert_eq!(res_during_callback, sp.res_ptr.load(Ordering::SeqCst));
+
+            sp.release.wait();
+            while sp.cb_done.load(Ordering::SeqCst) == 0 {
+                std::thread::yield_now();
+            }
+
+            let mut res_after = ptr::null_mut();
+            for _ in 0..500 {
+                res_after = taos_stmt2_result(stmt2);
+                if !res_after.is_null() {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            assert!(!res_after.is_null());
+            assert_eq!(res_after, sp.res_ptr.load(Ordering::SeqCst));
+
+            assert_eq!(taos_stmt2_close(stmt2), 0);
+            test_exec(taos, "drop database if exists test_1783576629");
+            taos_close(taos);
+        }
+    }
+
+    #[test]
+    fn test_taos_stmt2_async_result_available_in_callback() {
+        unsafe {
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    "drop database if exists test_1784000078",
+                    "create database test_1784000078",
+                    "use test_1784000078",
+                    "create table t0 (ts timestamp, c1 int)",
+                    "insert into t0 values(1739762261437, 5)",
+                ],
+            );
+
+            let sp = new_sync_points();
+            let stmt2 = prep_async_query_stmt(taos, &sp);
+            sp.stmt_ptr.store(stmt2 as _, Ordering::SeqCst);
+
+            assert_eq!(taos_stmt2_exec(stmt2, ptr::null_mut()), 0);
+
+            sp.entered.wait();
+            sp.release.wait();
+            while sp.cb_done.load(Ordering::SeqCst) == 0 {
+                std::thread::yield_now();
+            }
+
+            let callback_result = sp.result_from_callback.load(Ordering::SeqCst);
+            assert!(
+                !callback_result.is_null(),
+                "query result must be available while the async callback runs"
+            );
+            assert_eq!(callback_result, sp.res_ptr.load(Ordering::SeqCst));
+
+            assert_eq!(taos_stmt2_close(stmt2), 0);
+            test_exec(taos, "drop database if exists test_1784000078");
+            taos_close(taos);
+        }
+    }
+
+    #[test]
+    fn test_taos_stmt2_async_reject_concurrent_exec() {
+        unsafe {
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    "drop database if exists test_1783576905",
+                    "create database test_1783576905",
+                    "use test_1783576905",
+                    "create table t0 (ts timestamp, c1 int)",
+                    "insert into t0 values(1739762261437, 7)",
+                ],
+            );
+
+            let sp = new_sync_points();
+            let stmt2 = prep_async_query_stmt(taos, &sp);
+
+            assert_eq!(taos_stmt2_exec(stmt2, ptr::null_mut()), 0);
+
+            sp.entered.wait();
+
+            let code = taos_stmt2_exec(stmt2, ptr::null_mut());
+            assert_ne!(code, 0, "second async exec while in flight must fail");
+
+            sp.release.wait();
+            while sp.cb_done.load(Ordering::SeqCst) == 0 {
+                std::thread::yield_now();
+            }
+
+            assert_eq!(taos_stmt2_close(stmt2), 0);
+            test_exec(taos, "drop database if exists test_1783576905");
+            taos_close(taos);
+        }
+    }
+
+    #[test]
+    fn test_taos_stmt2_async_exec_without_prepare_sync_error() {
+        static ASYNC_NO_PREPARE_CB_CALLED: AtomicI64 = AtomicI64::new(0);
+
+        unsafe {
+            extern "C" fn fp(_userdata: *mut c_void, _res: *mut TAOS_RES, _code: c_int) {
+                ASYNC_NO_PREPARE_CB_CALLED.store(1, Ordering::SeqCst);
+            }
+
+            let taos = test_connect();
+            let mut option = TAOS_STMT2_OPTION {
+                reqid: 6001,
+                singleStbInsert: false,
+                singleTableBindOnce: false,
+                asyncExecFn: fp,
+                userdata: ptr::null_mut(),
+            };
+            let stmt2 = taos_stmt2_init(taos, &mut option);
+            assert!(!stmt2.is_null());
+
+            let code = taos_stmt2_exec(stmt2, ptr::null_mut());
+            assert_ne!(
+                code, 0,
+                "async exec without prepare must fail synchronously"
+            );
+
+            let err = CStr::from_ptr(taos_stmt2_error(stmt2)).to_str().unwrap();
+            assert!(err.contains("taos_stmt2_prepare is not called"), "{err}");
+
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            assert_eq!(
+                ASYNC_NO_PREPARE_CB_CALLED.load(Ordering::SeqCst),
+                0,
+                "no async task/callback should be spawned on sync error"
+            );
+
+            assert_eq!(taos_stmt2_close(stmt2), 0);
+            taos_close(taos);
+        }
+    }
+
+    #[test]
+    fn test_taos_stmt2_result_on_insert_returns_null() {
+        unsafe {
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    "drop database if exists test_1783578433",
+                    "create database test_1783578433",
+                    "use test_1783578433",
+                    "create table t0 (ts timestamp, c1 int)",
+                ],
+            );
+
+            let stmt2 = taos_stmt2_init(taos, ptr::null_mut());
+            assert!(!stmt2.is_null());
+
+            let sql = c"insert into t0 values(?, ?)";
+            assert_eq!(taos_stmt2_prepare(stmt2, sql.as_ptr(), 0), 0);
+
+            let mut buffer = vec![1739521477831i64];
+            let mut length = vec![8];
+            let mut is_null = vec![0];
+            let ts = new_bind!(Ty::Timestamp, buffer, length, is_null);
+            let mut buffer = vec![10i32];
+            let mut length = vec![4];
+            let mut is_null = vec![0];
+            let c1 = new_bind!(Ty::Int, buffer, length, is_null);
+            let mut col = vec![ts, c1];
+            let mut cols = vec![col.as_mut_ptr()];
+            let mut bindv = TAOS_STMT2_BINDV {
+                count: 1,
+                tbnames: ptr::null_mut(),
+                tags: ptr::null_mut(),
+                bind_cols: cols.as_mut_ptr(),
+            };
+            assert_eq!(taos_stmt2_bind_param(stmt2, &mut bindv, -1), 0);
+
+            let mut affected_rows = 0;
+            assert_eq!(taos_stmt2_exec(stmt2, &mut affected_rows), 0);
+
+            let res = taos_stmt2_result(stmt2);
+            assert!(res.is_null(), "result on insert stmt must be NULL");
+            let errstr = CStr::from_ptr(taos_stmt2_error(stmt2));
+            assert!(
+                !errstr.to_bytes().is_empty(),
+                "insert result should set an error message"
+            );
+
+            assert_eq!(taos_stmt2_close(stmt2), 0);
+            test_exec(taos, "drop database if exists test_1783578433");
+            taos_close(taos);
+        }
+    }
+
+    #[test]
+    fn test_taos_stmt2_async_exec_error_path() {
+        static ASYNC_ERR_CODE: AtomicI64 = AtomicI64::new(0);
+        static ASYNC_CB_CALLED: AtomicBool = AtomicBool::new(false);
+
+        unsafe {
+            extern "C" fn fp(_userdata: *mut c_void, res: *mut TAOS_RES, code: c_int) {
+                ASYNC_ERR_CODE.store(code as i64, Ordering::SeqCst);
+                assert!(res.is_null());
+                ASYNC_CB_CALLED.store(true, Ordering::SeqCst);
+            }
+
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    "drop database if exists test_1783578589",
+                    "create database test_1783578589",
+                    "use test_1783578589",
+                    "create table t0 (ts timestamp, c1 int)",
+                    "insert into t0 values(1739762261437, 5)",
+                ],
+            );
+
+            let mut option = TAOS_STMT2_OPTION {
+                reqid: 5001,
+                singleStbInsert: false,
+                singleTableBindOnce: false,
+                asyncExecFn: fp,
+                userdata: ptr::null_mut(),
+            };
+            let stmt2 = taos_stmt2_init(taos, &mut option);
+            assert!(!stmt2.is_null());
+
+            let sql = c"select * from t0 where c1 > ?";
+            assert_eq!(taos_stmt2_prepare(stmt2, sql.as_ptr(), 0), 0);
+
+            let mut buffer = vec![0];
+            let mut length = vec![4];
+            let mut is_null = vec![0];
+            let c1 = new_bind!(Ty::Int, buffer, length, is_null);
+            let mut col = vec![c1];
+            let mut cols = vec![col.as_mut_ptr()];
+            let mut bindv = TAOS_STMT2_BINDV {
+                count: 1,
+                tbnames: ptr::null_mut(),
+                tags: ptr::null_mut(),
+                bind_cols: cols.as_mut_ptr(),
+            };
+            assert_eq!(taos_stmt2_bind_param(stmt2, &mut bindv, -1), 0);
+
+            test_exec(taos, "drop table t0");
+
+            assert_eq!(taos_stmt2_exec(stmt2, ptr::null_mut()), 0);
+
+            let mut waited = 0;
+            while !ASYNC_CB_CALLED.load(Ordering::SeqCst) && waited < 60_000 {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                waited += 50;
+            }
+            assert!(
+                ASYNC_CB_CALLED.load(Ordering::SeqCst),
+                "async callback not invoked within 60s"
+            );
+
+            assert_ne!(ASYNC_ERR_CODE.load(Ordering::SeqCst), 0);
+
+            let res = taos_stmt2_result(stmt2);
+            assert!(res.is_null());
+
+            assert_eq!(taos_stmt2_close(stmt2), 0);
+            test_exec(taos, "drop database if exists test_1783578589");
+            taos_close(taos);
+        }
+    }
+
+    #[test]
+    fn test_taos_stmt2_close_waits_async_callback() {
+        unsafe {
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    "drop database if exists test_1783581062",
+                    "create database test_1783581062",
+                    "use test_1783581062",
+                    "create table t0 (ts timestamp, c1 int)",
+                    "insert into t0 values(1739762261437, 9)",
+                ],
+            );
+
+            let sp = new_sync_points();
+            let stmt2 = prep_async_query_stmt(taos, &sp);
+
+            assert_eq!(taos_stmt2_exec(stmt2, ptr::null_mut()), 0);
+
+            sp.entered.wait();
+
+            let stmt2_ptr = SafePtr(stmt2);
+            let close_returned = Arc::new(AtomicI64::new(0));
+            let close_returned2 = close_returned.clone();
+            let handle = std::thread::spawn(move || {
+                let stmt2 = stmt2_ptr;
+                let code = taos_stmt2_close(stmt2.0);
+                assert_eq!(code, 0);
+                close_returned2.store(1, Ordering::SeqCst);
+            });
+
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            assert_eq!(
+                close_returned.load(Ordering::SeqCst),
+                0,
+                "close must not return while callback is blocked"
+            );
+
+            sp.release.wait();
+            handle.join().unwrap();
+            assert_eq!(close_returned.load(Ordering::SeqCst), 1);
+            assert_eq!(sp.cb_done.load(Ordering::SeqCst), 1);
+
+            test_exec(taos, "drop database if exists test_1783581062");
+            taos_close(taos);
+        }
+    }
+
+    #[test]
+    fn test_taos_stmt2_async_query_result_owned_by_stmt() {
+        static OWNED_FETCH_OK: AtomicI64 = AtomicI64::new(0);
+        static OWNED_CODE: AtomicI64 = AtomicI64::new(-1);
+
+        unsafe {
+            extern "C" fn fp(_userdata: *mut c_void, res: *mut TAOS_RES, code: c_int) {
+                unsafe {
+                    OWNED_CODE.store(code as i64, Ordering::SeqCst);
+                    if !res.is_null() {
+                        let row = taos_fetch_row(res);
+                        if !row.is_null() {
+                            OWNED_FETCH_OK.store(1, Ordering::SeqCst);
+                        }
+                    }
+                }
+            }
+
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    "drop database if exists test_1783581251",
+                    "create database test_1783581251",
+                    "use test_1783581251",
+                    "create table t0 (ts timestamp, c1 int)",
+                    "insert into t0 values(1739762261437, 11)",
+                    "insert into t0 values(1739762261438, 22)",
+                ],
+            );
+
+            let mut option = TAOS_STMT2_OPTION {
+                reqid: 4001,
+                singleStbInsert: false,
+                singleTableBindOnce: false,
+                asyncExecFn: fp,
+                userdata: ptr::null_mut(),
+            };
+            let stmt2 = taos_stmt2_init(taos, &mut option);
+            assert!(!stmt2.is_null());
+
+            let sql = c"select * from t0 where c1 > ?";
+            assert_eq!(taos_stmt2_prepare(stmt2, sql.as_ptr(), 0), 0);
+
+            let mut buffer = vec![0];
+            let mut length = vec![4];
+            let mut is_null = vec![0];
+            let c1 = new_bind!(Ty::Int, buffer, length, is_null);
+            let mut col = vec![c1];
+            let mut cols = vec![col.as_mut_ptr()];
+            let mut bindv = TAOS_STMT2_BINDV {
+                count: 1,
+                tbnames: ptr::null_mut(),
+                tags: ptr::null_mut(),
+                bind_cols: cols.as_mut_ptr(),
+            };
+            assert_eq!(taos_stmt2_bind_param(stmt2, &mut bindv, -1), 0);
+
+            assert_eq!(taos_stmt2_exec(stmt2, ptr::null_mut()), 0);
+
+            std::thread::sleep(std::time::Duration::from_secs(1));
+
+            assert_eq!(OWNED_CODE.load(Ordering::SeqCst), 0);
+            assert_eq!(OWNED_FETCH_OK.load(Ordering::SeqCst), 1);
+
+            assert_eq!(taos_stmt2_close(stmt2), 0);
+            test_exec(taos, "drop database if exists test_1783581251");
             taos_close(taos);
         }
     }
@@ -2005,12 +3392,222 @@ mod tests {
 
             taos_stop_query(res);
 
-            taos_free_result(res);
-
             let code = taos_stmt2_close(stmt2);
             assert_eq!(code, 0);
 
             test_exec(taos, "drop database test_1739876374");
+            taos_close(taos);
+        }
+    }
+
+    #[test]
+    fn test_taos_stmt2_result_same_pointer() {
+        unsafe {
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    "drop database if exists test_1783581418",
+                    "create database test_1783581418",
+                    "use test_1783581418",
+                    "create table t0 (ts timestamp, c1 int)",
+                    "insert into t0 values(1739762261437, 1)",
+                    "insert into t0 values(1739762261438, 99)",
+                ],
+            );
+
+            let stmt2 = taos_stmt2_init(taos, ptr::null_mut());
+            assert!(!stmt2.is_null());
+
+            let sql = c"select * from t0 where c1 > ?";
+            let code = taos_stmt2_prepare(stmt2, sql.as_ptr(), 0);
+            assert_eq!(code, 0);
+
+            let mut buffer = vec![0];
+            let mut length = vec![4];
+            let mut is_null = vec![0];
+            let c1 = new_bind!(Ty::Int, buffer, length, is_null);
+
+            let mut col = vec![c1];
+            let mut cols = vec![col.as_mut_ptr()];
+            let mut bindv = TAOS_STMT2_BINDV {
+                count: cols.len() as _,
+                tbnames: ptr::null_mut(),
+                tags: ptr::null_mut(),
+                bind_cols: cols.as_mut_ptr(),
+            };
+
+            let code = taos_stmt2_bind_param(stmt2, &mut bindv, -1);
+            assert_eq!(code, 0);
+
+            let mut affected_rows = 0;
+            let code = taos_stmt2_exec(stmt2, &mut affected_rows);
+            assert_eq!(code, 0);
+
+            let res1 = taos_stmt2_result(stmt2);
+            assert!(!res1.is_null());
+            let res2 = taos_stmt2_result(stmt2);
+            assert!(!res2.is_null());
+            assert_eq!(res1, res2);
+
+            let row = taos_fetch_row(res1);
+            assert!(!row.is_null());
+
+            let code = taos_stmt2_close(stmt2);
+            assert_eq!(code, 0);
+
+            test_exec(taos, "drop database if exists test_1783581418");
+            taos_close(taos);
+        }
+    }
+
+    #[test]
+    fn test_taos_stmt2_close_frees_result() {
+        unsafe {
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    "drop database if exists test_1783581482",
+                    "create database test_1783581482",
+                    "use test_1783581482",
+                    "create table t0 (ts timestamp, c1 int)",
+                    "insert into t0 values(1739762261437, 1)",
+                    "insert into t0 values(1739762261438, 2)",
+                ],
+            );
+
+            let stmt2 = taos_stmt2_init(taos, ptr::null_mut());
+            assert!(!stmt2.is_null());
+
+            let sql = c"select * from t0 where c1 >= ?";
+            let code = taos_stmt2_prepare(stmt2, sql.as_ptr(), 0);
+            assert_eq!(code, 0);
+
+            let mut buffer = vec![0];
+            let mut length = vec![4];
+            let mut is_null = vec![0];
+            let c1 = new_bind!(Ty::Int, buffer, length, is_null);
+            let mut col = vec![c1];
+            let mut cols = vec![col.as_mut_ptr()];
+            let mut bindv = TAOS_STMT2_BINDV {
+                count: 1,
+                tbnames: ptr::null_mut(),
+                tags: ptr::null_mut(),
+                bind_cols: cols.as_mut_ptr(),
+            };
+            let code = taos_stmt2_bind_param(stmt2, &mut bindv, -1);
+            assert_eq!(code, 0);
+
+            let mut affected_rows = 0;
+            let code = taos_stmt2_exec(stmt2, &mut affected_rows);
+            assert_eq!(code, 0);
+
+            let res = taos_stmt2_result(stmt2);
+            assert!(!res.is_null());
+
+            let row = taos_fetch_row(res);
+            assert!(!row.is_null());
+
+            let code = taos_stmt2_close(stmt2);
+            assert_eq!(code, 0);
+
+            test_exec(taos, "drop database if exists test_1783581482");
+            taos_close(taos);
+        }
+    }
+
+    #[test]
+    fn test_taos_stmt2_rebind_clears_prev_result() {
+        unsafe {
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    "drop database if exists test_1783581523",
+                    "create database test_1783581523",
+                    "use test_1783581523",
+                    "create table t0 (ts timestamp, c1 int)",
+                    "insert into t0 values(1739762261437, 10)",
+                    "insert into t0 values(1739762261438, 20)",
+                    "insert into t0 values(1739762261439, 30)",
+                ],
+            );
+
+            let stmt2 = taos_stmt2_init(taos, ptr::null_mut());
+            assert!(!stmt2.is_null());
+
+            let sql = c"select * from t0 where c1 > ?";
+            let code = taos_stmt2_prepare(stmt2, sql.as_ptr(), 0);
+            assert_eq!(code, 0);
+
+            let mut buffer = vec![25];
+            let mut length = vec![4];
+            let mut is_null = vec![0];
+            let c1 = new_bind!(Ty::Int, buffer, length, is_null);
+            let mut col = vec![c1];
+            let mut cols = vec![col.as_mut_ptr()];
+            let mut bindv = TAOS_STMT2_BINDV {
+                count: 1,
+                tbnames: ptr::null_mut(),
+                tags: ptr::null_mut(),
+                bind_cols: cols.as_mut_ptr(),
+            };
+            let code = taos_stmt2_bind_param(stmt2, &mut bindv, -1);
+            assert_eq!(code, 0);
+
+            let mut affected_rows = 0;
+            let code = taos_stmt2_exec(stmt2, &mut affected_rows);
+            assert_eq!(code, 0);
+
+            let res1 = taos_stmt2_result(stmt2);
+            assert!(!res1.is_null());
+            let row = taos_fetch_row(res1);
+            assert!(!row.is_null());
+            let fields = taos_fetch_fields(res1);
+            let num_fields = taos_num_fields(res1);
+            let mut buf = vec![0 as c_char; 128];
+            taos_print_row(buf.as_mut_ptr(), row, fields, num_fields);
+            let text = CStr::from_ptr(buf.as_ptr()).to_str().unwrap().to_string();
+            assert!(text.contains("30"), "round1 row: {text}");
+            let row = taos_fetch_row(res1);
+            assert!(row.is_null());
+
+            let mut buffer = vec![5];
+            let mut length = vec![4];
+            let mut is_null = vec![0];
+            let c1 = new_bind!(Ty::Int, buffer, length, is_null);
+            let mut col = vec![c1];
+            let mut cols = vec![col.as_mut_ptr()];
+            let mut bindv = TAOS_STMT2_BINDV {
+                count: 1,
+                tbnames: ptr::null_mut(),
+                tags: ptr::null_mut(),
+                bind_cols: cols.as_mut_ptr(),
+            };
+            let code = taos_stmt2_bind_param(stmt2, &mut bindv, -1);
+            assert_eq!(code, 0);
+
+            let mut affected_rows = 0;
+            let code = taos_stmt2_exec(stmt2, &mut affected_rows);
+            assert_eq!(code, 0);
+
+            let res2 = taos_stmt2_result(stmt2);
+            assert!(!res2.is_null());
+            let mut cnt = 0;
+            loop {
+                let row = taos_fetch_row(res2);
+                if row.is_null() {
+                    break;
+                }
+                cnt += 1;
+            }
+            assert_eq!(cnt, 3, "round2 should match 3 rows");
+
+            let code = taos_stmt2_close(stmt2);
+            assert_eq!(code, 0);
+
+            test_exec(taos, "drop database if exists test_1783581523");
             taos_close(taos);
         }
     }
@@ -2110,8 +3707,6 @@ mod tests {
             let len = taos_print_row(str.as_mut_ptr(), row, fields, num_fields);
             assert!(len > 0);
             println!("str: {:?}, len: {}", CStr::from_ptr(str.as_ptr()), len);
-
-            taos_free_result(res);
 
             let code = taos_stmt2_close(stmt2);
             assert_eq!(code, 0);
@@ -2256,7 +3851,6 @@ mod tests {
                 "1739521477834 4 \\x12345678",
             );
 
-            taos_free_result(res);
             assert_eq!(taos_stmt2_close(stmt2), 0);
             test_exec(taos, "drop database test_1753168041");
             taos_close(taos);
@@ -2391,7 +3985,6 @@ mod tests {
                 "1726803356468 NULL NULL NULL",
             );
 
-            taos_free_result(res);
             assert_eq!(taos_stmt2_close(stmt2), 0);
             test_exec(taos, "drop database if exists test_1776764597");
             taos_close(taos);
@@ -2937,5 +4530,621 @@ mod tests {
             test_exec(taos, "drop database if exists test_1765161954");
             taos_close(taos);
         }
+    }
+
+    #[cfg(feature = "test-new-feat")]
+    #[test]
+    fn test_taos_stmt2_prepare_placeholder_tbname_rejected() {
+        unsafe {
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    "drop database if exists test_1783597162",
+                    "create database test_1783597162",
+                    "use test_1783597162",
+                    "create table t0 (ts timestamp, c1 int)",
+                ],
+            );
+
+            let stmt2 = taos_stmt2_init(taos, ptr::null_mut());
+            assert!(!stmt2.is_null());
+
+            let sql = c"insert into test_1783597162.? (ts, c1) values (?, ?)";
+            let code = taos_stmt2_prepare(stmt2, sql.as_ptr(), 0);
+            assert_ne!(code, 0, "prepare with table name placeholder must fail");
+
+            let err = CStr::from_ptr(taos_stmt2_error(stmt2)).to_str().unwrap();
+            assert!(err.contains("table name placeholder"), "{err}");
+
+            assert_eq!(taos_stmt2_close(stmt2), 0);
+            test_exec(taos, "drop database if exists test_1783597162");
+            taos_close(taos);
+        }
+    }
+
+    #[cfg(feature = "test-new-feat")]
+    #[test]
+    fn test_taos_stmt2_prepare_literal_sql() {
+        unsafe {
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    "drop database if exists test_1783739807",
+                    "create database test_1783739807",
+                    "use test_1783739807",
+                    "create table t0 (ts timestamp, c1 int)",
+                ],
+            );
+
+            let stmt2 = taos_stmt2_init(taos, ptr::null_mut());
+            assert!(!stmt2.is_null());
+
+            let sql = c"insert into t0 values (now, 1)";
+            let code = taos_stmt2_prepare(stmt2, sql.as_ptr(), 0);
+            assert_eq!(code, 0);
+
+            let mut affected_rows = 0;
+            let code = taos_stmt2_exec(stmt2, &mut affected_rows);
+            assert_eq!(code, 0);
+            assert_eq!(affected_rows, 1);
+
+            assert_eq!(taos_stmt2_close(stmt2), 0);
+            test_exec(taos, "drop database if exists test_1783739807");
+            taos_close(taos);
+        }
+    }
+
+    #[cfg(feature = "test-new-feat")]
+    #[test]
+    fn test_taos_stmt2_get_fields_literal_insert_free_null_is_noop() {
+        unsafe {
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    "drop database if exists test_1784000254",
+                    "create database test_1784000254",
+                    "use test_1784000254",
+                    "create table t0 (ts timestamp, c1 int)",
+                ],
+            );
+
+            let stmt2 = taos_stmt2_init(taos, ptr::null_mut());
+            assert!(!stmt2.is_null());
+
+            let sql = c"insert into t0 values (now, 1)";
+            assert_eq!(taos_stmt2_prepare(stmt2, sql.as_ptr(), 0), 0);
+
+            let mut count = -1;
+            let mut fields = ptr::null_mut();
+            let code = taos_stmt2_get_fields(stmt2, &mut count, &mut fields);
+            assert_eq!(code, 0);
+            assert_eq!(count, 0);
+            assert!(fields.is_null());
+
+            taos_stmt2_free_fields(stmt2, fields);
+
+            assert_eq!(taos_stmt2_close(stmt2), 0);
+            test_exec(taos, "drop database if exists test_1784000254");
+            taos_close(taos);
+        }
+    }
+
+    #[cfg(feature = "test-new-feat")]
+    #[test]
+    fn test_taos_stmt2_bind_after_rejected_prepare_fails() {
+        unsafe {
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    "drop database if exists test_1784007841",
+                    "create database test_1784007841",
+                    "use test_1784007841",
+                    "create table t0 (ts timestamp, c1 int)",
+                ],
+            );
+
+            let stmt2 = taos_stmt2_init(taos, ptr::null_mut());
+            assert!(!stmt2.is_null());
+
+            let sql = c"insert into test_1784007841.? (ts, c1) values (?, ?)";
+            let code = taos_stmt2_prepare(stmt2, sql.as_ptr(), 0);
+            assert_ne!(code, 0);
+
+            let mut insert = -1;
+            let code = taos_stmt2_is_insert(stmt2, &mut insert);
+            assert_ne!(code, 0);
+
+            let mut buffer = vec![1739521477831i64];
+            let mut length = vec![8];
+            let mut is_null = vec![0];
+            let ts = new_bind!(Ty::Timestamp, buffer, length, is_null);
+            let mut col = vec![ts];
+            let mut cols = vec![col.as_mut_ptr()];
+            let mut bindv = TAOS_STMT2_BINDV {
+                count: 1,
+                tbnames: ptr::null_mut(),
+                tags: ptr::null_mut(),
+                bind_cols: cols.as_mut_ptr(),
+            };
+            let code = taos_stmt2_bind_param(stmt2, &mut bindv, -1);
+            assert_ne!(code, 0);
+
+            assert_eq!(taos_stmt2_close(stmt2), 0);
+            test_exec(taos, "drop database if exists test_1784007841");
+            taos_close(taos);
+        }
+    }
+
+    #[test]
+    fn test_taos_stmt2_bind_without_prepare_returns_error() {
+        unsafe {
+            let taos = test_connect();
+            let stmt2 = taos_stmt2_init(taos, ptr::null_mut());
+            assert!(!stmt2.is_null());
+
+            let mut buffer = vec![1739763276172i64];
+            let mut length = vec![8];
+            let mut is_null = vec![0];
+            let ts = new_bind!(Ty::Timestamp, buffer, length, is_null);
+            let mut col = vec![ts];
+            let mut cols = vec![col.as_mut_ptr()];
+            let mut bindv = TAOS_STMT2_BINDV {
+                count: 1,
+                tbnames: ptr::null_mut(),
+                tags: ptr::null_mut(),
+                bind_cols: cols.as_mut_ptr(),
+            };
+
+            let code = taos_stmt2_bind_param(stmt2, &mut bindv, -1);
+            assert_ne!(code, 0);
+
+            let err = CStr::from_ptr(taos_stmt2_error(stmt2)).to_str().unwrap();
+            assert!(err.contains("taos_stmt2_prepare is not called"), "{err}");
+
+            assert_eq!(taos_stmt2_close(stmt2), 0);
+            taos_close(taos);
+        }
+    }
+
+    #[test]
+    fn test_taos_stmt2_async_error_readable_via_error() {
+        static ERR_CB_DONE: AtomicBool = AtomicBool::new(false);
+        static ERR_CB_CODE: AtomicI64 = AtomicI64::new(0);
+        static ERR_STMT2: AtomicPtr<c_void> = AtomicPtr::new(ptr::null_mut());
+
+        unsafe {
+            extern "C" fn fp(_userdata: *mut c_void, res: *mut TAOS_RES, code: c_int) {
+                unsafe {
+                    assert!(res.is_null());
+                    ERR_CB_CODE.store(code as i64, Ordering::SeqCst);
+                    let stmt = ERR_STMT2.load(Ordering::SeqCst);
+                    let err = CStr::from_ptr(taos_stmt2_error(stmt)).to_str().unwrap();
+                    assert!(!err.is_empty());
+                    ERR_CB_DONE.store(true, Ordering::SeqCst);
+                }
+            }
+
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    "drop database if exists test_1783749398",
+                    "create database test_1783749398",
+                    "use test_1783749398",
+                    "create table t0 (ts timestamp, c1 int)",
+                    "insert into t0 values(1739762261437, 5)",
+                ],
+            );
+
+            let mut option = TAOS_STMT2_OPTION {
+                reqid: 7001,
+                singleStbInsert: false,
+                singleTableBindOnce: false,
+                asyncExecFn: fp,
+                userdata: ptr::null_mut(),
+            };
+            let stmt2 = taos_stmt2_init(taos, &mut option);
+            assert!(!stmt2.is_null());
+            ERR_STMT2.store(stmt2 as _, Ordering::SeqCst);
+
+            let sql = c"select * from t0 where c1 > ?";
+            assert_eq!(taos_stmt2_prepare(stmt2, sql.as_ptr(), 0), 0);
+
+            let mut buffer = vec![0];
+            let mut length = vec![4];
+            let mut is_null = vec![0];
+            let c1 = new_bind!(Ty::Int, buffer, length, is_null);
+            let mut col = vec![c1];
+            let mut cols = vec![col.as_mut_ptr()];
+            let mut bindv = TAOS_STMT2_BINDV {
+                count: 1,
+                tbnames: ptr::null_mut(),
+                tags: ptr::null_mut(),
+                bind_cols: cols.as_mut_ptr(),
+            };
+            assert_eq!(taos_stmt2_bind_param(stmt2, &mut bindv, -1), 0);
+
+            test_exec(taos, "drop table t0");
+
+            assert_eq!(taos_stmt2_exec(stmt2, ptr::null_mut()), 0);
+
+            let mut waited = 0;
+            while !ERR_CB_DONE.load(Ordering::SeqCst) && waited < 60_000 {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                waited += 50;
+            }
+            assert!(ERR_CB_DONE.load(Ordering::SeqCst));
+            assert_ne!(ERR_CB_CODE.load(Ordering::SeqCst), 0);
+
+            let err = CStr::from_ptr(taos_stmt2_error(stmt2)).to_str().unwrap();
+            assert!(!err.is_empty());
+
+            assert_eq!(taos_stmt2_close(stmt2), 0);
+            test_exec(taos, "drop database if exists test_1783749398");
+            taos_close(taos);
+        }
+    }
+
+    #[test]
+    fn test_taos_stmt2_error_prefers_async_error_over_stale_outer_error() {
+        unsafe {
+            let taos = test_connect();
+            let stmt2 = taos_stmt2_init(taos, ptr::null_mut());
+            assert!(!stmt2.is_null());
+
+            let maybe_err = &mut *(stmt2 as *mut TaosMaybeError<TaosStmt2>);
+            let lifecycle = maybe_err.deref().unwrap().lifecycle.clone();
+            let (generation, started) = lifecycle.begin_async();
+            assert!(started);
+            lifecycle.publish_error(generation, maybe_err, None);
+            maybe_err.with_err(Some(TaosError::new(Code::FAILED, "stale outer error")));
+            lifecycle.complete_async_error(
+                generation,
+                TaosError::new(Code::FAILED, "current async error"),
+            );
+            lifecycle.finish_async();
+
+            let err = CStr::from_ptr(taos_stmt2_error(stmt2)).to_str().unwrap();
+            assert_eq!(err, "current async error");
+
+            assert_eq!(taos_stmt2_close(stmt2), 0);
+            taos_close(taos);
+        }
+    }
+
+    #[test]
+    fn test_taos_stmt2_error_preserves_newer_sync_error() {
+        unsafe {
+            let taos = test_connect();
+            let stmt2 = taos_stmt2_init(taos, ptr::null_mut());
+            assert!(!stmt2.is_null());
+
+            let maybe_err = &mut *(stmt2 as *mut TaosMaybeError<TaosStmt2>);
+            let lifecycle = maybe_err.deref().unwrap().lifecycle.clone();
+            let (generation, started) = lifecycle.begin_async();
+            assert!(started);
+            lifecycle.publish_error(generation, maybe_err, None);
+            lifecycle.complete_async_error(
+                generation,
+                TaosError::new(Code::FAILED, "stale async error"),
+            );
+            lifecycle.finish_async();
+
+            assert_ne!(taos_stmt2_is_insert(stmt2, ptr::null_mut()), 0);
+
+            let err = CStr::from_ptr(taos_stmt2_error(stmt2)).to_str().unwrap();
+            assert_eq!(err, "insert is null");
+
+            assert_eq!(taos_stmt2_close(stmt2), 0);
+            taos_close(taos);
+        }
+    }
+
+    unsafe fn seed_completed_async_error(stmt: *mut TAOS_STMT2) {
+        let maybe_err = &mut *(stmt as *mut TaosMaybeError<TaosStmt2>);
+        let lifecycle = maybe_err.deref().unwrap().lifecycle.clone();
+        let (generation, started) = lifecycle.begin_async();
+        assert!(started);
+        lifecycle.publish_error(generation, maybe_err, None);
+        lifecycle.complete_async_error(
+            generation,
+            TaosError::new(Code::FAILED, "stale async error"),
+        );
+        lifecycle.finish_async();
+    }
+
+    extern "C" fn ignore_stmt2_callback(_param: *mut c_void, _res: *mut TAOS_RES, _code: c_int) {}
+
+    #[test]
+    fn test_taos_stmt2_bind_param_column_error_supersedes_async_error() {
+        unsafe {
+            let taos = test_connect();
+            let stmt2 = taos_stmt2_init(taos, ptr::null_mut());
+            assert!(!stmt2.is_null());
+            seed_completed_async_error(stmt2);
+
+            assert_ne!(taos_stmt2_bind_param_column(stmt2, ptr::null_mut()), 0);
+
+            let err = CStr::from_ptr(taos_stmt2_error(stmt2)).to_str().unwrap();
+            assert_eq!(err, "taos_stmt2_bind_param_column is not implemented");
+
+            assert_eq!(taos_stmt2_close(stmt2), 0);
+            taos_close(taos);
+        }
+    }
+
+    #[test]
+    fn test_taos_stmt2_bind_param_column_with_stmt_preserves_thread_local_error() {
+        unsafe {
+            let taos = test_connect();
+            let stmt2 = taos_stmt2_init(taos, ptr::null_mut());
+            assert!(!stmt2.is_null());
+
+            assert_ne!(taos_stmt2_bind_param_column(stmt2, ptr::null_mut()), 0);
+
+            let err = CStr::from_ptr(taos_errstr(ptr::null_mut()))
+                .to_str()
+                .unwrap();
+            assert_eq!(err, "taos_stmt2_bind_param_column is not implemented");
+
+            assert_eq!(taos_stmt2_close(stmt2), 0);
+            taos_close(taos);
+        }
+    }
+
+    #[test]
+    fn test_taos_stmt2_bind_param_column_a_error_supersedes_async_error() {
+        unsafe {
+            let taos = test_connect();
+            let stmt2 = taos_stmt2_init(taos, ptr::null_mut());
+            assert!(!stmt2.is_null());
+            seed_completed_async_error(stmt2);
+
+            assert_ne!(
+                taos_stmt2_bind_param_column_a(
+                    stmt2,
+                    ptr::null_mut(),
+                    ignore_stmt2_callback,
+                    ptr::null_mut(),
+                ),
+                0
+            );
+
+            let err = CStr::from_ptr(taos_stmt2_error(stmt2)).to_str().unwrap();
+            assert_eq!(err, "taos_stmt2_bind_param_column_a is not implemented");
+
+            assert_eq!(taos_stmt2_close(stmt2), 0);
+            taos_close(taos);
+        }
+    }
+
+    #[cfg(feature = "test-new-feat")]
+    #[test]
+    fn test_taos_stmt2_failed_prepare_invalidates_previous_state() {
+        unsafe {
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    "drop database if exists test_1784040734",
+                    "create database test_1784040734",
+                    "use test_1784040734",
+                    "create table t0 (ts timestamp, c1 int)",
+                ],
+            );
+
+            let stmt2 = taos_stmt2_init(taos, ptr::null_mut());
+            assert!(!stmt2.is_null());
+
+            assert_eq!(
+                taos_stmt2_prepare(stmt2, c"select * from t0 where c1 > ?".as_ptr(), 0),
+                0
+            );
+
+            let mut count = 0;
+            assert_eq!(taos_stmt2_get_fields(stmt2, &mut count, ptr::null_mut()), 0);
+            assert_eq!(count, 1);
+
+            assert_ne!(
+                taos_stmt2_prepare(stmt2, c"select from".as_ptr(), 0),
+                0,
+                "the second prepare must fail"
+            );
+
+            let mut is_insert = -1;
+            assert_ne!(taos_stmt2_is_insert(stmt2, &mut is_insert), 0);
+
+            count = -1;
+            assert_ne!(taos_stmt2_get_fields(stmt2, &mut count, ptr::null_mut()), 0);
+
+            let mut value = vec![1_i32];
+            let mut length = vec![std::mem::size_of::<i32>() as i32];
+            let mut is_null = vec![0];
+            let value_bind = new_bind!(Ty::Int, value, length, is_null);
+            let mut columns = vec![value_bind];
+            let mut column_rows = vec![columns.as_mut_ptr()];
+            let mut bindv = TAOS_STMT2_BINDV {
+                count: 1,
+                tbnames: ptr::null_mut(),
+                tags: ptr::null_mut(),
+                bind_cols: column_rows.as_mut_ptr(),
+            };
+            assert_ne!(taos_stmt2_bind_param(stmt2, &mut bindv, -1), 0);
+
+            assert_eq!(taos_stmt2_close(stmt2), 0);
+            test_exec(taos, "drop database if exists test_1784040734");
+            taos_close(taos);
+        }
+    }
+
+    #[cfg(feature = "test-new-feat")]
+    #[test]
+    fn test_taos_stmt2_async_success_clears_not_ready_error() {
+        static CALLBACK_DONE: std::sync::atomic::AtomicBool =
+            std::sync::atomic::AtomicBool::new(false);
+        static CALLBACK_CODE: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(-1);
+
+        unsafe {
+            extern "C" fn callback(_userdata: *mut c_void, _res: *mut TAOS_RES, code: c_int) {
+                CALLBACK_CODE.store(code, std::sync::atomic::Ordering::SeqCst);
+                CALLBACK_DONE.store(true, std::sync::atomic::Ordering::SeqCst);
+            }
+
+            CALLBACK_DONE.store(false, std::sync::atomic::Ordering::SeqCst);
+            CALLBACK_CODE.store(-1, std::sync::atomic::Ordering::SeqCst);
+
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    "drop database if exists test_1784040791",
+                    "create database test_1784040791",
+                    "use test_1784040791",
+                    "create table t0 (ts timestamp, c1 int)",
+                    "insert into t0 values(now, 1)",
+                ],
+            );
+
+            let mut option = TAOS_STMT2_OPTION {
+                reqid: 1784040791,
+                singleStbInsert: false,
+                singleTableBindOnce: false,
+                asyncExecFn: callback,
+                userdata: ptr::null_mut(),
+            };
+            let stmt2 = taos_stmt2_init(taos, &mut option);
+            assert!(!stmt2.is_null());
+            assert_eq!(
+                taos_stmt2_prepare(stmt2, c"select * from t0 where c1 > ?".as_ptr(), 0),
+                0
+            );
+
+            let mut value = vec![0_i32];
+            let mut length = vec![std::mem::size_of::<i32>() as i32];
+            let mut is_null = vec![0];
+            let value_bind = new_bind!(Ty::Int, value, length, is_null);
+            let mut columns = vec![value_bind];
+            let mut column_rows = vec![columns.as_mut_ptr()];
+            let mut bindv = TAOS_STMT2_BINDV {
+                count: 1,
+                tbnames: ptr::null_mut(),
+                tags: ptr::null_mut(),
+                bind_cols: column_rows.as_mut_ptr(),
+            };
+            assert_eq!(taos_stmt2_bind_param(stmt2, &mut bindv, -1), 0);
+
+            assert_eq!(taos_stmt2_exec(stmt2, ptr::null_mut()), 0);
+            if taos_stmt2_result(stmt2).is_null() {
+                let err = CStr::from_ptr(taos_stmt2_error(stmt2)).to_str().unwrap();
+                assert!(err.contains("not available yet"), "{err}");
+            }
+
+            for _ in 0..1_000 {
+                if CALLBACK_DONE.load(std::sync::atomic::Ordering::SeqCst) {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+
+            assert_eq!(CALLBACK_CODE.load(std::sync::atomic::Ordering::SeqCst), 0);
+            let err = CStr::from_ptr(taos_stmt2_error(stmt2)).to_str().unwrap();
+            assert!(
+                !err.contains("not available yet"),
+                "successful async execution must clear stale outer error: {err}"
+            );
+
+            assert_eq!(taos_stmt2_close(stmt2), 0);
+            test_exec(taos, "drop database if exists test_1784040791");
+            taos_close(taos);
+        }
+    }
+
+    #[cfg(feature = "test-new-feat")]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_rejected_placeholder_prepare_does_not_recover() -> anyhow::Result<()> {
+        let restart_next_request = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let intercept_fn: InterceptFn = {
+            let restart_next_request = restart_next_request.clone();
+            Arc::new(move |_msg, _ctx| {
+                if restart_next_request.swap(false, std::sync::atomic::Ordering::SeqCst) {
+                    ProxyAction::Restart
+                } else {
+                    ProxyAction::Forward
+                }
+            })
+        };
+        let _proxy = WsProxy::start("127.0.0.1:8822", "ws://localhost:6041/ws", intercept_fn).await;
+
+        unsafe {
+            let taos = taos_connect(
+                c"localhost".as_ptr(),
+                ptr::null(),
+                ptr::null(),
+                ptr::null(),
+                8822,
+            );
+            assert!(!taos.is_null());
+
+            test_exec_many(
+                taos,
+                &[
+                    "drop database if exists test_1784040918",
+                    "create database test_1784040918",
+                    "use test_1784040918",
+                    "create table t0 (ts timestamp, c1 int)",
+                ],
+            );
+
+            let stmt2 = taos_stmt2_init(taos, ptr::null_mut());
+            assert!(!stmt2.is_null());
+            assert_ne!(
+                taos_stmt2_prepare(
+                    stmt2,
+                    c"insert into test_1784040918.? (ts, c1) values (?, ?)".as_ptr(),
+                    0,
+                ),
+                0
+            );
+
+            restart_next_request.store(true, std::sync::atomic::Ordering::SeqCst);
+            let result = taos_query(taos, c"select 1".as_ptr());
+            let mut reconnected = !result.is_null();
+            if reconnected {
+                taos_free_result(result);
+            }
+            for _ in 0..100 {
+                if reconnected {
+                    break;
+                }
+                let result = taos_query(taos, c"select 1".as_ptr());
+                if !result.is_null() {
+                    taos_free_result(result);
+                    reconnected = true;
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            assert!(
+                !restart_next_request.load(std::sync::atomic::Ordering::SeqCst),
+                "proxy restart was not triggered"
+            );
+            assert!(
+                reconnected,
+                "connection did not recover after proxy restart"
+            );
+
+            let mut is_insert = -1;
+            assert_ne!(taos_stmt2_is_insert(stmt2, &mut is_insert), 0);
+
+            assert_eq!(taos_stmt2_close(stmt2), 0);
+            test_exec(taos, "drop database if exists test_1784040918");
+            taos_close(taos);
+        }
+
+        Ok(())
     }
 }

@@ -1,3 +1,25 @@
+// Copyright (c) 2024 TAOS Data, Inc.
+//
+// SPDX-License-Identifier: MIT
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 use std::fmt::Debug;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -39,6 +61,12 @@ struct Stmt2Cache {
 }
 
 impl Stmt2Cache {
+    fn clear_prepare_state(&mut self) {
+        self.action = Stmt2Action::Init;
+        self.sql.clear();
+        self.bind_bytes.clear();
+    }
+
     fn build_req_and_bind_bytes(&self, stmt_id: StmtId) -> (WsSend, Vec<Vec<u8>>) {
         match self.action {
             Stmt2Action::Init => (self.build_init_req(), Vec::new()),
@@ -118,6 +146,7 @@ pub(super) struct Stmt2Inner {
     id: u64,
     client: Arc<WsTaos>,
     stmt_id: Arc<AtomicU64>,
+    is_prepared: Arc<AtomicBool>,
     is_insert: Arc<AtomicBool>,
     fields: Arc<RwLock<Option<Vec<Stmt2Field>>>>,
     fields_count: Arc<AtomicUsize>,
@@ -133,6 +162,7 @@ impl Stmt2Inner {
             id: generate_req_id(),
             client,
             stmt_id: Arc::default(),
+            is_prepared: Arc::default(),
             is_insert: Arc::default(),
             fields: Arc::default(),
             fields_count: Arc::default(),
@@ -199,6 +229,7 @@ impl Stmt2Inner {
     }
 
     async fn prepare<S: AsRef<str> + Send>(&self, sql: S) -> RawResult<()> {
+        self.clear_prepare_state().await;
         self.client.wait_for_reconnect().await?;
 
         let req_id = generate_req_id();
@@ -225,7 +256,13 @@ impl Stmt2Inner {
         };
         tracing::trace!("stmt2 prepare, id: {}, req: {req:?}", self.id);
 
-        let resp = self.send_request(req, recovering).await?;
+        let resp = match self.send_request(req, recovering).await {
+            Ok(resp) => resp,
+            Err(err) => {
+                self.clear_prepare_state().await;
+                return Err(err);
+            }
+        };
         if let WsRecvData::Stmt2Prepare {
             is_insert,
             fields,
@@ -236,6 +273,7 @@ impl Stmt2Inner {
             self.is_insert.store(is_insert, Ordering::Relaxed);
             *self.fields.write().await = fields;
             self.fields_count.store(fields_count, Ordering::Relaxed);
+            self.is_prepared.store(true, Ordering::Relaxed);
             return Ok(());
         }
         unreachable!("unexpected stmt2 prepare response: {resp:?}");
@@ -243,6 +281,7 @@ impl Stmt2Inner {
 
     async fn bind(&self, params: &[Stmt2BindParam]) -> RawResult<()> {
         self.client.wait_for_reconnect().await?;
+        self.ensure_prepared()?;
 
         let req_id = generate_req_id();
         let mut cache = self.cache.lock().await;
@@ -275,6 +314,7 @@ impl Stmt2Inner {
 
     async fn bind_bytes(&self, req_id: ReqId, mut bytes: Vec<u8>) -> RawResult<()> {
         self.client.wait_for_reconnect().await?;
+        self.ensure_prepared()?;
 
         LittleEndian::write_u64(&mut bytes[bind::STMT_ID_POS..], self.stmt_id());
 
@@ -301,6 +341,7 @@ impl Stmt2Inner {
 
     async fn exec(&self) -> RawResult<usize> {
         self.client.wait_for_reconnect().await?;
+        self.ensure_prepared()?;
 
         let req_id = generate_req_id();
         let mut cache = self.cache.lock().await;
@@ -356,6 +397,7 @@ impl Stmt2Inner {
 
     async fn result_set(&self) -> RawResult<ResultSet> {
         self.client.wait_for_reconnect().await?;
+        self.ensure_prepared()?;
 
         let req_id = generate_req_id();
         let mut cache = self.cache.lock().await;
@@ -573,6 +615,26 @@ impl Stmt2Inner {
         self.is_insert.load(Ordering::Relaxed)
     }
 
+    fn is_prepared(&self) -> bool {
+        self.is_prepared.load(Ordering::Relaxed)
+    }
+
+    fn ensure_prepared(&self) -> RawResult<()> {
+        if self.is_prepared() {
+            Ok(())
+        } else {
+            Err("stmt2 prepare is not called".into())
+        }
+    }
+
+    async fn clear_prepare_state(&self) {
+        self.is_prepared.store(false, Ordering::Relaxed);
+        self.is_insert.store(false, Ordering::Relaxed);
+        self.cache.lock().await.clear_prepare_state();
+        *self.fields.write().await = None;
+        self.fields_count.store(0, Ordering::Relaxed);
+    }
+
     fn affected_rows_once(&self) -> usize {
         self.affected_rows_once.load(Ordering::Relaxed)
     }
@@ -643,15 +705,27 @@ impl Stmt2 {
     }
 
     pub fn is_insert(&self) -> Option<bool> {
-        Some(self.inner.is_insert())
+        self.inner.is_prepared().then(|| self.inner.is_insert())
+    }
+
+    pub fn mark_unprepared(&self) {
+        block_in_place_or_global(self.inner.clear_prepare_state());
     }
 
     pub fn fields(&self) -> Option<Vec<Stmt2Field>> {
-        block_in_place_or_global(self.inner.fields.read()).clone()
+        if self.inner.is_prepared() {
+            block_in_place_or_global(self.inner.fields.read()).clone()
+        } else {
+            None
+        }
     }
 
     pub fn fields_count(&self) -> Option<usize> {
-        Some(self.inner.fields_count.load(Ordering::Relaxed))
+        if self.inner.is_prepared() {
+            Some(self.inner.fields_count.load(Ordering::Relaxed))
+        } else {
+            None
+        }
     }
 
     pub fn affected_rows(&self) -> usize {
@@ -736,8 +810,29 @@ mod tests {
     use taos_query::stmt2::Stmt2BindParam;
     use taos_query::{AsyncFetchable, AsyncQueryable, AsyncTBuilder};
 
-    use crate::stmt2::Stmt2;
+    use crate::stmt2::{Stmt2, Stmt2Action, Stmt2Cache};
     use crate::TaosBuilder;
+
+    #[test]
+    fn test_prepare_invalidation_discards_recovery_cache() {
+        let mut cache = Stmt2Cache {
+            req_id: 42,
+            action: Stmt2Action::Prepare,
+            single_stb_insert: true,
+            single_table_bind_once: true,
+            sql: "insert into db.? values(?)".to_string(),
+            bind_bytes: vec![vec![1, 2, 3]],
+        };
+
+        cache.clear_prepare_state();
+
+        assert_eq!(cache.action, Stmt2Action::Init);
+        assert!(cache.sql.is_empty());
+        assert!(cache.bind_bytes.is_empty());
+        assert_eq!(cache.req_id, 42);
+        assert!(cache.single_stb_insert);
+        assert!(cache.single_table_bind_once);
+    }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_stmt2_insert_single_row() -> anyhow::Result<()> {
@@ -1308,6 +1403,83 @@ mod tests {
         assert_eq!(records[3].c1, Some(vec![0x12, 0x34, 0x56, 0x78]));
 
         taos.exec("drop database test_1753080278").await?;
+
+        Ok(())
+    }
+
+    #[cfg(feature = "test-new-feat")]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_stmt2_blob_exceed_4mb() -> anyhow::Result<()> {
+        use serde::Deserialize;
+
+        let taos = TaosBuilder::from_dsn("ws://localhost:6041")?
+            .build()
+            .await?;
+
+        taos.exec_many(&[
+            "drop database if exists test_1789869110",
+            "create database test_1789869110",
+            "use test_1789869110",
+            "create table t0 (ts timestamp, c1 blob)",
+        ])
+        .await?;
+
+        let stmt2 = Stmt2::new(taos.client_cloned());
+        stmt2.init().await?;
+        stmt2.prepare("insert into t0 values(?, ?)").await?;
+
+        // Server main branch raised the BLOB max length from 4MB to 16MB
+        // (TSDB_MAX_BLOB_LEN = 16777216, including the 4-byte header).
+        // Use a 5MB value to exceed the old 4MB limit while staying within the new one.
+        let large_blob: Vec<u8> = (0..5 * 1024 * 1024).map(|i| (i % 256) as u8).collect();
+
+        let cols = vec![
+            ColumnView::from_millis_timestamp(vec![1726803356466, 1726803356467, 1726803356468]),
+            ColumnView::from_blob_bytes::<&[u8], _, _, _>(vec![
+                None,
+                Some(&b"hello blob"[..]),
+                Some(large_blob.as_slice()),
+            ]),
+        ];
+        let param = Stmt2BindParam::new(None, None, Some(cols));
+
+        stmt2.bind(&[param]).await?;
+
+        let affected = stmt2.exec().await?;
+        assert_eq!(affected, 3);
+
+        stmt2.prepare("select * from t0 where ts > ?").await?;
+
+        let cols = vec![ColumnView::from_millis_timestamp(vec![1726803356465])];
+        let param = Stmt2BindParam::new(None, None, Some(cols));
+        stmt2.bind(&[param]).await?;
+
+        let _ = stmt2.exec().await?;
+
+        #[derive(Debug, Deserialize)]
+        struct Record {
+            ts: i64,
+            c1: Option<Vec<u8>>,
+        }
+
+        let records: Vec<Record> = stmt2
+            .result_set()
+            .await?
+            .deserialize()
+            .try_collect()
+            .await?;
+
+        assert_eq!(records.len(), 3);
+
+        assert_eq!(records[0].ts, 1726803356466);
+        assert_eq!(records[1].ts, 1726803356467);
+        assert_eq!(records[2].ts, 1726803356468);
+
+        assert_eq!(records[0].c1, None);
+        assert_eq!(records[1].c1, Some(b"hello blob".to_vec()));
+        assert_eq!(records[2].c1.as_deref(), Some(large_blob.as_slice()));
+
+        taos.exec("drop database if exists test_1789869110").await?;
 
         Ok(())
     }

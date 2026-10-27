@@ -1,3 +1,25 @@
+// Copyright (c) 2022 TAOS Data, Inc.
+//
+// SPDX-License-Identifier: MIT
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 //! M-DSN: A Multi-address DSN(Data Source Name) parser.
 //!
 //! M-DSN support two kind of DSN format:
@@ -64,6 +86,7 @@
 //! sqlite://./file.db
 //! ```
 //!
+
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::fmt::Display;
@@ -630,18 +653,22 @@ impl Dsn {
             }
         } else {
             // path-like dsn
-            lazy_static::lazy_static! {
-                static ref PATH_REGEX: Regex = Regex::new(r"(?P<path>[^?]*)\?(?P<params>.*)").unwrap();
-            }
             let mut dsn = Dsn {
                 driver,
                 protocol,
                 path: None,
                 ..Default::default()
             };
-            if let Some(cap) = PATH_REGEX.captures(conf) {
-                let path = cap.name("path").map(|m| m.as_str().to_string());
-                let params = cap.name("params").map(|m| m.as_str().to_string());
+            // Windows verbatim paths use `\\?\` and contain a literal `?`, so only
+            // treat a later `?` as the DSN query separator.
+            let question_pos = if let Some(path) = conf.strip_prefix("\\\\?\\") {
+                path.find('?').map(|pos| "\\\\?\\".len() + pos)
+            } else {
+                conf.find('?')
+            };
+            if let Some(question_pos) = question_pos {
+                let path = conf.get(..question_pos).map(str::to_string);
+                let params = conf.get(question_pos + 1..).map(str::to_string);
                 dsn.path = path;
                 dsn.params = params
                     .map(|s| {
@@ -1120,7 +1147,7 @@ mod tests {
         let c = (&b).into_dsn().unwrap();
 
         let d: Dsn = (&c).try_into().unwrap();
-        let _: Dsn = (d).try_into().unwrap();
+        let _: Dsn = d;
         let _: Dsn = ("taos://").try_into().unwrap();
         let _: Dsn = ("taos://".to_string()).try_into().unwrap();
         let _: Dsn = (&"taos://:password@".parse::<Dsn>().unwrap().to_string())
@@ -1577,7 +1604,7 @@ mod tests {
 
     #[test]
     fn params() {
-        let s = r#"taos://?abc=abc"#;
+        let s = "taos://?abc=abc";
         let dsn = Dsn::from_str(s).unwrap();
         assert_eq!(
             dsn,
@@ -1589,7 +1616,7 @@ mod tests {
         );
         assert_eq!(dsn.to_string(), s);
 
-        let s = r#"taos://root@localhost?abc=abc"#;
+        let s = "taos://root@localhost?abc=abc";
         let dsn = Dsn::from_str(s).unwrap();
         assert_eq!(
             dsn,
@@ -1603,7 +1630,7 @@ mod tests {
         );
         assert_eq!(dsn.to_string(), s);
 
-        let s = r#"taos://root@localhost?a%20b"#;
+        let s = "taos://root@localhost?a%20b";
         let dsn = Dsn::from_str(s).unwrap();
         assert_eq!(
             dsn,
@@ -1635,18 +1662,18 @@ mod tests {
     fn tmq_offset() {
         let dsn = Dsn::from_str("tmq+ws:///abc1?offset=10:20,11:40").unwrap();
         let offset = dsn.get("offset").unwrap();
-        dbg!(&dsn);
-        dbg!(&offset);
+        let _ = &dsn;
+        let _ = &offset;
     }
 
     #[test]
     fn password_special_chars() {
         let p = "!@#$%^&*()";
         let e = urlencoding::encode(p);
-        dbg!(&e);
+        let _ = &e;
 
         let dsn = Dsn::from_str(&format!("taos://root:{e}@localhost:6030/")).unwrap();
-        dbg!(&dsn);
+        let _ = &dsn;
         assert_eq!(dsn.password.as_deref().unwrap(), p);
         assert_eq!(dsn.to_string(), format!("taos://root:{e}@localhost:6030"));
     }
@@ -1655,10 +1682,10 @@ mod tests {
     fn param_special_chars() {
         let p = "!@#$%^&*()";
         let e = urlencoding::encode(p);
-        dbg!(&e);
+        let _ = &e;
 
         let dsn = Dsn::from_str(&format!("taos://root:{e}@localhost:6030?code1={e}")).unwrap();
-        dbg!(&dsn);
+        let _ = &dsn;
         assert_eq!(dsn.password.as_deref().unwrap(), p);
         assert_eq!(dsn.get("code1").unwrap(), p);
         assert_eq!(
@@ -1672,10 +1699,10 @@ mod tests {
         let u = "a";
         let p = "!@#$%^&*()";
         let e = urlencoding::encode(p);
-        dbg!(&e);
+        let _ = &e;
 
         let dsn = Dsn::from_str(&format!("taos://{u}:{p}@localhost:6030?{e}={e}")).unwrap();
-        dbg!(&dsn);
+        let _ = &dsn;
         let dsn2 = Dsn::from_str(&format!("taos://{u}:{e}@localhost:6030?{e}={e}")).unwrap();
         assert_eq!(dsn, dsn2);
         assert_eq!(dsn.password.as_deref().unwrap(), p);
@@ -1689,17 +1716,17 @@ mod tests {
     #[test]
     fn unix_path_with_glob() {
         let dsn = Dsn::from_str("csv:./**.csv?param=1").unwrap();
-        dbg!(&dsn);
+        let _ = &dsn;
         assert!(dsn.path.is_some());
         assert_eq!(dsn.get("param").unwrap(), "1");
 
         let dsn = Dsn::from_str("csv:./**.csv?param=1").unwrap();
-        dbg!(&dsn);
+        let _ = &dsn;
         assert!(dsn.path.is_some());
         assert_eq!(dsn.get("param").unwrap(), "1");
 
         let dsn = Dsn::from_str("csv:.\\**.csv?param=1").unwrap();
-        dbg!(&dsn);
+        let _ = &dsn;
         assert!(dsn.path.is_some());
         assert_eq!(dsn.get("param").unwrap(), "1");
     }
@@ -1707,21 +1734,42 @@ mod tests {
     #[test]
     fn unix_path_with_space() {
         let dsn = Dsn::from_str("csv:./a b.csv?param=1").unwrap();
-        dbg!(&dsn);
+        let _ = &dsn;
         assert_eq!(dsn.path.unwrap(), "./a b.csv");
     }
 
     #[test]
     fn unix_multiple_path() {
         let dsn = Dsn::from_str("csv:./a b.csv,c d .csv?param=1").unwrap();
-        dbg!(&dsn);
+        let _ = &dsn;
         assert_eq!(dsn.path.unwrap(), "./a b.csv,c d .csv");
+    }
+
+    #[test]
+    fn windows_extended_path_with_params() {
+        let path = r"\\?\C:\TDengine\data\taosx\files\upload.csv";
+        let dsn =
+            Dsn::from_str(&format!("csv:{path}?batch_size=1000&delimiter=,&quote=\"")).unwrap();
+
+        assert_eq!(dsn.path.as_deref(), Some(path));
+        assert_eq!(dsn.get("batch_size").map(String::as_str), Some("1000"));
+        assert_eq!(dsn.get("delimiter").map(String::as_str), Some(","));
+        assert_eq!(dsn.get("quote").map(String::as_str), Some("\""));
+    }
+
+    #[test]
+    fn windows_extended_path_without_params() {
+        let path = r"\\?\C:\TDengine\data\taosx\files\upload.csv";
+        let dsn = Dsn::from_str(&format!("csv:{path}")).unwrap();
+
+        assert_eq!(dsn.path.as_deref(), Some(path));
+        assert!(dsn.params.is_empty());
     }
 
     #[test]
     fn unit_path_with_utf8() {
         let dsn = Dsn::from_str("csv:./文件 Aa1.csv?param=1").unwrap();
-        dbg!(&dsn);
+        let _ = &dsn;
         assert_eq!(dsn.path.unwrap(), "./文件 Aa1.csv");
     }
 
@@ -1731,7 +1779,7 @@ mod tests {
         assert_eq!(dsn.subject, Some("Met1 ABC".to_string()));
 
         let dsn = Dsn::from_str("pi://u ser:pa ss@host:80/Met1 ABC").unwrap();
-        dbg!(&dsn);
+        let _ = &dsn;
         assert_eq!(dsn.subject, Some("Met1 ABC".to_string()));
         assert_eq!(dsn.username, Some("u ser".to_string()));
         assert_eq!(dsn.password, Some("pa ss".to_string()));
@@ -1772,7 +1820,7 @@ mod tests {
     #[test]
     fn test_value_is_true() {
         for s in ["", "1", "true", "t", "yes", "y", "on", "enable", "enabled"] {
-            assert_eq!(value_is_true(s), true);
+            assert!(value_is_true(s));
         }
         for s in [
             "0",
@@ -1784,7 +1832,7 @@ mod tests {
             "disabled",
             "any-other-str",
         ] {
-            assert_eq!(value_is_true(s), false);
+            assert!(!value_is_true(s));
         }
     }
 
@@ -1805,7 +1853,7 @@ mod tests {
         let s = "taos:/!@#$%^&*()-_+=[]{}:;><|~,?params=1";
         let dsn = Dsn::from_str(s).unwrap();
         assert_eq!(dsn.path.unwrap(), "/!@#$%^&*()-_+=[]{}:;><|~,");
-        assert_eq!(dsn.params.get("params").unwrap(), "1");
+        assert_eq!(&dsn.params["params"], "1");
     }
     #[test]
     fn at_question_position_mix() {
@@ -1813,11 +1861,8 @@ mod tests {
             "taos:/!@#$%^&*()-_+=[]{}:;><|~,?params=./@abc.txt&b=!@#$%^*()-_+=[]{}:;><中文汉字£¢§®";
         let dsn = Dsn::from_str(s).unwrap();
         assert_eq!(dsn.path.unwrap(), "/!@#$%^&*()-_+=[]{}:;><|~,");
-        assert_eq!(dsn.params.get("params").unwrap(), "./@abc.txt");
-        assert_eq!(
-            dsn.params.get("b").unwrap(),
-            "!@#$%^*()-_+=[]{}:;><中文汉字£¢§®"
-        );
+        assert_eq!(&dsn.params["params"], "./@abc.txt");
+        assert_eq!(&dsn.params["b"], "!@#$%^*()-_+=[]{}:;><中文汉字£¢§®");
     }
 
     #[test]
@@ -1833,14 +1878,8 @@ mod tests {
         assert_eq!(dsn.addresses[0].host.as_deref().unwrap(), "192.168.2.16");
         assert_eq!(dsn.addresses[0].port.unwrap(), 53530);
         assert_eq!(dsn.subject.as_deref().unwrap(), "OPCUA/SimulationServer");
-        assert_eq!(
-            dsn.params.get("node_id_pattern").unwrap(),
-            "^(?!.*_Error).+$"
-        );
-        assert_eq!(
-            dsn.params.get("browse_name_pattern").unwrap(),
-            "^(?!.*_Error).+$"
-        );
+        assert_eq!(&dsn.params["node_id_pattern"], "^(?!.*_Error).+$");
+        assert_eq!(&dsn.params["browse_name_pattern"], "^(?!.*_Error).+$");
 
         let dsn = "opcua://?certificate=@./tests/opc/certificate.crt"
             .into_dsn()
@@ -1852,7 +1891,7 @@ mod tests {
         );
 
         let dsn = "opcua://?certificate=@abc".into_dsn().unwrap();
-        dbg!(&dsn);
+        let _ = &dsn;
         assert!(dsn.subject.is_none());
         assert!(dsn.addresses.is_empty());
         assert_eq!(dsn.get("certificate").unwrap(), "@abc");
@@ -1860,7 +1899,7 @@ mod tests {
         let dsn = "opcua://192.168.1.13:9092/abc/path?certificate=@abc"
             .into_dsn()
             .unwrap();
-        dbg!(&dsn);
+        let _ = &dsn;
         assert_eq!(dsn.addresses[0].host.as_deref().unwrap(), "192.168.1.13");
         assert_eq!(dsn.addresses[0].port.unwrap(), 9092);
         assert_eq!(dsn.subject.as_deref().unwrap(), "abc/path");
@@ -1912,9 +1951,9 @@ mod tests {
 
     #[test]
     fn taosx_csv_dsn() {
-        let dsn = r#"csv:/data/test-csv?skip=0&has_header=true&new_file_notify=false&file_pattern=^\\?\\-\\*\\-\\[\\-\\]\\-[ab]\\-[^ef]\\-.\\-.*\\.csv$"#;
+        let dsn = r"csv:/data/test-csv?skip=0&has_header=true&new_file_notify=false&file_pattern=^\\?\\-\\*\\-\\[\\-\\]\\-[ab]\\-[^ef]\\-.\\-.*\\.csv$";
         let dsn = Dsn::from_str(dsn).unwrap();
-        dbg!(&dsn);
+        let _ = &dsn;
         assert_eq!(dsn.driver, "csv");
         assert_eq!(dsn.path.as_deref().unwrap(), "/data/test-csv");
         assert_eq!(dsn.get("skip").unwrap(), "0");
@@ -1922,7 +1961,7 @@ mod tests {
         assert_eq!(dsn.get("new_file_notify").unwrap(), "false");
         assert_eq!(
             dsn.get("file_pattern").unwrap(),
-            r#"^\\?\\-\\*\\-\\[\\-\\]\\-[ab]\\-[^ef]\\-.\\-.*\\.csv$"#,
+            r"^\\?\\-\\*\\-\\[\\-\\]\\-[ab]\\-[^ef]\\-.\\-.*\\.csv$",
         );
     }
 
@@ -2179,7 +2218,7 @@ mod tests {
 
     #[test]
     fn test_tls() {
-        const TEST_CERT: &str = r"-----BEGIN CERTIFICATE-----
+        const TEST_CERT: &str = "-----BEGIN CERTIFICATE-----
 MIIDvTCCAqWgAwIBAgIUfQjwmIKn4dhLRrmlfu7lmVTVUQkwDQYJKoZIhvcNAQEL
 BQAwbjELMAkGA1UEBhMCQ04xEjAQBgNVBAgMCVlvdXJTdGF0ZTERMA8GA1UEBwwI
 WW91ckNpdHkxEDAOBgNVBAoMB1lvdXJPcmcxETAPBgNVBAsMCFlvdXJVbml0MRMw

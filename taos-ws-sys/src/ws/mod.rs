@@ -1,15 +1,39 @@
 #![allow(unused_variables)]
 
+// Copyright (c) 2022 TAOS Data, Inc.
+//
+// SPDX-License-Identifier: MIT
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 use std::collections::HashMap;
 use std::ffi::{c_char, c_int, c_void, CStr};
 use std::ptr;
 use std::sync::OnceLock;
 use std::time::Duration;
 
+use config::WsTlsMode;
 use error::{set_err_and_get_code, TaosError};
 use faststr::FastStr;
 use query::QueryResultSet;
 use sml::SchemalessResultSet;
+use stmt2::Stmt2ResultSet;
 use taos_error::Code;
 use taos_log::QidManager;
 use taos_query::common::{Field, Precision, Ty};
@@ -19,8 +43,6 @@ use taos_ws::query::{ConnOption, Error};
 use taos_ws::{Offset, Taos, TaosBuilder};
 use tmq::TmqResultSet;
 use tracing::{debug, error, instrument, trace, warn};
-
-use crate::ws::config::WsTlsMode;
 
 mod config;
 pub mod error;
@@ -843,6 +865,7 @@ pub enum ResultSet {
     Query(QueryResultSet),
     Schemaless(SchemalessResultSet),
     Tmq(TmqResultSet),
+    Stmt2(Stmt2ResultSet),
 }
 
 impl ResultSetOperations for ResultSet {
@@ -851,6 +874,7 @@ impl ResultSetOperations for ResultSet {
             ResultSet::Query(rs) => rs.tmq_get_topic_name(),
             ResultSet::Schemaless(rs) => rs.tmq_get_topic_name(),
             ResultSet::Tmq(rs) => rs.tmq_get_topic_name(),
+            ResultSet::Stmt2(rs) => rs.tmq_get_topic_name(),
         }
     }
 
@@ -859,6 +883,7 @@ impl ResultSetOperations for ResultSet {
             ResultSet::Query(rs) => rs.tmq_get_db_name(),
             ResultSet::Schemaless(rs) => rs.tmq_get_db_name(),
             ResultSet::Tmq(rs) => rs.tmq_get_db_name(),
+            ResultSet::Stmt2(rs) => rs.tmq_get_db_name(),
         }
     }
 
@@ -867,6 +892,7 @@ impl ResultSetOperations for ResultSet {
             ResultSet::Query(rs) => rs.tmq_get_table_name(),
             ResultSet::Schemaless(rs) => rs.tmq_get_table_name(),
             ResultSet::Tmq(rs) => rs.tmq_get_table_name(),
+            ResultSet::Stmt2(rs) => rs.tmq_get_table_name(),
         }
     }
 
@@ -875,6 +901,7 @@ impl ResultSetOperations for ResultSet {
             ResultSet::Query(rs) => rs.tmq_get_offset(),
             ResultSet::Schemaless(rs) => rs.tmq_get_offset(),
             ResultSet::Tmq(rs) => rs.tmq_get_offset(),
+            ResultSet::Stmt2(rs) => rs.tmq_get_offset(),
         }
     }
 
@@ -883,6 +910,7 @@ impl ResultSetOperations for ResultSet {
             ResultSet::Query(rs) => rs.tmq_get_vgroup_offset(),
             ResultSet::Schemaless(rs) => rs.tmq_get_vgroup_offset(),
             ResultSet::Tmq(rs) => rs.tmq_get_vgroup_offset(),
+            ResultSet::Stmt2(rs) => rs.tmq_get_vgroup_offset(),
         }
     }
 
@@ -891,6 +919,7 @@ impl ResultSetOperations for ResultSet {
             ResultSet::Query(rs) => rs.tmq_get_vgroup_id(),
             ResultSet::Schemaless(rs) => rs.tmq_get_vgroup_id(),
             ResultSet::Tmq(rs) => rs.tmq_get_vgroup_id(),
+            ResultSet::Stmt2(rs) => rs.tmq_get_vgroup_id(),
         }
     }
 
@@ -899,6 +928,7 @@ impl ResultSetOperations for ResultSet {
             ResultSet::Query(rs) => rs.precision(),
             ResultSet::Schemaless(rs) => rs.precision(),
             ResultSet::Tmq(rs) => rs.precision(),
+            ResultSet::Stmt2(rs) => rs.precision(),
         }
     }
 
@@ -907,6 +937,7 @@ impl ResultSetOperations for ResultSet {
             ResultSet::Query(rs) => rs.affected_rows(),
             ResultSet::Schemaless(rs) => rs.affected_rows(),
             ResultSet::Tmq(rs) => rs.affected_rows(),
+            ResultSet::Stmt2(rs) => rs.affected_rows(),
         }
     }
 
@@ -915,6 +946,7 @@ impl ResultSetOperations for ResultSet {
             ResultSet::Query(rs) => rs.affected_rows64(),
             ResultSet::Schemaless(rs) => rs.affected_rows64(),
             ResultSet::Tmq(rs) => rs.affected_rows64(),
+            ResultSet::Stmt2(rs) => rs.affected_rows64(),
         }
     }
 
@@ -923,6 +955,7 @@ impl ResultSetOperations for ResultSet {
             ResultSet::Query(rs) => rs.num_of_fields(),
             ResultSet::Schemaless(rs) => rs.num_of_fields(),
             ResultSet::Tmq(rs) => rs.num_of_fields(),
+            ResultSet::Stmt2(rs) => rs.num_of_fields(),
         }
     }
 
@@ -931,6 +964,7 @@ impl ResultSetOperations for ResultSet {
             ResultSet::Query(rs) => rs.get_fields(),
             ResultSet::Schemaless(rs) => rs.get_fields(),
             ResultSet::Tmq(rs) => rs.get_fields(),
+            ResultSet::Stmt2(rs) => rs.get_fields(),
         }
     }
 
@@ -939,6 +973,7 @@ impl ResultSetOperations for ResultSet {
             ResultSet::Query(rs) => rs.get_fields_e(),
             ResultSet::Schemaless(rs) => rs.get_fields_e(),
             ResultSet::Tmq(rs) => rs.get_fields_e(),
+            ResultSet::Stmt2(rs) => rs.get_fields_e(),
         }
     }
 
@@ -951,6 +986,7 @@ impl ResultSetOperations for ResultSet {
             ResultSet::Query(rs) => rs.fetch_raw_block(ptr, rows),
             ResultSet::Schemaless(rs) => rs.fetch_raw_block(ptr, rows),
             ResultSet::Tmq(rs) => rs.fetch_raw_block(ptr, rows),
+            ResultSet::Stmt2(rs) => rs.fetch_raw_block(ptr, rows),
         }
     }
 
@@ -959,6 +995,7 @@ impl ResultSetOperations for ResultSet {
             ResultSet::Query(rs) => rs.fetch_block(rows, num),
             ResultSet::Schemaless(rs) => rs.fetch_block(rows, num),
             ResultSet::Tmq(rs) => rs.fetch_block(rows, num),
+            ResultSet::Stmt2(rs) => rs.fetch_block(rows, num),
         }
     }
 
@@ -967,6 +1004,7 @@ impl ResultSetOperations for ResultSet {
             ResultSet::Query(rs) => rs.fetch_row(),
             ResultSet::Schemaless(rs) => rs.fetch_row(),
             ResultSet::Tmq(rs) => rs.fetch_row(),
+            ResultSet::Stmt2(rs) => rs.fetch_row(),
         }
     }
 
@@ -975,6 +1013,7 @@ impl ResultSetOperations for ResultSet {
             ResultSet::Query(rs) => rs.get_raw_value(row, col),
             ResultSet::Schemaless(rs) => rs.get_raw_value(row, col),
             ResultSet::Tmq(rs) => rs.get_raw_value(row, col),
+            ResultSet::Stmt2(rs) => rs.get_raw_value(row, col),
         }
     }
 
@@ -983,6 +1022,7 @@ impl ResultSetOperations for ResultSet {
             ResultSet::Query(rs) => rs.take_timing(),
             ResultSet::Schemaless(rs) => rs.take_timing(),
             ResultSet::Tmq(rs) => rs.take_timing(),
+            ResultSet::Stmt2(rs) => rs.take_timing(),
         }
     }
 
@@ -991,6 +1031,7 @@ impl ResultSetOperations for ResultSet {
             ResultSet::Query(rs) => rs.stop_query(),
             ResultSet::Schemaless(rs) => rs.stop_query(),
             ResultSet::Tmq(rs) => rs.stop_query(),
+            ResultSet::Stmt2(rs) => rs.stop_query(),
         }
     }
 
@@ -1004,6 +1045,7 @@ impl ResultSetOperations for ResultSet {
             ResultSet::Query(rs) => rs.is_null_by_column(column_index, result, rows),
             ResultSet::Schemaless(rs) => rs.is_null_by_column(column_index, result, rows),
             ResultSet::Tmq(rs) => rs.is_null_by_column(column_index, result, rows),
+            ResultSet::Stmt2(rs) => rs.is_null_by_column(column_index, result, rows),
         }
     }
 
@@ -1012,6 +1054,7 @@ impl ResultSetOperations for ResultSet {
             ResultSet::Query(rs) => rs.get_column_data_offset(column_index),
             ResultSet::Schemaless(rs) => rs.get_column_data_offset(column_index),
             ResultSet::Tmq(rs) => rs.get_column_data_offset(column_index),
+            ResultSet::Stmt2(rs) => rs.get_column_data_offset(column_index),
         }
     }
 }

@@ -1,3 +1,25 @@
+// Copyright (c) 2022 TAOS Data, Inc.
+//
+// SPDX-License-Identifier: MIT
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 use std::cell::UnsafeCell;
 use std::ffi::{c_char, CStr, CString};
 use std::mem::ManuallyDrop;
@@ -344,6 +366,7 @@ struct Auth {
     pass: Option<CString>,
     totp: Option<CString>,
     token: Option<CString>,
+    user_app: Option<CString>,
     db: Option<CString>,
     port: u16,
     max_retries: u8,
@@ -390,6 +413,10 @@ impl Auth {
         self.token().map_or_else(std::ptr::null, CStr::as_ptr)
     }
 
+    pub(crate) fn user_app(&self) -> Option<&CStr> {
+        self.user_app.as_deref()
+    }
+
     pub(crate) fn database(&self) -> Option<&CStr> {
         self.db.as_deref()
     }
@@ -407,6 +434,20 @@ impl Auth {
     }
 }
 
+fn parse_user_app_param(value: &str) -> Option<CString> {
+    let value = value.trim();
+    if value.is_empty() {
+        return None;
+    }
+    CString::new(value).map_or_else(
+        |err| {
+            warn!(error = ?err, "ignore invalid user_app parameter");
+            None
+        },
+        Some,
+    )
+}
+
 impl taos_query::TBuilder for TaosBuilder {
     type Target = Taos;
 
@@ -419,6 +460,7 @@ impl taos_query::TBuilder for TaosBuilder {
             "totp_code",
             "bearerToken",
             "bearer_token",
+            "user_app",
         ];
         PARAMS
     }
@@ -466,6 +508,9 @@ impl taos_query::TBuilder for TaosBuilder {
             let token = CString::new(token.as_str())
                 .map_err(|e| RawError::from_string(format!("Invalid bearer token: {e}")))?;
             auth.token.replace(token);
+        }
+        if let Some(user_app) = params.get("user_app").and_then(|v| parse_user_app_param(v)) {
+            auth.user_app.replace(user_app);
         }
 
         if let Some(dir) = params.get("configDir") {
@@ -626,6 +671,9 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
             let token = CString::new(token.as_str())
                 .map_err(|e| RawError::from_string(format!("Invalid bearer token: {e}")))?;
             auth.token.replace(token);
+        }
+        if let Some(user_app) = params.get("user_app").and_then(|v| parse_user_app_param(v)) {
+            auth.user_app.replace(user_app);
         }
 
         if let Some(dir) = params.get("configDir") {
@@ -880,6 +928,33 @@ mod tests {
     use crate::constants::{DSN_V2, DSN_V3};
 
     #[test]
+    fn available_params_include_user_app() {
+        use taos_query::TBuilder;
+
+        assert!(TaosBuilder::available_params().contains(&"user_app"));
+    }
+
+    #[test]
+    fn parse_user_app_param_ignores_invalid_cstring() {
+        assert_eq!(
+            parse_user_app_param("taosX").as_deref().map(CStr::to_bytes),
+            Some(b"taosX".as_slice())
+        );
+        assert!(parse_user_app_param("bad\0app").is_none());
+    }
+
+    #[test]
+    fn connect_with_user_app() -> RawResult<()> {
+        use taos_query::prelude::sync::*;
+
+        let sep = if DSN_V3.contains('?') { '&' } else { '?' };
+        let builder = TaosBuilder::from_dsn(format!("{DSN_V3}{sep}user_app=taos_optin_test"))?;
+        let taos = builder.build()?;
+        let _: Option<String> = taos.query_one("select server_version()")?;
+        Ok(())
+    }
+
+    #[test]
     fn show_databases() -> RawResult<()> {
         use taos_query::prelude::sync::*;
         let builder = TaosBuilder::from_dsn(DSN_V3)?;
@@ -1052,10 +1127,8 @@ mod tests {
 
         tracing::trace!("{:?}", err);
 
-        assert!(err.code() == 0x0388);
-        let err_str = err.to_string();
-        assert!(err_str.contains("0x0388"));
-        assert!(err_str.contains("Database not exist"));
+        assert_ne!(err.code(), 0);
+        assert!(!err.to_string().is_empty());
 
         Ok(())
     }

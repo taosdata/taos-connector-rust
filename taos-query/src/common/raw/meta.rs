@@ -1,3 +1,25 @@
+// Copyright (c) 2022 TAOS Data, Inc.
+//
+// SPDX-License-Identifier: MIT
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 use std::fmt::{Display, Write};
 
 use either::Either;
@@ -68,6 +90,13 @@ pub enum MetaCreate {
         table_name: String,
         columns: Vec<FieldMore>,
         tags: Vec<Field>,
+        // VST inheritance (BASE ON): present only when this super table inherits.
+        #[serde(default)]
+        base_on: Option<Vec<String>>,
+        #[serde(default)]
+        own_col_start: Option<usize>,
+        #[serde(default)]
+        own_tag_start: Option<usize>,
     },
     #[serde(rename_all = "camelCase")]
     Child {
@@ -181,6 +210,76 @@ fn test_meta_create_deserialize() {
         "CREATE TABLE IF NOT EXISTS `T1` USING `ST` (`t1`, `t2`) TAGS('ab', 'cd')"
     );
 }
+
+#[test]
+fn test_meta_create_super_base_on() {
+    // Inherited VST: ts (col 0) + own columns kept inline, inherited [1, ownColStart) dropped,
+    // own tags [ownTagStart, n) kept, BASE ON appended.
+    let json = r#"{
+        "tableType": "super",
+        "tableName": "vst_child",
+        "columns": [
+            {"name": "ts", "type": 9, "length": 0},
+            {"name": "inherited_c", "type": 6, "length": 0},
+            {"name": "own_c", "type": 4, "length": 0}
+        ],
+        "tags": [
+            {"name": "inherited_t", "type": 4, "length": 0},
+            {"name": "own_t", "type": 8, "length": 16}
+        ],
+        "baseOn": ["vst_parent_a", "vst_parent_b"],
+        "ownColStart": 2,
+        "ownTagStart": 1
+    }"#;
+    let meta: MetaCreate = serde_json::from_str(json).unwrap();
+    assert_eq!(
+        meta.to_string(),
+        "CREATE TABLE IF NOT EXISTS `vst_child`(`ts` TIMESTAMP, `own_c` INT) TAGS(`own_t` BINARY(16)) BASE ON `vst_parent_a`, `vst_parent_b`"
+    );
+
+    // Non-inherited super table is unchanged (no baseOn / start indices).
+    let json = r#"{
+        "tableType": "super",
+        "tableName": "st",
+        "columns": [
+            {"name": "ts", "type": 9, "length": 0},
+            {"name": "c1", "type": 4, "length": 0}
+        ],
+        "tags": [
+            {"name": "t1", "type": 4, "length": 0}
+        ]
+    }"#;
+    let meta: MetaCreate = serde_json::from_str(json).unwrap();
+    assert_eq!(
+        meta.to_string(),
+        "CREATE TABLE IF NOT EXISTS `st`(`ts` TIMESTAMP, `c1` INT) TAGS(`t1` INT)"
+    );
+}
+
+#[test]
+fn test_meta_alter_base_on() {
+    let json = r#"{
+        "tableName": "vst_child",
+        "alterType": 22,
+        "baseOn": ["vst_parent_a", "vst_parent_b"]
+    }"#;
+    let meta: MetaAlter = serde_json::from_str(json).unwrap();
+    assert_eq!(
+        meta.to_string(),
+        "ALTER STABLE `vst_child` ADD BASE ON `vst_parent_a`, `vst_parent_b`"
+    );
+
+    let json = r#"{
+        "tableName": "vst_child",
+        "alterType": 23,
+        "baseOn": ["vst_parent_a"]
+    }"#;
+    let meta: MetaAlter = serde_json::from_str(json).unwrap();
+    assert_eq!(
+        meta.to_string(),
+        "ALTER STABLE `vst_child` DROP BASE ON `vst_parent_a`"
+    );
+}
 impl Display for MetaCreate {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("CREATE TABLE IF NOT EXISTS ")?;
@@ -189,18 +288,59 @@ impl Display for MetaCreate {
                 table_name,
                 columns,
                 tags,
+                base_on,
+                own_col_start,
+                own_tag_start,
             } => {
-                debug_assert!(!columns.is_empty(), "{self:?}");
-                debug_assert!(!tags.is_empty());
+                let parents = base_on.as_deref().unwrap_or_default();
+                let inherits = !parents.is_empty();
+                // Inherited VSTs carry merged (parent + own) columns/tags. Match the
+                // server's SHOW CREATE rule: keep column 0 (the ts primary key) inline,
+                // skip inherited columns [1, ownColStart), then emit own columns
+                // [ownColStart, n). Tags emit only the own slice [ownTagStart, n).
+                // Without inheritance, the start indices are absent → emit everything.
+                let col_own_start = if inherits {
+                    own_col_start.unwrap_or(1).max(1)
+                } else {
+                    0
+                };
+                let tag_own_start = if inherits {
+                    own_tag_start.unwrap_or(0)
+                } else {
+                    0
+                };
+
+                let own_cols: Vec<&FieldMore> = if inherits {
+                    columns
+                        .iter()
+                        .take(1)
+                        .chain(columns.iter().skip(col_own_start))
+                        .collect()
+                } else {
+                    columns.iter().collect()
+                };
+                let own_tags = tags.get(tag_own_start..).unwrap_or(&[]);
+
+                debug_assert!(inherits || !columns.is_empty(), "{self:?}");
+                debug_assert!(inherits || !tags.is_empty());
 
                 f.write_fmt(format_args!("`{table_name}`"))?;
-                f.write_char('(')?;
-                f.write_str(&columns.iter().map(|f| f.sql_repr()).join(", "))?;
-                f.write_char(')')?;
+                if !own_cols.is_empty() {
+                    f.write_char('(')?;
+                    f.write_str(&own_cols.iter().map(|f| f.sql_repr()).join(", "))?;
+                    f.write_char(')')?;
+                }
 
-                f.write_str(" TAGS(")?;
-                f.write_str(&tags.iter().map(|f| f.sql_repr()).join(", "))?;
-                f.write_char(')')?;
+                if !own_tags.is_empty() {
+                    f.write_str(" TAGS(")?;
+                    f.write_str(&own_tags.iter().map(|f| f.sql_repr()).join(", "))?;
+                    f.write_char(')')?;
+                }
+
+                if inherits {
+                    f.write_str(" BASE ON ")?;
+                    f.write_str(&parents.iter().map(|p| format!("`{p}`")).join(", "))?;
+                }
             }
             MetaCreate::Child {
                 table_name,
@@ -285,6 +425,10 @@ pub enum AlterType {
     SetMultiTagValue = 15,
     SetMultiTableTagValue = 19,
     BatchSetTagByCond = 20,
+    AlterTagRef = 21,
+    // VST inheritance (BASE ON)
+    AddBaseOn = 22,
+    DropBaseOn = 23,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -302,6 +446,8 @@ pub struct MetaAlter {
     pub tables: Option<Vec<Table>>,
     #[serde(rename = "where")]
     pub condition: Option<String>,
+    // VST inheritance: parent full names added/dropped (AddBaseOn / DropBaseOn).
+    pub base_on: Option<Vec<String>>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -457,6 +603,29 @@ impl Display for MetaAlter {
                     f.write_fmt(format_args!(" WHERE {condition}"))?;
                 }
                 Ok(())
+            }
+            AlterType::AlterTagRef => {
+                f.write_fmt(format_args!(
+                    "ALTER TABLE `{}` SET TAG `{}`",
+                    self.table_name,
+                    self.field.name()
+                ))?;
+                // The server emits colValue with the source-column reference for tag-ref alters.
+                // Append it so the DDL is replayable; omit (leaving a tag name only) when absent.
+                if let Some(ref v) = self.col_value {
+                    f.write_fmt(format_args!(" = {v}"))?;
+                }
+                Ok(())
+            }
+            AlterType::AddBaseOn | AlterType::DropBaseOn => {
+                let verb = if matches!(self.alter_type, AlterType::AddBaseOn) {
+                    "ADD BASE ON"
+                } else {
+                    "DROP BASE ON"
+                };
+                f.write_fmt(format_args!("ALTER STABLE `{}` {} ", self.table_name, verb))?;
+                let parents = self.base_on.as_deref().unwrap_or_default();
+                f.write_str(&parents.iter().map(|p| format!("`{p}`")).join(", "))
             }
         }
     }
