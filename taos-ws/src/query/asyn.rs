@@ -1720,6 +1720,111 @@ mod tests {
         ));
     }
 
+    // --- mock taosAdapter for connection-lifecycle tests --------------------------
+
+    const MOCK_VERSION_FRAME: &str =
+        r#"{"code":0,"message":"","action":"version","version":"3.3.0.0"}"#;
+    const MOCK_CONN_FRAME: &str = r#"{"code":0,"message":"","action":"conn"}"#;
+
+    /// What the mock does with the first query frame it receives.
+    enum MockQueryReply {
+        /// Reply with a text frame that is only valid as binary data (`action=block`).
+        BlockAsText,
+        /// Drop the TCP socket without answering (peer went away mid-request).
+        DropSocket,
+    }
+
+    /// Stand-in for taosAdapter: performs the WS handshake, answers the `version` and
+    /// `conn` login frames, then applies `reply` to the first query frame.
+    async fn run_mock_adapter(listener: tokio::net::TcpListener, reply: MockQueryReply) {
+        use futures::{SinkExt, StreamExt};
+        use tokio_tungstenite::tungstenite::Message;
+
+        let (stream, _) = listener.accept().await.expect("mock accept");
+        let mut ws = tokio_tungstenite::accept_async(stream)
+            .await
+            .expect("mock websocket handshake");
+
+        while let Some(message) = ws.next().await {
+            let payload = match message {
+                Ok(Message::Text(text)) => text.as_str().to_string(),
+                Ok(Message::Close(_)) | Err(_) => return,
+                Ok(_) => continue,
+            };
+            let value: serde_json::Value = match serde_json::from_str(&payload) {
+                Ok(value) => value,
+                Err(_) => return,
+            };
+            match value.get("action").and_then(|action| action.as_str()) {
+                Some("version") => {
+                    let _ = ws.send(Message::text(MOCK_VERSION_FRAME)).await;
+                }
+                Some("conn") => {
+                    let _ = ws.send(Message::text(MOCK_CONN_FRAME)).await;
+                }
+                Some("query") => {
+                    let req_id = value.get("req_id").and_then(|id| id.as_u64()).unwrap_or(7);
+                    match reply {
+                        MockQueryReply::BlockAsText => {
+                            let frame = format!(
+                                r#"{{"code":0,"message":"","req_id":{req_id},"action":"block","raw":[]}}"#
+                            );
+                            let _ = ws.send(Message::text(frame)).await;
+                        }
+                        MockQueryReply::DropSocket => return,
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    async fn mock_endpoint() -> (tokio::net::TcpListener, String) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind mock adapter");
+        let addr = listener.local_addr().expect("mock address");
+        (listener, format!("ws://{addr}"))
+    }
+
+    async fn connect_mock(url: String) -> WsTaos {
+        let builder = TaosBuilder::from_dsn(url).expect("dsn");
+        WsTaos::from_wsinfo(&builder).await.expect("connect")
+    }
+
+    /// The reported production scenario: a text frame that is only valid as binary data
+    /// used to be logged and dropped. If it is the only answer a request gets, that
+    /// request must fail (CONN_CLOSED) instead of waiting forever.
+    #[tokio::test]
+    async fn test_mock_unroutable_text_response_fails_pending_query() {
+        let (listener, url) = mock_endpoint().await;
+        let server = tokio::spawn(run_mock_adapter(listener, MockQueryReply::BlockAsText));
+        let ws = connect_mock(url).await;
+
+        let err = tokio::time::timeout(Duration::from_secs(5), ws.sender.send_recv(query(7)))
+            .await
+            .expect("the query must not hang on an unroutable text frame")
+            .expect_err("a block payload on a text frame must fail the query");
+        assert_eq!(err.code(), WS_ERROR_NO::CONN_CLOSED.as_code());
+        let _ = tokio::time::timeout(Duration::from_secs(5), server).await;
+    }
+
+    /// Peer disappearing while a query is in flight must surface as CONN_CLOSED, not a
+    /// panic in the read task and not an unbounded wait in the caller.
+    #[tokio::test]
+    async fn test_mock_peer_socket_drop_fails_pending_query() {
+        let (listener, url) = mock_endpoint().await;
+        let server = tokio::spawn(run_mock_adapter(listener, MockQueryReply::DropSocket));
+        let ws = connect_mock(url).await;
+
+        let err = tokio::time::timeout(Duration::from_secs(5), ws.sender.send_recv(query(11)))
+            .await
+            .expect("the query must not hang after the peer went away")
+            .expect_err("a dropped socket must fail the query");
+        assert_eq!(err.code(), WS_ERROR_NO::CONN_CLOSED.as_code());
+        let _ = tokio::time::timeout(Duration::from_secs(5), server).await;
+    }
+
     /// A truncated block-new frame must be reported as an error instead of panicking
     /// the reader task (see `parse_block_new_frame`).
     #[test]
