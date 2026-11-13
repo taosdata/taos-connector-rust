@@ -1874,55 +1874,63 @@ mod tests {
         }
     }
 
-    fn block_new_frame(finished: bool, body: &[u8]) -> Vec<u8> {
-        let mut raw = Vec::new();
-        raw.extend_from_slice(&1u64.to_le_bytes()); // action
-        raw.extend_from_slice(&1u16.to_le_bytes()); // block version
-        raw.extend_from_slice(&1_234u64.to_le_bytes()); // timing (ns)
-        raw.extend_from_slice(&7u64.to_le_bytes()); // block req id
-        raw.extend_from_slice(&0u32.to_le_bytes()); // block code
-        raw.extend_from_slice(&5u32.to_le_bytes()); // inlined<4> str len
-        raw.extend_from_slice(b"error"); // block message
-        raw.extend_from_slice(&9u64.to_le_bytes()); // result id
-        raw.push(u8::from(finished));
+    /// Build the bytes of a v3 block-new frame in protocol order:
+    /// `action, block_version, timing, block_req_id, block_code, msg_len, msg,
+    /// result_id, finished, [raw_len, raw]`.
+    ///
+    /// The two length prefixes are written verbatim, so a test can lie about them while
+    /// keeping every other field where the parser expects it.
+    fn block_new_frame_with_lengths(
+        msg: &[u8],
+        msg_len: u32,
+        finished: bool,
+        raw: &[u8],
+        raw_len: u32,
+    ) -> Vec<u8> {
+        let mut frame = Vec::new();
+        frame.extend_from_slice(&1u64.to_le_bytes()); // action
+        frame.extend_from_slice(&1u16.to_le_bytes()); // block version
+        frame.extend_from_slice(&1_234u64.to_le_bytes()); // timing (ns)
+        frame.extend_from_slice(&7u64.to_le_bytes()); // block req id
+        frame.extend_from_slice(&0u32.to_le_bytes()); // block code
+        frame.extend_from_slice(&msg_len.to_le_bytes()); // inlined<4> str len
+        frame.extend_from_slice(msg);
+        frame.extend_from_slice(&9u64.to_le_bytes()); // result id
+        frame.push(u8::from(finished));
         if !finished {
-            raw.extend_from_slice(&(body.len() as u32).to_le_bytes()); // inlined<4> bytes len
-            raw.extend_from_slice(body);
+            frame.extend_from_slice(&raw_len.to_le_bytes()); // inlined<4> bytes len
+            frame.extend_from_slice(raw);
         }
-        raw
+        frame
+    }
+
+    fn block_new_frame(finished: bool, body: &[u8]) -> Vec<u8> {
+        block_new_frame_with_lengths(b"error", 5, finished, body, body.len() as u32)
     }
 
     /// A frame that lies about its inlined payload length must fail *before* anything is
     /// allocated for it. `InlinableRead::read_inlined_*` would `vec![0; 0xFFFFFFFF]` first.
     #[test]
     fn test_parse_block_new_frame_rejects_huge_inlined_length() {
-        let header = |len: u32, finished: u8| {
-            let mut raw = Vec::new();
-            raw.extend_from_slice(&1u64.to_le_bytes()); // action
-            raw.extend_from_slice(&1u16.to_le_bytes()); // block version
-            raw.extend_from_slice(&0u64.to_le_bytes()); // timing
-            raw.extend_from_slice(&7u64.to_le_bytes()); // block req id
-            raw.extend_from_slice(&0u32.to_le_bytes()); // block code
-            raw.extend_from_slice(&len.to_le_bytes()); // inlined message length (lie)
-            raw.push(finished);
-            raw
-        };
-
         // `block_message` claims 4 GiB of payload that is not there.
-        let err = parse_block_new_frame(&header(0xFFFF_FFFF, 0))
+        let frame = block_new_frame_with_lengths(b"", 0xFFFF_FFFF, false, b"", 0);
+        let err = parse_block_new_frame(&frame)
             .expect_err("a 4 GiB inlined string must not be allocated");
         assert_eq!(err.kind(), std::io::ErrorKind::UnexpectedEof);
-        assert!(err.to_string().contains("4294967295"), "unexpected: {err}");
+        assert!(
+            err.to_string().contains("4294967295"),
+            "the message bound check must fire first, got: {err}"
+        );
 
-        // Same lie for the raw block body after a valid message.
-        let mut raw = header(5, 0);
-        raw.extend_from_slice(b"error"); // the 5-byte message
-        raw.extend_from_slice(&9u64.to_le_bytes()); // result id
-        raw.extend_from_slice(&1u8.to_le_bytes()); // not finished
-        raw.extend_from_slice(&0xFFFF_FFFFu32.to_le_bytes()); // inlined raw length (lie)
-        let err = parse_block_new_frame(&raw)
+        // Same lie for the raw block body, after a well-formed message of the right size.
+        let frame = block_new_frame_with_lengths(b"error", 5, false, b"", 0xFFFF_FFFF);
+        let err = parse_block_new_frame(&frame)
             .expect_err("a 4 GiB inlined block must not be allocated");
         assert_eq!(err.kind(), std::io::ErrorKind::UnexpectedEof);
+        assert!(
+            err.to_string().contains("4294967295"),
+            "the raw block bound check must fire, got: {err}"
+        );
     }
 
     #[test]
