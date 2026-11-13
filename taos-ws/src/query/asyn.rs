@@ -29,7 +29,7 @@ use std::io::Write;
 use std::mem::transmute;
 use std::pin::Pin;
 // use std::io::Write;
-use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::task::Poll;
 use std::time::{Duration, Instant};
@@ -44,6 +44,40 @@ type QueryChannelSender = oneshot::Sender<RawResult<WsRecvData>>;
 type QueryInner = HashMap<ReqId, QueryChannelSender>;
 type QueryAgent = Arc<QueryInner>;
 type QueryResMapper = HashMap<ResId, ReqId>;
+
+/// Error used by every "this connection is gone" exit path, so callers can tell a dead
+/// connection (rebuild it) from an ordinary query error (`Code::FAILED`).
+fn conn_closed(reason: impl std::fmt::Display) -> RawError {
+    RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(), reason.to_string())
+}
+
+/// What a decoded text payload means for the connection.
+enum TextPayload {
+    /// A real response; it is routed to its request by `req_id`.
+    Response,
+    /// Control message that may legitimately arrive asynchronously; safe to ignore.
+    Ignorable,
+    /// Decodable, but never a valid text response (`Block*` are binary-only). It cannot
+    /// be routed, so dropping it would leave the request it belongs to waiting forever:
+    /// the connection is out of sync and has to fail.
+    Fatal,
+}
+
+/// If a future server starts pushing another asynchronous control frame, it has to be
+/// added to the `Ignorable` arm here — otherwise it fails the connection.
+fn classify_text_payload(data: &WsRecvData) -> TextPayload {
+    match data {
+        WsRecvData::Query(_)
+        | WsRecvData::Fetch(_)
+        | WsRecvData::FetchBlock
+        | WsRecvData::WriteMeta
+        | WsRecvData::WriteRaw
+        | WsRecvData::WriteRawBlock
+        | WsRecvData::WriteRawBlockWithFields => TextPayload::Response,
+        WsRecvData::Conn | WsRecvData::Version { .. } => TextPayload::Ignorable,
+        _ => TextPayload::Fatal,
+    }
+}
 
 #[derive(Debug, Clone)]
 struct Version {
@@ -63,6 +97,9 @@ struct WsQuerySender {
     results: Arc<QueryResMapper>,
     sender: WsSender,
     queries: QueryAgent,
+    /// Set by [`read_queries`] when it gives up. Once true nothing can deliver a
+    /// response any more, so new requests must fail instead of waiting forever.
+    closed: Arc<AtomicBool>,
 }
 
 impl WsQuerySender {
@@ -73,56 +110,90 @@ impl WsQuerySender {
     async fn send_recv(&self, msg: WsSend) -> RawResult<WsRecvData> {
         let send_timeout = Duration::from_millis(1000);
         let req_id = msg.req_id();
+
+        // The reader task is the only thing that can answer this connection. If it is
+        // gone, queueing here would wait forever: fail fast instead.
+        if self.closed.load(Ordering::Acquire) {
+            return Err(conn_closed("websocket connection is closed"));
+        }
+
         let (tx, rx) = query_channel();
 
         self.queries.insert(req_id, tx);
 
-        match msg {
-            WsSend::FetchBlock(args) => {
-                log::trace!("[req id: {req_id}] prepare message {msg:?}");
-                if self.results.contains_key(&args.id) {
-                    Err(RawError::from_string(format!(
-                        "there's a result with id {}",
-                        args.id
-                    )))?;
-                }
-                self.results.insert(args.id, args.req_id);
-
-                self.sender
-                    .send_timeout(msg.to_msg(), send_timeout)
-                    .await
-                    .map_err(Error::from)?;
-                //
-            }
-            WsSend::Binary(bytes) => {
-                self.sender
-                    .send_timeout(
-                        WsMessage {
-                            code: OpCode::Binary,
-                            data: bytes.into(),
-                            close_code: None,
-                        },
-                        send_timeout,
-                    )
-                    .await
-                    .map_err(Error::from)?;
-            }
-            _ => {
-                log::trace!("[req id: {req_id}] prepare  message: {msg:?}");
-                self.sender
-                    .send_timeout(msg.to_msg(), send_timeout)
-                    .await
-                    .map_err(Error::from)?;
-            }
+        // Re-check after registering: the read task may have flipped the flag and swept
+        // the pending map between our first check and this insert. Without this second
+        // look the entry would sit in the map forever (nothing would ever answer it).
+        if self.closed.load(Ordering::Acquire) {
+            self.queries.remove(&req_id);
+            return Err(conn_closed("websocket connection is closed"));
         }
-        // handle the error
+
+        let sent = async {
+            match msg {
+                WsSend::FetchBlock(args) => {
+                    log::trace!("[req id: {req_id}] prepare message {msg:?}");
+                    if self.results.contains_key(&args.id) {
+                        return Err(RawError::from_string(format!(
+                            "there's a result with id {}",
+                            args.id
+                        )));
+                    }
+                    self.results.insert(args.id, args.req_id);
+
+                    self.sender
+                        .send_timeout(msg.to_msg(), send_timeout)
+                        .await
+                        .map_err(Error::from)?;
+                    //
+                }
+                WsSend::Binary(bytes) => {
+                    self.sender
+                        .send_timeout(
+                            WsMessage {
+                                code: OpCode::Binary,
+                                data: bytes.into(),
+                                close_code: None,
+                            },
+                            send_timeout,
+                        )
+                        .await
+                        .map_err(Error::from)?;
+                }
+                _ => {
+                    log::trace!("[req id: {req_id}] prepare  message: {msg:?}");
+                    self.sender
+                        .send_timeout(msg.to_msg(), send_timeout)
+                        .await
+                        .map_err(Error::from)?;
+                }
+            }
+            Ok(())
+        }
+        .await;
+
+        if let Err(err) = sent {
+            // Never reached the wire: drop the pending slot instead of leaving an entry
+            // that nobody will ever answer.
+            self.queries.remove(&req_id);
+            return Err(err);
+        }
+
         log::trace!("[req id: {req_id}] message sent, wait for receiving");
-        let res = rx.await.unwrap().map_err(Error::from)?;
-        log::trace!("[req id: {req_id}] message received: {res:?}");
-        Ok(res)
+        match rx.await {
+            Ok(res) => res,
+            // The pending sender was dropped without an answer (reader task exited).
+            // This used to `unwrap()` and panic in the caller.
+            Err(err) => Err(conn_closed(format!(
+                "websocket connection is closed before the response arrived: {err}"
+            ))),
+        }
     }
     async fn send_only(&self, msg: WsSend) -> RawResult<()> {
         let send_timeout = Duration::from_millis(1000);
+        if self.closed.load(Ordering::Acquire) {
+            return Err(conn_closed("websocket connection is closed"));
+        }
         self.sender
             .send_timeout(msg.to_msg(), send_timeout)
             .await
@@ -272,6 +343,10 @@ impl Error {
             Error::Dsn(_) => Code::new(WS_ERROR_NO::DSN_ERROR as _),
             Error::IoError(_) => Code::new(WS_ERROR_NO::IO_ERROR as _),
             Error::WsErrorWst(_) => Code::new(WS_ERROR_NO::WEBSOCKET_ERROR as _),
+            // The write half is gone entirely: that is a dead connection, not a slow one.
+            Error::SendTimeoutError(
+                tokio::sync::mpsc::error::SendTimeoutError::Closed(_),
+            ) => Code::new(WS_ERROR_NO::CONN_CLOSED as _),
             Error::SendTimeoutError(_) => Code::new(WS_ERROR_NO::SEND_MESSAGE_TIMEOUT as _),
             // Error::RecvTimeout(_) => Code::new(WS_ERROR_NO::RECV_MESSAGE_TIMEOUT as _),
             _ => Code::FAILED,
@@ -301,6 +376,87 @@ impl From<Error> for RawError {
     }
 }
 
+/// Parsed payload of a v3 `OpCode::Binary` block-new frame.
+#[derive(Debug)]
+struct BlockNewFrame {
+    block_version: u16,
+    timing: Duration,
+    block_req_id: u64,
+    block_code: u32,
+    block_message: String,
+    finished: bool,
+    raw: Vec<u8>,
+}
+
+/// Bounds-checked readers over an in-memory frame.
+///
+/// `taos_query::util::InlinableRead::read_inlined_{str,bytes}` (used elsewhere) trusts
+/// the inlined length prefix and does `vec![0; len]` *before* checking that the bytes
+/// are actually present, so a corrupt frame claiming a 4 GiB payload makes it allocate
+/// that much before failing. Here the declared length is validated against the bytes
+/// left in the frame first, so a malformed frame can only ever cost what it delivered.
+fn take<'a>(slice: &mut &'a [u8], len: usize) -> std::io::Result<&'a [u8]> {
+    if slice.len() < len {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::UnexpectedEof,
+            format!("frame declares {len} bytes but only {} are left", slice.len()),
+        ));
+    }
+    let (head, tail) = slice.split_at(len);
+    *slice = tail;
+    Ok(head)
+}
+
+fn take_array<const N: usize>(slice: &mut &[u8]) -> std::io::Result<[u8; N]> {
+    let mut out = [0u8; N];
+    out.copy_from_slice(take(slice, N)?);
+    Ok(out)
+}
+
+fn take_inlined4(slice: &mut &[u8]) -> std::io::Result<Vec<u8>> {
+    let len = u32::from_le_bytes(take_array::<4>(slice)?) as usize;
+    Ok(take(slice, len)?.to_vec())
+}
+
+fn take_inlined4_str(slice: &mut &[u8]) -> std::io::Result<String> {
+    String::from_utf8(take_inlined4(slice)?)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+}
+
+/// Parse the header of a v3 block-new binary frame.
+///
+/// Returns `Err` for truncated/misaligned frames so that the caller can fail the
+/// connection instead of leaving the request that owned the frame waiting. Nothing
+/// here may panic: a panic inside `read_queries` kills the only reader task of the
+/// connection, and every query still waiting on it would then never receive a result
+/// (it hangs instead of failing).
+fn parse_block_new_frame(frame: &[u8]) -> std::io::Result<BlockNewFrame> {
+    let mut slice = frame;
+
+    let _action = u64::from_le_bytes(take_array::<8>(&mut slice)?);
+    let block_version = u16::from_le_bytes(take_array::<2>(&mut slice)?);
+    let timing = Duration::from_nanos(u64::from_le_bytes(take_array::<8>(&mut slice)?));
+    let block_req_id = u64::from_le_bytes(take_array::<8>(&mut slice)?);
+    let block_code = u32::from_le_bytes(take_array::<4>(&mut slice)?);
+    let block_message = take_inlined4_str(&mut slice)?;
+    let _result_id = u64::from_le_bytes(take_array::<8>(&mut slice)?);
+    let finished = take_array::<1>(&mut slice)?[0] == 1;
+    let raw = if finished {
+        Vec::new()
+    } else {
+        take_inlined4(&mut slice)?
+    };
+    Ok(BlockNewFrame {
+        block_version,
+        timing,
+        block_req_id,
+        block_code,
+        block_message,
+        finished,
+        raw,
+    })
+}
+
 async fn read_queries(
     mut reader: AsyncDeflateRecv<ReadHalf<BufStream<AsyncStream>>>,
     queries_sender: QueryAgent,
@@ -308,6 +464,8 @@ async fn read_queries(
     ws2: WsSender,
     is_v3: bool,
     mut close_listener: watch::Receiver<bool>,
+    closed: Arc<AtomicBool>,
+    close_signal: watch::Sender<bool>,
 ) {
     let ws3 = ws2.clone();
     tokio::spawn(async move {
@@ -329,16 +487,46 @@ async fn read_queries(
     });
     'ws: loop {
         tokio::select! {
-            Ok(frame) = reader.receive() => {
-                let (header, payload) = frame;
+            res = reader.receive() => {
+                let (header, payload) = match res {
+                    Ok(frame) => frame,
+                    Err(err) => {
+                        // A read error must close the connection explicitly: with the old
+                        // `Ok(frame) = ...` pattern the branch was silently disabled and the
+                        // loop degraded into waiting on `close_listener` forever, so pending
+                        // queries never got an error back.
+                        log::error!("websocket read error, closing connection: {err:?}");
+                        break 'ws;
+                    }
+                };
                 let code = header.code;
                 match code {
                     OpCode::Text => {
 
                         log::trace!("received json response: {payload}", payload = String::from_utf8_lossy(&payload));
-                        let v: WsRecv = serde_json::from_slice(&payload).unwrap();
+                        let v: WsRecv = match serde_json::from_slice(&payload) {
+                            Ok(v) => v,
+                            Err(err) => {
+                                // An unparsable text frame means the stream is out of sync;
+                                // log what we got and fail the connection instead of panicking.
+                                log::error!(
+                                    "failed to parse text frame as json, closing connection: {err}; frame={}",
+                                    String::from_utf8_lossy(&payload[..payload.len().min(256)])
+                                );
+                                break 'ws;
+                            }
+                        };
 
                         let (req_id, data, ok) = v.ok();
+                        // A decodable payload that can never be a text response (block
+                        // data is binary-only) must not be dropped: it may be the only
+                        // answer the request with this req_id will ever get.
+                        if let TextPayload::Fatal = classify_text_payload(&data) {
+                            log::error!(
+                                "text frame carries a payload that is not a valid response (req_id {req_id}), failing connection"
+                            );
+                            break 'ws;
+                        }
                         match &data {
                             WsRecvData::Query(_) => {
                                 if let Some((_, sender)) = queries_sender.remove(&req_id)
@@ -347,22 +535,27 @@ async fn read_queries(
                                         log::error!("send data with error: {err:?}");
                                     }
                                 } else {
-                                    debug_assert!(!queries_sender.contains_key(&req_id));
                                     log::warn!("req_id {req_id} not detected, message might be lost");
                                 }
                             }
                             WsRecvData::Fetch(fetch) => {
                                 let id = fetch.id;
                                 if fetch.completed {
-                                    ws2.send(
-                                        WsSend::FreeResult(WsResArgs {
-                                            req_id,
-                                            id,
-                                        })
-                                        .to_msg(),
-                                    )
-                                    .await
-                                    .unwrap();
+                                    if let Err(err) = ws2
+                                        .send(
+                                            WsSend::FreeResult(WsResArgs {
+                                                req_id,
+                                                id,
+                                            })
+                                            .to_msg(),
+                                        )
+                                        .await
+                                    {
+                                        log::error!(
+                                            "websocket write half is closed (free result), giving up connection: {err:?}"
+                                        );
+                                        break 'ws;
+                                    }
                                 }
                                 // dbg!(&queries_sender);
                                 if let Some((_, sender)) = queries_sender.remove(&req_id)
@@ -373,7 +566,12 @@ async fn read_queries(
                                 }
                             }
                             WsRecvData::FetchBlock => {
-                                assert!(ok.is_err());
+                                if ok.is_ok() {
+                                    log::error!(
+                                        "unexpected ok payload for fetch_block, closing connection"
+                                    );
+                                    break 'ws;
+                                }
                                 if let Some((_, sender)) = queries_sender.remove(&req_id)
                                 {
                                     let _ = sender.send(ok.map(|_| data));
@@ -406,8 +604,12 @@ async fn read_queries(
                                 }
                             }
 
-                            // Block type is for binary.
-                            _ => unreachable!(),
+                            // Only `Conn` / `Version` reach this arm (see
+                            // `classify_text_payload`): asynchronous control frames with no
+                            // request waiting on them.
+                            _ => {
+                                log::debug!("ignoring asynchronous control text frame");
+                            }
                         }
                     }
                     OpCode::Binary => {
@@ -419,56 +621,81 @@ async fn read_queries(
                         let mut is_block_new : bool = false;
 
                         let timing = if is_v3 {
-                            let timing = slice.read_u64().unwrap();
-                            if timing == std::u64::MAX {
-                                is_block_new = true;
-                                Duration::ZERO
-                            } else {
-                                Duration::from_nanos(timing as _)
+                            match slice.read_u64() {
+                                Ok(timing) => {
+                                    if timing == std::u64::MAX {
+                                        is_block_new = true;
+                                        Duration::ZERO
+                                    } else {
+                                        Duration::from_nanos(timing as _)
+                                    }
+                                }
+                                Err(err) => {
+                                    // A truncated frame means the stream is out of sync and we
+                                    // cannot tell which query it belonged to: fail the whole
+                                    // connection (wakes every pending query) instead of
+                                    // leaving its owner waiting forever.
+                                    log::error!(
+                                        "invalid binary frame (truncated block header), failing connection: {err}"
+                                    );
+                                    break 'ws;
+                                }
                             }
                         } else {
                             Duration::ZERO
                         };
 
                         if is_block_new {
-                            let _action = slice.read_u64().unwrap();
-                            let block_version = slice.read_u16().unwrap();
-                            let timing = Duration::from_nanos(slice.read_u64().unwrap());
-                            let block_req_id = slice.read_u64().unwrap();
-                            let block_code = slice.read_u32().unwrap();
-                            let block_message = slice.read_inlined_str::<4>().unwrap();
-                            let _result_id = slice.read_u64().unwrap();
-                            let finished = slice.read_u8().unwrap() == 1;
-                            let result_block : Vec<u8>;
-                            if finished {
-                                result_block = Vec::<u8>::new();
-                            } else {
-                                result_block = slice.read_inlined_bytes::<4>().unwrap();
-                            }
+                            let frame = match parse_block_new_frame(slice) {
+                                Ok(frame) => frame,
+                                Err(err) => {
+                                    log::error!(
+                                        "invalid block-new binary frame, failing connection: {err}"
+                                    );
+                                    break 'ws;
+                                }
+                            };
 
-                            if let Some((_, sender)) = queries_sender.remove(&block_req_id) {
-                                sender.send(Ok(WsRecvData::BlockNew {
-                                    block_version,
-                                    timing,
-                                    block_req_id,
-                                    block_code,
-                                    block_message,
-                                    finished,
-                                    raw: result_block.to_vec(),
-                                })).unwrap();
+                            if let Some((_, sender)) = queries_sender.remove(&frame.block_req_id) {
+                                if let Err(err) = sender.send(Ok(WsRecvData::BlockNew {
+                                    block_version: frame.block_version,
+                                    timing: frame.timing,
+                                    block_req_id: frame.block_req_id,
+                                    block_code: frame.block_code,
+                                    block_message: frame.block_message,
+                                    finished: frame.finished,
+                                    raw: frame.raw,
+                                })) {
+                                    // The receiver is dropped together with the query future
+                                    // (caller cancelled). Not a connection problem, so keep going.
+                                    log::debug!(
+                                        "query {} is gone, drop block-new frame: {err:?}",
+                                        frame.block_req_id
+                                    );
+                                }
                             } else {
-                                log::warn!("req_id {block_req_id} not detected, message might be lost");
+                                log::warn!("req_id {} not detected, message might be lost", frame.block_req_id);
                             }
                             continue;
                         }
 
-                        let res_id = slice.read_u64().unwrap();
+                        let res_id = match slice.read_u64() {
+                            Ok(res_id) => res_id,
+                            Err(err) => {
+                                log::error!(
+                                    "invalid binary frame (truncated result id), failing connection: {err}"
+                                );
+                                break 'ws;
+                            }
+                        };
                         if let Some((_, req_id)) =  fetches_sender.remove(&res_id) {
                             if is_v3 {
                                 // v3
                                 if let Some((_, sender)) = queries_sender.remove(&req_id) {
                                     log::trace!("send data to fetches with id {}", res_id);
-                                    sender.send(Ok(WsRecvData::Block { timing, raw: block[offset..].to_vec() })).unwrap();
+                                    if let Err(err) = sender.send(Ok(WsRecvData::Block { timing, raw: block[offset..].to_vec() })) {
+                                        log::debug!("query {req_id} is gone, drop block frame: {err:?}");
+                                    }
                                 } else {
                                     log::warn!("req_id {res_id} not detected, message might be lost");
                                 }
@@ -476,7 +703,9 @@ async fn read_queries(
                                 // v2
                                 if let Some((_, sender)) = queries_sender.remove(&req_id) {
                                     log::trace!("send data to fetches with id {}", res_id);
-                                    sender.send(Ok(WsRecvData::BlockV2 { timing, raw: block[offset..].to_vec() })).unwrap();
+                                    if let Err(err) = sender.send(Ok(WsRecvData::BlockV2 { timing, raw: block[offset..].to_vec() })) {
+                                        log::debug!("query {req_id} is gone, drop block v2 frame: {err:?}");
+                                    }
                                 } else {
                                     log::warn!("req_id {res_id} not detected, message might be lost");
                                 }
@@ -504,11 +733,19 @@ async fn read_queries(
                     }
                     OpCode::Ping => {
                         let bytes = payload.to_vec();
-                        ws2.send(WsMessage{
+                        if let Err(err) = ws2.send(WsMessage{
                             code: OpCode::Pong,
                             data: bytes.into(),
                             close_code: None
-                        }).await.unwrap();
+                        }).await {
+                            // The write half is gone (e.g. `BrokenPipe` after the peer
+                            // closed the socket). This used to `unwrap()` and panic, which
+                            // killed the reader task and left the connection half-alive.
+                            log::error!(
+                                "websocket write half is closed, cannot reply pong, giving up connection: {err:?}"
+                            );
+                            break 'ws;
+                        }
                     }
                     OpCode::Pong => {
                         // do nothing
@@ -540,22 +777,23 @@ async fn read_queries(
             }
         }
     }
-    if queries_sender.is_empty() {
-        return;
-    }
+    // Terminal state, in this order:
+    //  1. reject new requests (they could never be answered by this connection),
+    //  2. tell the writer task to close the socket and exit, so its queue is dropped and
+    //     later sends fail instead of being accepted into a socket nobody reads,
+    //  3. wake the requests that are already waiting.
+    // Doing (1) before (3) keeps a request that races with this shutdown from being
+    // queued after the pending sweep.
+    closed.store(true, Ordering::Release);
+    let _ = close_signal.send_replace(true);
 
     let mut keys = Vec::new();
     for e in queries_sender.iter() {
         keys.push(*e.key());
     }
-    // queries_sender
-    //     .for_each_async(|k, _| {
-    //         keys.push(*k);
-    //     })
-    //     .await;
     for k in keys {
         if let Some((_, sender)) = queries_sender.remove(&k) {
-            let _ = sender.send(Err(RawError::from_string("websocket connection is closed")));
+            let _ = sender.send(Err(conn_closed("websocket connection is closed")));
         }
     }
 }
@@ -768,6 +1006,9 @@ impl WsTaos {
                 sender: ws_cloned,
                 queries: queries2_cloned,
                 results,
+                // No read task is spawned on this legacy path, so nothing will ever
+                // flip this flag; kept for the struct contract.
+                closed: Arc::new(AtomicBool::new(false)),
             },
         })
     }
@@ -853,6 +1094,9 @@ impl WsTaos {
         // Connection watcher
         let (tx, mut rx) = watch::channel(false);
         let close_listener = rx.clone();
+        // Shared terminal flag: set by the read task when it gives up, checked by every
+        // new request so a dead connection fails fast instead of queueing forever.
+        let closed = Arc::new(AtomicBool::new(false));
 
         tokio::spawn(async move {
             let mut interval = time::interval(Duration::from_millis(10));
@@ -889,8 +1133,20 @@ impl WsTaos {
             }
         });
 
+        let closed_task = closed.clone();
+        let close_signal_task = tx.clone();
         tokio::spawn(async move {
-            read_queries(reader, queries2, fetches_sender, ws2, is_v3, close_listener).await
+            read_queries(
+                reader,
+                queries2,
+                fetches_sender,
+                ws2,
+                is_v3,
+                close_listener,
+                closed_task,
+                close_signal_task,
+            )
+            .await
         });
         let ws_cloned = ws.clone();
 
@@ -905,6 +1161,7 @@ impl WsTaos {
                 sender: ws_cloned,
                 queries: queries2_cloned,
                 results,
+                closed,
             },
         })
     }
@@ -1380,6 +1637,326 @@ mod tests {
     use futures::TryStreamExt;
 
     use super::*;
+
+    fn test_sender(closed: bool) -> (WsQuerySender, Arc<QueryInner>, tokio::sync::mpsc::Receiver<WsMessage<bytes::Bytes>>) {
+        let (tx, rx) = tokio::sync::mpsc::channel(8);
+        let queries = Arc::new(QueryInner::new());
+        let sender = WsQuerySender {
+            version: Version {
+                version: "3.0.0.0".to_string(),
+                is_support_binary_sql: true,
+            },
+            req_id: Default::default(),
+            results: Arc::new(QueryResMapper::new()),
+            sender: tx,
+            queries: queries.clone(),
+            closed: Arc::new(AtomicBool::new(closed)),
+        };
+        (sender, queries, rx)
+    }
+
+    fn query(req_id: u64) -> WsSend {
+        WsSend::Query {
+            req_id,
+            sql: "select 1".to_string(),
+        }
+    }
+
+    /// A connection whose read task gave up must reject new requests immediately with
+    /// CONN_CLOSED, instead of queueing them into a channel nobody reads.
+    #[tokio::test]
+    async fn test_send_recv_on_closed_connection_fails_fast() {
+        let (sender, queries, _rx) = test_sender(true);
+        let err = sender
+            .send_recv(query(1))
+            .await
+            .expect_err("a closed connection must not accept new requests");
+        assert_eq!(err.code(), WS_ERROR_NO::CONN_CLOSED.as_code());
+        assert!(queries.is_empty(), "no pending entry may be left behind");
+    }
+
+    /// The pending sender can be dropped without an answer (read task exited). That must
+    /// surface as CONN_CLOSED in a bounded time, not panic in the caller.
+    #[tokio::test]
+    async fn test_send_recv_dropped_waiter_returns_conn_closed() {
+        let (sender, queries, _rx) = test_sender(false);
+        let pending = queries.clone();
+        tokio::spawn(async move {
+            loop {
+                if let Some((_, tx)) = pending.remove(&7) {
+                    // simulate the read task going away while the request is in flight
+                    drop(tx);
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        });
+        let err = tokio::time::timeout(Duration::from_secs(5), sender.send_recv(query(7)))
+            .await
+            .expect("must not hang")
+            .expect_err("a dropped waiter must not be silent");
+        assert_eq!(err.code(), WS_ERROR_NO::CONN_CLOSED.as_code());
+        assert!(queries.is_empty());
+    }
+
+    /// A request that cannot even be queued must not leave a dangling pending entry.
+    #[tokio::test]
+    async fn test_send_recv_send_failure_cleans_pending_entry() {
+        let (sender, queries, rx) = test_sender(false);
+        drop(rx); // write half already gone
+        let err = sender
+            .send_recv(query(9))
+            .await
+            .expect_err("a dead write half must fail the request");
+        // A closed write half is a dead connection, not a slow send.
+        assert_eq!(err.code(), WS_ERROR_NO::CONN_CLOSED.as_code());
+        assert!(queries.is_empty(), "pending entry must not leak");
+    }
+
+    /// Text frames that decode to a payload which can never be a text response must be
+    /// classified as fatal: dropping them would leave their request waiting forever.
+    #[test]
+    fn test_classify_text_payload() {
+        let decode = |json: &str| serde_json::from_str::<WsRecv>(json).expect("valid frame");
+
+        let block = r#"{"code":0,"message":"","req_id":7,"action":"block","raw":[]}"#;
+        assert!(matches!(
+            classify_text_payload(&decode(block).data),
+            TextPayload::Fatal
+        ));
+        let block_v2 = r#"{"code":0,"message":"","req_id":7,"action":"block_v2","raw":[]}"#;
+        assert!(matches!(
+            classify_text_payload(&decode(block_v2).data),
+            TextPayload::Fatal
+        ));
+        let block_new = r#"{"code":0,"message":"","req_id":7,"action":"block_new","block_version":1,"block_req_id":7,"block_code":0,"block_message":"","finished":true,"raw":[]}"#;
+        assert!(matches!(
+            classify_text_payload(&decode(block_new).data),
+            TextPayload::Fatal
+        ));
+
+        // Asynchronous control frames are legal and must not kill the connection.
+        assert!(matches!(
+            classify_text_payload(&decode(r#"{"code":0,"message":"","action":"conn"}"#).data),
+            TextPayload::Ignorable
+        ));
+        assert!(matches!(
+            classify_text_payload(&decode(r#"{"code":0,"message":"","action":"version","version":"3.3.0.0"}"#).data),
+            TextPayload::Ignorable
+        ));
+
+        // Real responses keep being routed.
+        assert!(matches!(
+            classify_text_payload(&decode(r#"{"code":0,"message":"","req_id":7,"action":"write_meta"}"#).data),
+            TextPayload::Response
+        ));
+        assert!(matches!(
+            classify_text_payload(&decode(r#"{"code":0,"message":"","req_id":7,"action":"fetch_block"}"#).data),
+            TextPayload::Response
+        ));
+    }
+
+    // --- mock taosAdapter for connection-lifecycle tests --------------------------
+
+    const MOCK_VERSION_FRAME: &str =
+        r#"{"code":0,"message":"","action":"version","version":"3.3.0.0"}"#;
+    const MOCK_CONN_FRAME: &str = r#"{"code":0,"message":"","action":"conn"}"#;
+
+    /// What the mock does with the first query frame it receives.
+    enum MockQueryReply {
+        /// Reply with a text frame that is only valid as binary data (`action=block`).
+        BlockAsText,
+        /// Drop the TCP socket without answering (peer went away mid-request).
+        DropSocket,
+    }
+
+    /// Stand-in for taosAdapter: performs the WS handshake, answers the `version` and
+    /// `conn` login frames, then applies `reply` to the first query frame.
+    async fn run_mock_adapter(listener: tokio::net::TcpListener, reply: MockQueryReply) {
+        use futures::{SinkExt, StreamExt};
+        use tokio_tungstenite::tungstenite::Message;
+
+        let (stream, _) = listener.accept().await.expect("mock accept");
+        let mut ws = tokio_tungstenite::accept_async(stream)
+            .await
+            .expect("mock websocket handshake");
+
+        while let Some(message) = ws.next().await {
+            let payload = match message {
+                Ok(Message::Text(text)) => text.as_str().to_string(),
+                Ok(Message::Close(_)) | Err(_) => return,
+                Ok(_) => continue,
+            };
+            let value: serde_json::Value = match serde_json::from_str(&payload) {
+                Ok(value) => value,
+                Err(_) => return,
+            };
+            match value.get("action").and_then(|action| action.as_str()) {
+                Some("version") => {
+                    let _ = ws.send(Message::text(MOCK_VERSION_FRAME)).await;
+                }
+                Some("conn") => {
+                    let _ = ws.send(Message::text(MOCK_CONN_FRAME)).await;
+                }
+                Some("query") => {
+                    let req_id = value.get("req_id").and_then(|id| id.as_u64()).unwrap_or(7);
+                    match reply {
+                        MockQueryReply::BlockAsText => {
+                            let frame = format!(
+                                r#"{{"code":0,"message":"","req_id":{req_id},"action":"block","raw":[]}}"#
+                            );
+                            let _ = ws.send(Message::text(frame)).await;
+                        }
+                        MockQueryReply::DropSocket => return,
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    async fn mock_endpoint() -> (tokio::net::TcpListener, String) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind mock adapter");
+        let addr = listener.local_addr().expect("mock address");
+        (listener, format!("ws://{addr}"))
+    }
+
+    async fn connect_mock(url: String) -> WsTaos {
+        let builder = TaosBuilder::from_dsn(url).expect("dsn");
+        WsTaos::from_wsinfo(&builder).await.expect("connect")
+    }
+
+    /// The reported production scenario: a text frame that is only valid as binary data
+    /// used to be logged and dropped. If it is the only answer a request gets, that
+    /// request must fail (CONN_CLOSED) instead of waiting forever.
+    #[tokio::test]
+    async fn test_mock_unroutable_text_response_fails_pending_query() {
+        let (listener, url) = mock_endpoint().await;
+        let server = tokio::spawn(run_mock_adapter(listener, MockQueryReply::BlockAsText));
+        let ws = connect_mock(url).await;
+
+        let err = tokio::time::timeout(Duration::from_secs(5), ws.sender.send_recv(query(7)))
+            .await
+            .expect("the query must not hang on an unroutable text frame")
+            .expect_err("a block payload on a text frame must fail the query");
+        assert_eq!(err.code(), WS_ERROR_NO::CONN_CLOSED.as_code());
+        let _ = tokio::time::timeout(Duration::from_secs(5), server).await;
+    }
+
+    /// Peer disappearing while a query is in flight must surface as CONN_CLOSED, not a
+    /// panic in the read task and not an unbounded wait in the caller.
+    #[tokio::test]
+    async fn test_mock_peer_socket_drop_fails_pending_query() {
+        let (listener, url) = mock_endpoint().await;
+        let server = tokio::spawn(run_mock_adapter(listener, MockQueryReply::DropSocket));
+        let ws = connect_mock(url).await;
+
+        let err = tokio::time::timeout(Duration::from_secs(5), ws.sender.send_recv(query(11)))
+            .await
+            .expect("the query must not hang after the peer went away")
+            .expect_err("a dropped socket must fail the query");
+        assert_eq!(err.code(), WS_ERROR_NO::CONN_CLOSED.as_code());
+        let _ = tokio::time::timeout(Duration::from_secs(5), server).await;
+    }
+
+    /// A truncated block-new frame must be reported as an error instead of panicking
+    /// the reader task (see `parse_block_new_frame`).
+    #[test]
+    fn test_parse_block_new_frame_truncated_is_error() {
+        for len in [0usize, 1, 8, 9, 17, 25, 29, 30] {
+            let buf: &[u8] = &vec![0u8; len];
+            assert!(
+                parse_block_new_frame(buf).is_err(),
+                "truncated frame of {len} bytes must not parse"
+            );
+        }
+    }
+
+    /// Build the bytes of a v3 block-new frame in protocol order:
+    /// `action, block_version, timing, block_req_id, block_code, msg_len, msg,
+    /// result_id, finished, [raw_len, raw]`.
+    ///
+    /// The two length prefixes are written verbatim, so a test can lie about them while
+    /// keeping every other field where the parser expects it.
+    fn block_new_frame_with_lengths(
+        msg: &[u8],
+        msg_len: u32,
+        finished: bool,
+        raw: &[u8],
+        raw_len: u32,
+    ) -> Vec<u8> {
+        let mut frame = Vec::new();
+        frame.extend_from_slice(&1u64.to_le_bytes()); // action
+        frame.extend_from_slice(&1u16.to_le_bytes()); // block version
+        frame.extend_from_slice(&1_234u64.to_le_bytes()); // timing (ns)
+        frame.extend_from_slice(&7u64.to_le_bytes()); // block req id
+        frame.extend_from_slice(&0u32.to_le_bytes()); // block code
+        frame.extend_from_slice(&msg_len.to_le_bytes()); // inlined<4> str len
+        frame.extend_from_slice(msg);
+        frame.extend_from_slice(&9u64.to_le_bytes()); // result id
+        frame.push(u8::from(finished));
+        if !finished {
+            frame.extend_from_slice(&raw_len.to_le_bytes()); // inlined<4> bytes len
+            frame.extend_from_slice(raw);
+        }
+        frame
+    }
+
+    fn block_new_frame(finished: bool, body: &[u8]) -> Vec<u8> {
+        block_new_frame_with_lengths(b"error", 5, finished, body, body.len() as u32)
+    }
+
+    /// A frame that lies about its inlined payload length must fail *before* anything is
+    /// allocated for it. `InlinableRead::read_inlined_*` would `vec![0; 0xFFFFFFFF]` first.
+    #[test]
+    fn test_parse_block_new_frame_rejects_huge_inlined_length() {
+        // `block_message` claims 4 GiB of payload that is not there.
+        let frame = block_new_frame_with_lengths(b"", 0xFFFF_FFFF, false, b"", 0);
+        let err = parse_block_new_frame(&frame)
+            .expect_err("a 4 GiB inlined string must not be allocated");
+        assert_eq!(err.kind(), std::io::ErrorKind::UnexpectedEof);
+        assert!(
+            err.to_string().contains("4294967295"),
+            "the message bound check must fire first, got: {err}"
+        );
+
+        // Same lie for the raw block body, after a well-formed message of the right size.
+        let frame = block_new_frame_with_lengths(b"error", 5, false, b"", 0xFFFF_FFFF);
+        let err = parse_block_new_frame(&frame)
+            .expect_err("a 4 GiB inlined block must not be allocated");
+        assert_eq!(err.kind(), std::io::ErrorKind::UnexpectedEof);
+        assert!(
+            err.to_string().contains("4294967295"),
+            "the raw block bound check must fire, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_parse_block_new_frame_ok() {
+        let raw = block_new_frame(false, b"block");
+        let frame = parse_block_new_frame(&raw).expect("parse");
+        assert_eq!(frame.block_version, 1);
+        assert_eq!(frame.timing, Duration::from_nanos(1_234));
+        assert_eq!(frame.block_req_id, 7);
+        assert_eq!(frame.block_code, 0);
+        assert_eq!(frame.block_message, "error");
+        assert!(!frame.finished);
+        assert_eq!(frame.raw, b"block".to_vec());
+
+        let raw = block_new_frame(true, &[]);
+        let frame = parse_block_new_frame(&raw).expect("parse");
+        assert!(frame.finished);
+        assert!(frame.raw.is_empty());
+    }
+
+    #[test]
+    fn test_parse_block_new_frame_body_truncated_is_error() {
+        let mut raw = block_new_frame(false, b"block");
+        raw.truncate(raw.len() - 1); // declare 5 bytes of block body, deliver 4
+        assert!(parse_block_new_frame(&raw).is_err());
+    }
 
     #[test]
     fn test_is_support_binary_sql() -> anyhow::Result<()> {

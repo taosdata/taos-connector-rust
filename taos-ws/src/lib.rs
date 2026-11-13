@@ -507,7 +507,17 @@ impl TaosBuilder {
         &self,
         url: String,
     ) -> RawResult<AsyncDeflateCodec<tokio::io::BufStream<ws_tool::stream::AsyncStream>>> {
-        let mut config = ClientConfig::default();
+        // `ClientConfig::default()` leaves the buffers at 0. tokio used to treat a
+        // zero-capacity `BufReader` as a pass-through, but since 1.54 it is
+        // `assert!(capacity > 0)` -> every websocket connect panics. taos-ws also never
+        // flushes the write half (it relies on write-through), so `ClientConfig::buffered()`
+        // would silently swallow messages: capacity 1 keeps write-through semantics and
+        // satisfies the assertion.
+        let mut config = ClientConfig {
+            read_buf: 1,
+            write_buf: 1,
+            ..Default::default()
+        };
 
         #[cfg(feature = "deflate")]
         {
@@ -574,7 +584,13 @@ impl TaosBuilder {
         &self,
         url: String,
     ) -> RawResult<AsyncDeflateCodec<tokio::io::BufStream<ws_tool::stream::AsyncStream>>> {
-        let mut config = ClientConfig::default();
+        // See `ws_tool_build_stream`: capacity 0 panics on tokio >= 1.54, and any
+        // capacity > 1 needs an explicit flush after every send.
+        let mut config = ClientConfig {
+            read_buf: 1,
+            write_buf: 1,
+            ..Default::default()
+        };
 
         #[cfg(feature = "deflate")]
         {
