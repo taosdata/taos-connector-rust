@@ -377,6 +377,7 @@ impl From<Error> for RawError {
 }
 
 /// Parsed payload of a v3 `OpCode::Binary` block-new frame.
+#[derive(Debug)]
 struct BlockNewFrame {
     block_version: u16,
     timing: Duration,
@@ -387,28 +388,63 @@ struct BlockNewFrame {
     raw: Vec<u8>,
 }
 
+/// Bounds-checked readers over an in-memory frame.
+///
+/// `taos_query::util::InlinableRead::read_inlined_{str,bytes}` (used elsewhere) trusts
+/// the inlined length prefix and does `vec![0; len]` *before* checking that the bytes
+/// are actually present, so a corrupt frame claiming a 4 GiB payload makes it allocate
+/// that much before failing. Here the declared length is validated against the bytes
+/// left in the frame first, so a malformed frame can only ever cost what it delivered.
+fn take<'a>(slice: &mut &'a [u8], len: usize) -> std::io::Result<&'a [u8]> {
+    if slice.len() < len {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::UnexpectedEof,
+            format!("frame declares {len} bytes but only {} are left", slice.len()),
+        ));
+    }
+    let (head, tail) = slice.split_at(len);
+    *slice = tail;
+    Ok(head)
+}
+
+fn take_array<const N: usize>(slice: &mut &[u8]) -> std::io::Result<[u8; N]> {
+    let mut out = [0u8; N];
+    out.copy_from_slice(take(slice, N)?);
+    Ok(out)
+}
+
+fn take_inlined4(slice: &mut &[u8]) -> std::io::Result<Vec<u8>> {
+    let len = u32::from_le_bytes(take_array::<4>(slice)?) as usize;
+    Ok(take(slice, len)?.to_vec())
+}
+
+fn take_inlined4_str(slice: &mut &[u8]) -> std::io::Result<String> {
+    String::from_utf8(take_inlined4(slice)?)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+}
+
 /// Parse the header of a v3 block-new binary frame.
 ///
-/// Returns `Err` for truncated/misaligned frames so that the caller can drop the
-/// frame and keep serving the connection. Nothing here may panic: a panic inside
-/// `read_queries` kills the only reader task of the connection, and every query
-/// still waiting on it would then never receive a result (it hangs instead of
-/// failing).
-fn parse_block_new_frame<R: std::io::Read>(slice: &mut R) -> std::io::Result<BlockNewFrame> {
-    use taos_query::util::InlinableRead;
+/// Returns `Err` for truncated/misaligned frames so that the caller can fail the
+/// connection instead of leaving the request that owned the frame waiting. Nothing
+/// here may panic: a panic inside `read_queries` kills the only reader task of the
+/// connection, and every query still waiting on it would then never receive a result
+/// (it hangs instead of failing).
+fn parse_block_new_frame(frame: &[u8]) -> std::io::Result<BlockNewFrame> {
+    let mut slice = frame;
 
-    let _action = slice.read_u64()?;
-    let block_version = slice.read_u16()?;
-    let timing = Duration::from_nanos(slice.read_u64()?);
-    let block_req_id = slice.read_u64()?;
-    let block_code = slice.read_u32()?;
-    let block_message = slice.read_inlined_str::<4>()?;
-    let _result_id = slice.read_u64()?;
-    let finished = slice.read_u8()? == 1;
+    let _action = u64::from_le_bytes(take_array::<8>(&mut slice)?);
+    let block_version = u16::from_le_bytes(take_array::<2>(&mut slice)?);
+    let timing = Duration::from_nanos(u64::from_le_bytes(take_array::<8>(&mut slice)?));
+    let block_req_id = u64::from_le_bytes(take_array::<8>(&mut slice)?);
+    let block_code = u32::from_le_bytes(take_array::<4>(&mut slice)?);
+    let block_message = take_inlined4_str(&mut slice)?;
+    let _result_id = u64::from_le_bytes(take_array::<8>(&mut slice)?);
+    let finished = take_array::<1>(&mut slice)?[0] == 1;
     let raw = if finished {
         Vec::new()
     } else {
-        slice.read_inlined_bytes::<4>()?
+        take_inlined4(&mut slice)?
     };
     Ok(BlockNewFrame {
         block_version,
@@ -610,7 +646,7 @@ async fn read_queries(
                         };
 
                         if is_block_new {
-                            let frame = match parse_block_new_frame(&mut slice) {
+                            let frame = match parse_block_new_frame(slice) {
                                 Ok(frame) => frame,
                                 Err(err) => {
                                     log::error!(
@@ -1830,9 +1866,9 @@ mod tests {
     #[test]
     fn test_parse_block_new_frame_truncated_is_error() {
         for len in [0usize, 1, 8, 9, 17, 25, 29, 30] {
-            let mut buf: &[u8] = &vec![0u8; len];
+            let buf: &[u8] = &vec![0u8; len];
             assert!(
-                parse_block_new_frame(&mut buf).is_err(),
+                parse_block_new_frame(buf).is_err(),
                 "truncated frame of {len} bytes must not parse"
             );
         }
@@ -1856,11 +1892,43 @@ mod tests {
         raw
     }
 
+    /// A frame that lies about its inlined payload length must fail *before* anything is
+    /// allocated for it. `InlinableRead::read_inlined_*` would `vec![0; 0xFFFFFFFF]` first.
+    #[test]
+    fn test_parse_block_new_frame_rejects_huge_inlined_length() {
+        let header = |len: u32, finished: u8| {
+            let mut raw = Vec::new();
+            raw.extend_from_slice(&1u64.to_le_bytes()); // action
+            raw.extend_from_slice(&1u16.to_le_bytes()); // block version
+            raw.extend_from_slice(&0u64.to_le_bytes()); // timing
+            raw.extend_from_slice(&7u64.to_le_bytes()); // block req id
+            raw.extend_from_slice(&0u32.to_le_bytes()); // block code
+            raw.extend_from_slice(&len.to_le_bytes()); // inlined message length (lie)
+            raw.push(finished);
+            raw
+        };
+
+        // `block_message` claims 4 GiB of payload that is not there.
+        let err = parse_block_new_frame(&header(0xFFFF_FFFF, 0))
+            .expect_err("a 4 GiB inlined string must not be allocated");
+        assert_eq!(err.kind(), std::io::ErrorKind::UnexpectedEof);
+        assert!(err.to_string().contains("4294967295"), "unexpected: {err}");
+
+        // Same lie for the raw block body after a valid message.
+        let mut raw = header(5, 0);
+        raw.extend_from_slice(b"error"); // the 5-byte message
+        raw.extend_from_slice(&9u64.to_le_bytes()); // result id
+        raw.extend_from_slice(&1u8.to_le_bytes()); // not finished
+        raw.extend_from_slice(&0xFFFF_FFFFu32.to_le_bytes()); // inlined raw length (lie)
+        let err = parse_block_new_frame(&raw)
+            .expect_err("a 4 GiB inlined block must not be allocated");
+        assert_eq!(err.kind(), std::io::ErrorKind::UnexpectedEof);
+    }
+
     #[test]
     fn test_parse_block_new_frame_ok() {
         let raw = block_new_frame(false, b"block");
-        let mut slice: &[u8] = &raw;
-        let frame = parse_block_new_frame(&mut slice).expect("parse");
+        let frame = parse_block_new_frame(&raw).expect("parse");
         assert_eq!(frame.block_version, 1);
         assert_eq!(frame.timing, Duration::from_nanos(1_234));
         assert_eq!(frame.block_req_id, 7);
@@ -1870,8 +1938,7 @@ mod tests {
         assert_eq!(frame.raw, b"block".to_vec());
 
         let raw = block_new_frame(true, &[]);
-        let mut slice: &[u8] = &raw;
-        let frame = parse_block_new_frame(&mut slice).expect("parse");
+        let frame = parse_block_new_frame(&raw).expect("parse");
         assert!(frame.finished);
         assert!(frame.raw.is_empty());
     }
@@ -1880,8 +1947,7 @@ mod tests {
     fn test_parse_block_new_frame_body_truncated_is_error() {
         let mut raw = block_new_frame(false, b"block");
         raw.truncate(raw.len() - 1); // declare 5 bytes of block body, deliver 4
-        let mut slice: &[u8] = &raw;
-        assert!(parse_block_new_frame(&mut slice).is_err());
+        assert!(parse_block_new_frame(&raw).is_err());
     }
 
     #[test]
