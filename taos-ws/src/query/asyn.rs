@@ -51,6 +51,34 @@ fn conn_closed(reason: impl std::fmt::Display) -> RawError {
     RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(), reason.to_string())
 }
 
+/// What a decoded text payload means for the connection.
+enum TextPayload {
+    /// A real response; it is routed to its request by `req_id`.
+    Response,
+    /// Control message that may legitimately arrive asynchronously; safe to ignore.
+    Ignorable,
+    /// Decodable, but never a valid text response (`Block*` are binary-only). It cannot
+    /// be routed, so dropping it would leave the request it belongs to waiting forever:
+    /// the connection is out of sync and has to fail.
+    Fatal,
+}
+
+/// If a future server starts pushing another asynchronous control frame, it has to be
+/// added to the `Ignorable` arm here — otherwise it fails the connection.
+fn classify_text_payload(data: &WsRecvData) -> TextPayload {
+    match data {
+        WsRecvData::Query(_)
+        | WsRecvData::Fetch(_)
+        | WsRecvData::FetchBlock
+        | WsRecvData::WriteMeta
+        | WsRecvData::WriteRaw
+        | WsRecvData::WriteRawBlock
+        | WsRecvData::WriteRawBlockWithFields => TextPayload::Response,
+        WsRecvData::Conn | WsRecvData::Version { .. } => TextPayload::Ignorable,
+        _ => TextPayload::Fatal,
+    }
+}
+
 #[derive(Debug, Clone)]
 struct Version {
     version: String,
@@ -315,6 +343,10 @@ impl Error {
             Error::Dsn(_) => Code::new(WS_ERROR_NO::DSN_ERROR as _),
             Error::IoError(_) => Code::new(WS_ERROR_NO::IO_ERROR as _),
             Error::WsErrorWst(_) => Code::new(WS_ERROR_NO::WEBSOCKET_ERROR as _),
+            // The write half is gone entirely: that is a dead connection, not a slow one.
+            Error::SendTimeoutError(
+                tokio::sync::mpsc::error::SendTimeoutError::Closed(_),
+            ) => Code::new(WS_ERROR_NO::CONN_CLOSED as _),
             Error::SendTimeoutError(_) => Code::new(WS_ERROR_NO::SEND_MESSAGE_TIMEOUT as _),
             // Error::RecvTimeout(_) => Code::new(WS_ERROR_NO::RECV_MESSAGE_TIMEOUT as _),
             _ => Code::FAILED,
@@ -450,6 +482,15 @@ async fn read_queries(
                         };
 
                         let (req_id, data, ok) = v.ok();
+                        // A decodable payload that can never be a text response (block
+                        // data is binary-only) must not be dropped: it may be the only
+                        // answer the request with this req_id will ever get.
+                        if let TextPayload::Fatal = classify_text_payload(&data) {
+                            log::error!(
+                                "text frame carries a payload that is not a valid response (req_id {req_id}), failing connection"
+                            );
+                            break 'ws;
+                        }
                         match &data {
                             WsRecvData::Query(_) => {
                                 if let Some((_, sender)) = queries_sender.remove(&req_id)
@@ -527,9 +568,11 @@ async fn read_queries(
                                 }
                             }
 
-                            // Block type is for binary.
+                            // Only `Conn` / `Version` reach this arm (see
+                            // `classify_text_payload`): asynchronous control frames with no
+                            // request waiting on them.
                             _ => {
-                                log::warn!("unexpected payload type in text frame, ignored");
+                                log::debug!("ignoring asynchronous control text frame");
                             }
                         }
                     }
@@ -1625,11 +1668,56 @@ mod tests {
     async fn test_send_recv_send_failure_cleans_pending_entry() {
         let (sender, queries, rx) = test_sender(false);
         drop(rx); // write half already gone
-        let _err = sender
+        let err = sender
             .send_recv(query(9))
             .await
             .expect_err("a dead write half must fail the request");
+        // A closed write half is a dead connection, not a slow send.
+        assert_eq!(err.code(), WS_ERROR_NO::CONN_CLOSED.as_code());
         assert!(queries.is_empty(), "pending entry must not leak");
+    }
+
+    /// Text frames that decode to a payload which can never be a text response must be
+    /// classified as fatal: dropping them would leave their request waiting forever.
+    #[test]
+    fn test_classify_text_payload() {
+        let decode = |json: &str| serde_json::from_str::<WsRecv>(json).expect("valid frame");
+
+        let block = r#"{"code":0,"message":"","req_id":7,"action":"block","raw":[]}"#;
+        assert!(matches!(
+            classify_text_payload(&decode(block).data),
+            TextPayload::Fatal
+        ));
+        let block_v2 = r#"{"code":0,"message":"","req_id":7,"action":"block_v2","raw":[]}"#;
+        assert!(matches!(
+            classify_text_payload(&decode(block_v2).data),
+            TextPayload::Fatal
+        ));
+        let block_new = r#"{"code":0,"message":"","req_id":7,"action":"block_new","block_version":1,"block_req_id":7,"block_code":0,"block_message":"","finished":true,"raw":[]}"#;
+        assert!(matches!(
+            classify_text_payload(&decode(block_new).data),
+            TextPayload::Fatal
+        ));
+
+        // Asynchronous control frames are legal and must not kill the connection.
+        assert!(matches!(
+            classify_text_payload(&decode(r#"{"code":0,"message":"","action":"conn"}"#).data),
+            TextPayload::Ignorable
+        ));
+        assert!(matches!(
+            classify_text_payload(&decode(r#"{"code":0,"message":"","action":"version","version":"3.3.0.0"}"#).data),
+            TextPayload::Ignorable
+        ));
+
+        // Real responses keep being routed.
+        assert!(matches!(
+            classify_text_payload(&decode(r#"{"code":0,"message":"","req_id":7,"action":"write_meta"}"#).data),
+            TextPayload::Response
+        ));
+        assert!(matches!(
+            classify_text_payload(&decode(r#"{"code":0,"message":"","req_id":7,"action":"fetch_block"}"#).data),
+            TextPayload::Response
+        ));
     }
 
     /// A truncated block-new frame must be reported as an error instead of panicking
