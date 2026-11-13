@@ -29,7 +29,7 @@ use std::io::Write;
 use std::mem::transmute;
 use std::pin::Pin;
 // use std::io::Write;
-use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::task::Poll;
 use std::time::{Duration, Instant};
@@ -44,6 +44,12 @@ type QueryChannelSender = oneshot::Sender<RawResult<WsRecvData>>;
 type QueryInner = HashMap<ReqId, QueryChannelSender>;
 type QueryAgent = Arc<QueryInner>;
 type QueryResMapper = HashMap<ResId, ReqId>;
+
+/// Error used by every "this connection is gone" exit path, so callers can tell a dead
+/// connection (rebuild it) from an ordinary query error (`Code::FAILED`).
+fn conn_closed(reason: impl std::fmt::Display) -> RawError {
+    RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(), reason.to_string())
+}
 
 #[derive(Debug, Clone)]
 struct Version {
@@ -63,6 +69,9 @@ struct WsQuerySender {
     results: Arc<QueryResMapper>,
     sender: WsSender,
     queries: QueryAgent,
+    /// Set by [`read_queries`] when it gives up. Once true nothing can deliver a
+    /// response any more, so new requests must fail instead of waiting forever.
+    closed: Arc<AtomicBool>,
 }
 
 impl WsQuerySender {
@@ -73,56 +82,90 @@ impl WsQuerySender {
     async fn send_recv(&self, msg: WsSend) -> RawResult<WsRecvData> {
         let send_timeout = Duration::from_millis(1000);
         let req_id = msg.req_id();
+
+        // The reader task is the only thing that can answer this connection. If it is
+        // gone, queueing here would wait forever: fail fast instead.
+        if self.closed.load(Ordering::Acquire) {
+            return Err(conn_closed("websocket connection is closed"));
+        }
+
         let (tx, rx) = query_channel();
 
         self.queries.insert(req_id, tx);
 
-        match msg {
-            WsSend::FetchBlock(args) => {
-                log::trace!("[req id: {req_id}] prepare message {msg:?}");
-                if self.results.contains_key(&args.id) {
-                    Err(RawError::from_string(format!(
-                        "there's a result with id {}",
-                        args.id
-                    )))?;
-                }
-                self.results.insert(args.id, args.req_id);
-
-                self.sender
-                    .send_timeout(msg.to_msg(), send_timeout)
-                    .await
-                    .map_err(Error::from)?;
-                //
-            }
-            WsSend::Binary(bytes) => {
-                self.sender
-                    .send_timeout(
-                        WsMessage {
-                            code: OpCode::Binary,
-                            data: bytes.into(),
-                            close_code: None,
-                        },
-                        send_timeout,
-                    )
-                    .await
-                    .map_err(Error::from)?;
-            }
-            _ => {
-                log::trace!("[req id: {req_id}] prepare  message: {msg:?}");
-                self.sender
-                    .send_timeout(msg.to_msg(), send_timeout)
-                    .await
-                    .map_err(Error::from)?;
-            }
+        // Re-check after registering: the read task may have flipped the flag and swept
+        // the pending map between our first check and this insert. Without this second
+        // look the entry would sit in the map forever (nothing would ever answer it).
+        if self.closed.load(Ordering::Acquire) {
+            self.queries.remove(&req_id);
+            return Err(conn_closed("websocket connection is closed"));
         }
-        // handle the error
+
+        let sent = async {
+            match msg {
+                WsSend::FetchBlock(args) => {
+                    log::trace!("[req id: {req_id}] prepare message {msg:?}");
+                    if self.results.contains_key(&args.id) {
+                        return Err(RawError::from_string(format!(
+                            "there's a result with id {}",
+                            args.id
+                        )));
+                    }
+                    self.results.insert(args.id, args.req_id);
+
+                    self.sender
+                        .send_timeout(msg.to_msg(), send_timeout)
+                        .await
+                        .map_err(Error::from)?;
+                    //
+                }
+                WsSend::Binary(bytes) => {
+                    self.sender
+                        .send_timeout(
+                            WsMessage {
+                                code: OpCode::Binary,
+                                data: bytes.into(),
+                                close_code: None,
+                            },
+                            send_timeout,
+                        )
+                        .await
+                        .map_err(Error::from)?;
+                }
+                _ => {
+                    log::trace!("[req id: {req_id}] prepare  message: {msg:?}");
+                    self.sender
+                        .send_timeout(msg.to_msg(), send_timeout)
+                        .await
+                        .map_err(Error::from)?;
+                }
+            }
+            Ok(())
+        }
+        .await;
+
+        if let Err(err) = sent {
+            // Never reached the wire: drop the pending slot instead of leaving an entry
+            // that nobody will ever answer.
+            self.queries.remove(&req_id);
+            return Err(err);
+        }
+
         log::trace!("[req id: {req_id}] message sent, wait for receiving");
-        let res = rx.await.unwrap().map_err(Error::from)?;
-        log::trace!("[req id: {req_id}] message received: {res:?}");
-        Ok(res)
+        match rx.await {
+            Ok(res) => res,
+            // The pending sender was dropped without an answer (reader task exited).
+            // This used to `unwrap()` and panic in the caller.
+            Err(err) => Err(conn_closed(format!(
+                "websocket connection is closed before the response arrived: {err}"
+            ))),
+        }
     }
     async fn send_only(&self, msg: WsSend) -> RawResult<()> {
         let send_timeout = Duration::from_millis(1000);
+        if self.closed.load(Ordering::Acquire) {
+            return Err(conn_closed("websocket connection is closed"));
+        }
         self.sender
             .send_timeout(msg.to_msg(), send_timeout)
             .await
@@ -353,6 +396,8 @@ async fn read_queries(
     ws2: WsSender,
     is_v3: bool,
     mut close_listener: watch::Receiver<bool>,
+    closed: Arc<AtomicBool>,
+    close_signal: watch::Sender<bool>,
 ) {
     let ws3 = ws2.clone();
     tokio::spawn(async move {
@@ -507,10 +552,14 @@ async fn read_queries(
                                     }
                                 }
                                 Err(err) => {
+                                    // A truncated frame means the stream is out of sync and we
+                                    // cannot tell which query it belonged to: fail the whole
+                                    // connection (wakes every pending query) instead of
+                                    // leaving its owner waiting forever.
                                     log::error!(
-                                        "invalid binary frame (truncated block header), dropping it: {err}"
+                                        "invalid binary frame (truncated block header), failing connection: {err}"
                                     );
-                                    continue 'ws;
+                                    break 'ws;
                                 }
                             }
                         } else {
@@ -522,9 +571,9 @@ async fn read_queries(
                                 Ok(frame) => frame,
                                 Err(err) => {
                                     log::error!(
-                                        "invalid block-new binary frame, dropping it: {err}"
+                                        "invalid block-new binary frame, failing connection: {err}"
                                     );
-                                    continue 'ws;
+                                    break 'ws;
                                 }
                             };
 
@@ -555,9 +604,9 @@ async fn read_queries(
                             Ok(res_id) => res_id,
                             Err(err) => {
                                 log::error!(
-                                    "invalid binary frame (truncated result id), dropping it: {err}"
+                                    "invalid binary frame (truncated result id), failing connection: {err}"
                                 );
-                                continue 'ws;
+                                break 'ws;
                             }
                         };
                         if let Some((_, req_id)) =  fetches_sender.remove(&res_id) {
@@ -649,28 +698,25 @@ async fn read_queries(
             }
         }
     }
-    // Wake up every query that is still waiting for a response. The reader task is the
-    // only one that could ever deliver one, so leaving them blocked would turn a closed
-    // connection into an unbounded hang in the caller.
+    // Terminal state, in this order:
+    //  1. reject new requests (they could never be answered by this connection),
+    //  2. tell the writer task to close the socket and exit, so its queue is dropped and
+    //     later sends fail instead of being accepted into a socket nobody reads,
+    //  3. wake the requests that are already waiting.
+    // Doing (1) before (3) keeps a request that races with this shutdown from being
+    // queued after the pending sweep.
+    closed.store(true, Ordering::Release);
+    let _ = close_signal.send_replace(true);
+
     let mut keys = Vec::new();
     for e in queries_sender.iter() {
         keys.push(*e.key());
     }
     for k in keys {
         if let Some((_, sender)) = queries_sender.remove(&k) {
-            let _ = sender.send(Err(RawError::from_string("websocket connection is closed")));
+            let _ = sender.send(Err(conn_closed("websocket connection is closed")));
         }
     }
-
-    // Stop the write half as well: without it the connection object would still accept
-    // new queries and send them into a socket nobody reads any more.
-    let _ = ws2
-        .send(WsMessage {
-            code: OpCode::Close,
-            data: bytes::Bytes::new(),
-            close_code: None,
-        })
-        .await;
 }
 
 pub fn compare_versions(v1: &str, v2: &str) -> std::cmp::Ordering {
@@ -881,6 +927,9 @@ impl WsTaos {
                 sender: ws_cloned,
                 queries: queries2_cloned,
                 results,
+                // No read task is spawned on this legacy path, so nothing will ever
+                // flip this flag; kept for the struct contract.
+                closed: Arc::new(AtomicBool::new(false)),
             },
         })
     }
@@ -966,6 +1015,9 @@ impl WsTaos {
         // Connection watcher
         let (tx, mut rx) = watch::channel(false);
         let close_listener = rx.clone();
+        // Shared terminal flag: set by the read task when it gives up, checked by every
+        // new request so a dead connection fails fast instead of queueing forever.
+        let closed = Arc::new(AtomicBool::new(false));
 
         tokio::spawn(async move {
             let mut interval = time::interval(Duration::from_millis(10));
@@ -1002,8 +1054,20 @@ impl WsTaos {
             }
         });
 
+        let closed_task = closed.clone();
+        let close_signal_task = tx.clone();
         tokio::spawn(async move {
-            read_queries(reader, queries2, fetches_sender, ws2, is_v3, close_listener).await
+            read_queries(
+                reader,
+                queries2,
+                fetches_sender,
+                ws2,
+                is_v3,
+                close_listener,
+                closed_task,
+                close_signal_task,
+            )
+            .await
         });
         let ws_cloned = ws.clone();
 
@@ -1018,6 +1082,7 @@ impl WsTaos {
                 sender: ws_cloned,
                 queries: queries2_cloned,
                 results,
+                closed,
             },
         })
     }
@@ -1493,6 +1558,79 @@ mod tests {
     use futures::TryStreamExt;
 
     use super::*;
+
+    fn test_sender(closed: bool) -> (WsQuerySender, Arc<QueryInner>, tokio::sync::mpsc::Receiver<WsMessage<bytes::Bytes>>) {
+        let (tx, rx) = tokio::sync::mpsc::channel(8);
+        let queries = Arc::new(QueryInner::new());
+        let sender = WsQuerySender {
+            version: Version {
+                version: "3.0.0.0".to_string(),
+                is_support_binary_sql: true,
+            },
+            req_id: Default::default(),
+            results: Arc::new(QueryResMapper::new()),
+            sender: tx,
+            queries: queries.clone(),
+            closed: Arc::new(AtomicBool::new(closed)),
+        };
+        (sender, queries, rx)
+    }
+
+    fn query(req_id: u64) -> WsSend {
+        WsSend::Query {
+            req_id,
+            sql: "select 1".to_string(),
+        }
+    }
+
+    /// A connection whose read task gave up must reject new requests immediately with
+    /// CONN_CLOSED, instead of queueing them into a channel nobody reads.
+    #[tokio::test]
+    async fn test_send_recv_on_closed_connection_fails_fast() {
+        let (sender, queries, _rx) = test_sender(true);
+        let err = sender
+            .send_recv(query(1))
+            .await
+            .expect_err("a closed connection must not accept new requests");
+        assert_eq!(err.code(), WS_ERROR_NO::CONN_CLOSED.as_code());
+        assert!(queries.is_empty(), "no pending entry may be left behind");
+    }
+
+    /// The pending sender can be dropped without an answer (read task exited). That must
+    /// surface as CONN_CLOSED in a bounded time, not panic in the caller.
+    #[tokio::test]
+    async fn test_send_recv_dropped_waiter_returns_conn_closed() {
+        let (sender, queries, _rx) = test_sender(false);
+        let pending = queries.clone();
+        tokio::spawn(async move {
+            loop {
+                if let Some((_, tx)) = pending.remove(&7) {
+                    // simulate the read task going away while the request is in flight
+                    drop(tx);
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        });
+        let err = tokio::time::timeout(Duration::from_secs(5), sender.send_recv(query(7)))
+            .await
+            .expect("must not hang")
+            .expect_err("a dropped waiter must not be silent");
+        assert_eq!(err.code(), WS_ERROR_NO::CONN_CLOSED.as_code());
+        assert!(queries.is_empty());
+    }
+
+    /// A request that cannot even be queued must not leave a dangling pending entry.
+    #[tokio::test]
+    async fn test_send_recv_send_failure_cleans_pending_entry() {
+        let (sender, queries, rx) = test_sender(false);
+        drop(rx); // write half already gone
+        let _err = sender
+            .send_recv(query(9))
+            .await
+            .expect_err("a dead write half must fail the request");
+        assert!(queries.is_empty(), "pending entry must not leak");
+    }
 
     /// A truncated block-new frame must be reported as an error instead of panicking
     /// the reader task (see `parse_block_new_frame`).
