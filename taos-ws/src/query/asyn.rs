@@ -301,6 +301,51 @@ impl From<Error> for RawError {
     }
 }
 
+/// Parsed payload of a v3 `OpCode::Binary` block-new frame.
+struct BlockNewFrame {
+    block_version: u16,
+    timing: Duration,
+    block_req_id: u64,
+    block_code: u32,
+    block_message: String,
+    finished: bool,
+    raw: Vec<u8>,
+}
+
+/// Parse the header of a v3 block-new binary frame.
+///
+/// Returns `Err` for truncated/misaligned frames so that the caller can drop the
+/// frame and keep serving the connection. Nothing here may panic: a panic inside
+/// `read_queries` kills the only reader task of the connection, and every query
+/// still waiting on it would then never receive a result (it hangs instead of
+/// failing).
+fn parse_block_new_frame<R: std::io::Read>(slice: &mut R) -> std::io::Result<BlockNewFrame> {
+    use taos_query::util::InlinableRead;
+
+    let _action = slice.read_u64()?;
+    let block_version = slice.read_u16()?;
+    let timing = Duration::from_nanos(slice.read_u64()?);
+    let block_req_id = slice.read_u64()?;
+    let block_code = slice.read_u32()?;
+    let block_message = slice.read_inlined_str::<4>()?;
+    let _result_id = slice.read_u64()?;
+    let finished = slice.read_u8()? == 1;
+    let raw = if finished {
+        Vec::new()
+    } else {
+        slice.read_inlined_bytes::<4>()?
+    };
+    Ok(BlockNewFrame {
+        block_version,
+        timing,
+        block_req_id,
+        block_code,
+        block_message,
+        finished,
+        raw,
+    })
+}
+
 async fn read_queries(
     mut reader: AsyncDeflateRecv<ReadHalf<BufStream<AsyncStream>>>,
     queries_sender: QueryAgent,
@@ -329,14 +374,35 @@ async fn read_queries(
     });
     'ws: loop {
         tokio::select! {
-            Ok(frame) = reader.receive() => {
-                let (header, payload) = frame;
+            res = reader.receive() => {
+                let (header, payload) = match res {
+                    Ok(frame) => frame,
+                    Err(err) => {
+                        // A read error must close the connection explicitly: with the old
+                        // `Ok(frame) = ...` pattern the branch was silently disabled and the
+                        // loop degraded into waiting on `close_listener` forever, so pending
+                        // queries never got an error back.
+                        log::error!("websocket read error, closing connection: {err:?}");
+                        break 'ws;
+                    }
+                };
                 let code = header.code;
                 match code {
                     OpCode::Text => {
 
                         log::trace!("received json response: {payload}", payload = String::from_utf8_lossy(&payload));
-                        let v: WsRecv = serde_json::from_slice(&payload).unwrap();
+                        let v: WsRecv = match serde_json::from_slice(&payload) {
+                            Ok(v) => v,
+                            Err(err) => {
+                                // An unparsable text frame means the stream is out of sync;
+                                // log what we got and fail the connection instead of panicking.
+                                log::error!(
+                                    "failed to parse text frame as json, closing connection: {err}; frame={}",
+                                    String::from_utf8_lossy(&payload[..payload.len().min(256)])
+                                );
+                                break 'ws;
+                            }
+                        };
 
                         let (req_id, data, ok) = v.ok();
                         match &data {
@@ -347,22 +413,27 @@ async fn read_queries(
                                         log::error!("send data with error: {err:?}");
                                     }
                                 } else {
-                                    debug_assert!(!queries_sender.contains_key(&req_id));
                                     log::warn!("req_id {req_id} not detected, message might be lost");
                                 }
                             }
                             WsRecvData::Fetch(fetch) => {
                                 let id = fetch.id;
                                 if fetch.completed {
-                                    ws2.send(
-                                        WsSend::FreeResult(WsResArgs {
-                                            req_id,
-                                            id,
-                                        })
-                                        .to_msg(),
-                                    )
-                                    .await
-                                    .unwrap();
+                                    if let Err(err) = ws2
+                                        .send(
+                                            WsSend::FreeResult(WsResArgs {
+                                                req_id,
+                                                id,
+                                            })
+                                            .to_msg(),
+                                        )
+                                        .await
+                                    {
+                                        log::error!(
+                                            "websocket write half is closed (free result), giving up connection: {err:?}"
+                                        );
+                                        break 'ws;
+                                    }
                                 }
                                 // dbg!(&queries_sender);
                                 if let Some((_, sender)) = queries_sender.remove(&req_id)
@@ -373,7 +444,12 @@ async fn read_queries(
                                 }
                             }
                             WsRecvData::FetchBlock => {
-                                assert!(ok.is_err());
+                                if ok.is_ok() {
+                                    log::error!(
+                                        "unexpected ok payload for fetch_block, closing connection"
+                                    );
+                                    break 'ws;
+                                }
                                 if let Some((_, sender)) = queries_sender.remove(&req_id)
                                 {
                                     let _ = sender.send(ok.map(|_| data));
@@ -407,7 +483,9 @@ async fn read_queries(
                             }
 
                             // Block type is for binary.
-                            _ => unreachable!(),
+                            _ => {
+                                log::warn!("unexpected payload type in text frame, ignored");
+                            }
                         }
                     }
                     OpCode::Binary => {
@@ -419,56 +497,77 @@ async fn read_queries(
                         let mut is_block_new : bool = false;
 
                         let timing = if is_v3 {
-                            let timing = slice.read_u64().unwrap();
-                            if timing == std::u64::MAX {
-                                is_block_new = true;
-                                Duration::ZERO
-                            } else {
-                                Duration::from_nanos(timing as _)
+                            match slice.read_u64() {
+                                Ok(timing) => {
+                                    if timing == std::u64::MAX {
+                                        is_block_new = true;
+                                        Duration::ZERO
+                                    } else {
+                                        Duration::from_nanos(timing as _)
+                                    }
+                                }
+                                Err(err) => {
+                                    log::error!(
+                                        "invalid binary frame (truncated block header), dropping it: {err}"
+                                    );
+                                    continue 'ws;
+                                }
                             }
                         } else {
                             Duration::ZERO
                         };
 
                         if is_block_new {
-                            let _action = slice.read_u64().unwrap();
-                            let block_version = slice.read_u16().unwrap();
-                            let timing = Duration::from_nanos(slice.read_u64().unwrap());
-                            let block_req_id = slice.read_u64().unwrap();
-                            let block_code = slice.read_u32().unwrap();
-                            let block_message = slice.read_inlined_str::<4>().unwrap();
-                            let _result_id = slice.read_u64().unwrap();
-                            let finished = slice.read_u8().unwrap() == 1;
-                            let result_block : Vec<u8>;
-                            if finished {
-                                result_block = Vec::<u8>::new();
-                            } else {
-                                result_block = slice.read_inlined_bytes::<4>().unwrap();
-                            }
+                            let frame = match parse_block_new_frame(&mut slice) {
+                                Ok(frame) => frame,
+                                Err(err) => {
+                                    log::error!(
+                                        "invalid block-new binary frame, dropping it: {err}"
+                                    );
+                                    continue 'ws;
+                                }
+                            };
 
-                            if let Some((_, sender)) = queries_sender.remove(&block_req_id) {
-                                sender.send(Ok(WsRecvData::BlockNew {
-                                    block_version,
-                                    timing,
-                                    block_req_id,
-                                    block_code,
-                                    block_message,
-                                    finished,
-                                    raw: result_block.to_vec(),
-                                })).unwrap();
+                            if let Some((_, sender)) = queries_sender.remove(&frame.block_req_id) {
+                                if let Err(err) = sender.send(Ok(WsRecvData::BlockNew {
+                                    block_version: frame.block_version,
+                                    timing: frame.timing,
+                                    block_req_id: frame.block_req_id,
+                                    block_code: frame.block_code,
+                                    block_message: frame.block_message,
+                                    finished: frame.finished,
+                                    raw: frame.raw,
+                                })) {
+                                    // The receiver is dropped together with the query future
+                                    // (caller cancelled). Not a connection problem, so keep going.
+                                    log::debug!(
+                                        "query {} is gone, drop block-new frame: {err:?}",
+                                        frame.block_req_id
+                                    );
+                                }
                             } else {
-                                log::warn!("req_id {block_req_id} not detected, message might be lost");
+                                log::warn!("req_id {} not detected, message might be lost", frame.block_req_id);
                             }
                             continue;
                         }
 
-                        let res_id = slice.read_u64().unwrap();
+                        let res_id = match slice.read_u64() {
+                            Ok(res_id) => res_id,
+                            Err(err) => {
+                                log::error!(
+                                    "invalid binary frame (truncated result id), dropping it: {err}"
+                                );
+                                continue 'ws;
+                            }
+                        };
                         if let Some((_, req_id)) =  fetches_sender.remove(&res_id) {
                             if is_v3 {
                                 // v3
                                 if let Some((_, sender)) = queries_sender.remove(&req_id) {
                                     log::trace!("send data to fetches with id {}", res_id);
-                                    sender.send(Ok(WsRecvData::Block { timing, raw: block[offset..].to_vec() })).unwrap();
+                                    if let Err(err) = sender.send(Ok(WsRecvData::Block { timing, raw: block[offset..].to_vec() })) {
+                                        log::debug!("query {req_id} is gone, drop block frame: {err:?}");
+                                    }
                                 } else {
                                     log::warn!("req_id {res_id} not detected, message might be lost");
                                 }
@@ -476,7 +575,9 @@ async fn read_queries(
                                 // v2
                                 if let Some((_, sender)) = queries_sender.remove(&req_id) {
                                     log::trace!("send data to fetches with id {}", res_id);
-                                    sender.send(Ok(WsRecvData::BlockV2 { timing, raw: block[offset..].to_vec() })).unwrap();
+                                    if let Err(err) = sender.send(Ok(WsRecvData::BlockV2 { timing, raw: block[offset..].to_vec() })) {
+                                        log::debug!("query {req_id} is gone, drop block v2 frame: {err:?}");
+                                    }
                                 } else {
                                     log::warn!("req_id {res_id} not detected, message might be lost");
                                 }
@@ -504,11 +605,19 @@ async fn read_queries(
                     }
                     OpCode::Ping => {
                         let bytes = payload.to_vec();
-                        ws2.send(WsMessage{
+                        if let Err(err) = ws2.send(WsMessage{
                             code: OpCode::Pong,
                             data: bytes.into(),
                             close_code: None
-                        }).await.unwrap();
+                        }).await {
+                            // The write half is gone (e.g. `BrokenPipe` after the peer
+                            // closed the socket). This used to `unwrap()` and panic, which
+                            // killed the reader task and left the connection half-alive.
+                            log::error!(
+                                "websocket write half is closed, cannot reply pong, giving up connection: {err:?}"
+                            );
+                            break 'ws;
+                        }
                     }
                     OpCode::Pong => {
                         // do nothing
@@ -540,24 +649,28 @@ async fn read_queries(
             }
         }
     }
-    if queries_sender.is_empty() {
-        return;
-    }
-
+    // Wake up every query that is still waiting for a response. The reader task is the
+    // only one that could ever deliver one, so leaving them blocked would turn a closed
+    // connection into an unbounded hang in the caller.
     let mut keys = Vec::new();
     for e in queries_sender.iter() {
         keys.push(*e.key());
     }
-    // queries_sender
-    //     .for_each_async(|k, _| {
-    //         keys.push(*k);
-    //     })
-    //     .await;
     for k in keys {
         if let Some((_, sender)) = queries_sender.remove(&k) {
             let _ = sender.send(Err(RawError::from_string("websocket connection is closed")));
         }
     }
+
+    // Stop the write half as well: without it the connection object would still accept
+    // new queries and send them into a socket nobody reads any more.
+    let _ = ws2
+        .send(WsMessage {
+            code: OpCode::Close,
+            data: bytes::Bytes::new(),
+            close_code: None,
+        })
+        .await;
 }
 
 pub fn compare_versions(v1: &str, v2: &str) -> std::cmp::Ordering {
@@ -1380,6 +1493,65 @@ mod tests {
     use futures::TryStreamExt;
 
     use super::*;
+
+    /// A truncated block-new frame must be reported as an error instead of panicking
+    /// the reader task (see `parse_block_new_frame`).
+    #[test]
+    fn test_parse_block_new_frame_truncated_is_error() {
+        for len in [0usize, 1, 8, 9, 17, 25, 29, 30] {
+            let mut buf: &[u8] = &vec![0u8; len];
+            assert!(
+                parse_block_new_frame(&mut buf).is_err(),
+                "truncated frame of {len} bytes must not parse"
+            );
+        }
+    }
+
+    fn block_new_frame(finished: bool, body: &[u8]) -> Vec<u8> {
+        let mut raw = Vec::new();
+        raw.extend_from_slice(&1u64.to_le_bytes()); // action
+        raw.extend_from_slice(&1u16.to_le_bytes()); // block version
+        raw.extend_from_slice(&1_234u64.to_le_bytes()); // timing (ns)
+        raw.extend_from_slice(&7u64.to_le_bytes()); // block req id
+        raw.extend_from_slice(&0u32.to_le_bytes()); // block code
+        raw.extend_from_slice(&5u32.to_le_bytes()); // inlined<4> str len
+        raw.extend_from_slice(b"error"); // block message
+        raw.extend_from_slice(&9u64.to_le_bytes()); // result id
+        raw.push(u8::from(finished));
+        if !finished {
+            raw.extend_from_slice(&(body.len() as u32).to_le_bytes()); // inlined<4> bytes len
+            raw.extend_from_slice(body);
+        }
+        raw
+    }
+
+    #[test]
+    fn test_parse_block_new_frame_ok() {
+        let raw = block_new_frame(false, b"block");
+        let mut slice: &[u8] = &raw;
+        let frame = parse_block_new_frame(&mut slice).expect("parse");
+        assert_eq!(frame.block_version, 1);
+        assert_eq!(frame.timing, Duration::from_nanos(1_234));
+        assert_eq!(frame.block_req_id, 7);
+        assert_eq!(frame.block_code, 0);
+        assert_eq!(frame.block_message, "error");
+        assert!(!frame.finished);
+        assert_eq!(frame.raw, b"block".to_vec());
+
+        let raw = block_new_frame(true, &[]);
+        let mut slice: &[u8] = &raw;
+        let frame = parse_block_new_frame(&mut slice).expect("parse");
+        assert!(frame.finished);
+        assert!(frame.raw.is_empty());
+    }
+
+    #[test]
+    fn test_parse_block_new_frame_body_truncated_is_error() {
+        let mut raw = block_new_frame(false, b"block");
+        raw.truncate(raw.len() - 1); // declare 5 bytes of block body, deliver 4
+        let mut slice: &[u8] = &raw;
+        assert!(parse_block_new_frame(&mut slice).is_err());
+    }
 
     #[test]
     fn test_is_support_binary_sql() -> anyhow::Result<()> {
